@@ -1,29 +1,75 @@
 {
   "expo": {
-    "name": "BarrioRun",
-    "slug": "BarrioRun",
+    "name": "ConqueRun",
+    "slug": "conqurun",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ConqueRun usa tu ubicación mientras grabas una carrera para medir distancia, ritmo y conquistar barrios.",
+          "locationAlwaysAndWhenInUsePermission": "ConqueRun usa tu ubicación incluso con la pantalla apagada para grabar carreras completas.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "ConqueRun usa Face ID para desbloquear tu sesión guardada."
+        }
+      ]
+    ],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#080b14"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "ConqueRun usa tu ubicación mientras grabas una carrera para medir distancia, ritmo y conquistar barrios.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "ConqueRun usa tu ubicación incluso con la pantalla apagada para grabar carreras completas.",
+        "UIBackgroundModes": [
+          "location"
+        ],
+        "NSPhotoLibraryUsageDescription": "ConqueRun usa tu galería para elegir fotos de perfil o grupo, que se revisan antes de publicarse.",
+        "NSFaceIDUsageDescription": "ConqueRun usa Face ID para desbloquear tu sesión guardada.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.conquerun.app"
     },
     "android": {
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#080b14"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.conquerun.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "43f83c91-be64-432c-989d-74b2ecb9ff12"
+      }
+    },
+    "owner": "miguelhsa"
   }
 }

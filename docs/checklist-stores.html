@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Checklist Publicación – ConqueRun</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #080b14;
+      color: #f8fafc;
+      line-height: 1.7;
+      padding: 40px 20px 80px;
+    }
+    .wrap { max-width: 820px; margin: 0 auto; }
+    .logo { font-size: 26px; font-weight: 900; color: #d6aa4c; margin-bottom: 6px; }
+    .logo span { color: #f8fafc; }
+    h1 { font-size: 22px; font-weight: 800; color: #f8fafc; margin: 8px 0 6px; }
+    .subtitle { font-size: 14px; color: #64748b; margin-bottom: 40px; }
+
+    .section-title {
+      font-size: 13px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1px; color: #64748b; margin: 36px 0 12px;
+      padding-bottom: 8px; border-bottom: 1px solid #263244;
+    }
+
+    .platform-row { display: flex; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
+    .badge {
+      font-size: 11px; font-weight: 700; padding: 2px 9px;
+      border-radius: 20px; letter-spacing: 0.3px;
+    }
+    .badge-ios { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+    .badge-android { background: #14281e; color: #4ade80; border: 1px solid #16a34a; }
+    .badge-ambas { background: #1e1e2e; color: #a78bfa; border: 1px solid #7c3aed; }
+    .badge-code { background: #1e2d3d; color: #38bdf8; border: 1px solid #0369a1; }
+    .badge-manual { background: #2d1e0f; color: #fb923c; border: 1px solid #c2410c; }
+
+    .item {
+      display: flex; align-items: flex-start; gap: 14px;
+      background: #111827; border: 1px solid #263244;
+      border-radius: 10px; padding: 14px 16px; margin-bottom: 8px;
+    }
+    .item.done { border-color: #166534; background: #0d1f13; }
+    .item.pending { border-color: #263244; }
+    .item.blocker { border-color: #7f1d1d; background: #170a0a; }
+    .item.warning { border-color: #78350f; background: #1a1004; }
+
+    .check {
+      flex-shrink: 0; width: 22px; height: 22px;
+      border-radius: 50%; display: flex; align-items: center;
+      justify-content: center; font-size: 12px; margin-top: 1px;
+    }
+    .check-done { background: #166534; color: #4ade80; }
+    .check-blocker { background: #7f1d1d; color: #f87171; font-size: 14px; }
+    .check-warning { background: #78350f; color: #fb923c; font-size: 14px; }
+    .check-pending { background: #1e293b; color: #64748b; font-size: 14px; }
+
+    .item-body { flex: 1; }
+    .item-title { font-size: 15px; font-weight: 700; color: #f8fafc; margin-bottom: 3px; }
+    .item.done .item-title { color: #4ade80; }
+    .item.blocker .item-title { color: #f87171; }
+    .item.warning .item-title { color: #fb923c; }
+    .item-desc { font-size: 13px; color: #94a3b8; line-height: 1.6; }
+    .item-desc code {
+      background: #1e293b; padding: 1px 6px; border-radius: 4px;
+      font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; color: #38bdf8;
+    }
+    .item-desc a { color: #d6aa4c; text-decoration: none; }
+    .item-desc a:hover { text-decoration: underline; }
+
+    .steps { margin-top: 8px; padding-left: 16px; }
+    .steps li { font-size: 13px; color: #94a3b8; margin-bottom: 4px; list-style: decimal; }
+
+    .summary-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px; margin: 24px 0 36px;
+    }
+    .summary-card {
+      background: #111827; border: 1px solid #263244;
+      border-radius: 12px; padding: 16px; text-align: center;
+    }
+    .summary-num { font-size: 32px; font-weight: 900; margin-bottom: 4px; }
+    .summary-label { font-size: 12px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .num-done { color: #4ade80; }
+    .num-blocker { color: #f87171; }
+    .num-warning { color: #fb923c; }
+    .num-pending { color: #94a3b8; }
+
+    hr { border: none; border-top: 1px solid #1e293b; margin: 40px 0; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="logo">Conque<span>Run</span></div>
+  <h1>Checklist de Publicación</h1>
+  <p class="subtitle">App Store (iOS) · Google Play (Android) — actualizado mayo 2026</p>
+
+  <!-- RESUMEN -->
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="summary-num num-done">7</div>
+      <div class="summary-label">✓ Completado</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-num num-blocker">3</div>
+      <div class="summary-label">✗ Bloqueante</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-num num-warning">5</div>
+      <div class="summary-label">⚠ Pendiente tú</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-num num-pending">4</div>
+      <div class="summary-label">○ Antes de lanzar</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       BLOQUEANTES
+  ════════════════════════════════════════════════ -->
+  <div class="section-title">🔴 Bloqueantes — sin esto te rechazan</div>
+
+  <div class="item done">
+    <div class="check check-done">✓</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">Bundle ID / Package name corregido</div>
+      <div class="item-desc">
+        Cambiado de <code>com.anonymous.conqurun</code> a <code>com.conquerun.app</code> en <code>app.json</code>.
+      </div>
+    </div>
+  </div>
+
+  <div class="item done">
+    <div class="check check-done">✓</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">Eliminación real de cuenta implementada</div>
+      <div class="item-desc">
+        La app borra Firebase Auth, Firestore, fotos de Storage, ranking, grupos y marcas territoriales.
+        Requiere reautenticación con contraseña. Implementado en <code>utils/moderacion.js</code>.
+      </div>
+    </div>
+  </div>
+
+  <div class="item done">
+    <div class="check check-done">✓</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-android">Android</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">Permisos duplicados eliminados</div>
+      <div class="item-desc">
+        <code>app.json</code> tenía cada permiso Android dos veces. Limpiado a lista única con formato correcto.
+      </div>
+    </div>
+  </div>
+
+  <div class="item blocker">
+    <div class="check check-blocker">✗</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Publicar la política de privacidad</div>
+      <div class="item-desc">
+        El HTML está creado en <code>docs/privacidad.html</code>. Necesitas subirlo y obtener una URL pública.
+        <ol class="steps">
+          <li>Sube el repo a GitHub (si no está).</li>
+          <li>Ve a <strong>Settings → Pages → Source → main → /docs</strong>.</li>
+          <li>La URL será: <code>https://miguelhsa.github.io/conqueRun/privacidad.html</code></li>
+          <li>Cambia el email <code>privacidad@conquerun.app</code> por el tuyo real antes de publicar.</li>
+          <li>Añade esa URL en App Store Connect y en Play Console.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="item blocker">
+    <div class="check check-blocker">✗</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-android">Android</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Declaración de ubicación en segundo plano (Play Console)</div>
+      <div class="item-desc">
+        Google exige justificar el uso de <code>ACCESS_BACKGROUND_LOCATION</code> con un formulario y un vídeo.
+        <ol class="steps">
+          <li>Ve a Play Console → <strong>Contenido de la app → Permisos de ubicación en segundo plano</strong>.</li>
+          <li>Justificación: "La app graba carreras de running. El usuario activa la grabación manualmente. La ubicación en segundo plano es necesaria para continuar midiendo distancia y ruta cuando la pantalla se apaga."</li>
+          <li>Graba un vídeo de 1-2 min: abre la app → inicia carrera → apaga pantalla → vuelve a encenderla → muestra que la carrera sigue grabándose.</li>
+          <li>Adjunta el vídeo en el formulario.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="item blocker">
+    <div class="check check-blocker">✗</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ios">iOS</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Justificación de ubicación en segundo plano (App Store Review)</div>
+      <div class="item-desc">
+        Apple revisa manualmente las apps con <code>UIBackgroundModes: location</code>.
+        <ol class="steps">
+          <li>En App Store Connect, en el campo "Notes for App Review" explica: "ConqueRun es una app de running competitivo. La ubicación en segundo plano se usa exclusivamente para grabar la ruta de la carrera cuando el usuario apaga la pantalla. El usuario activa y desactiva la grabación manualmente."</li>
+          <li>Prepara el mismo vídeo del punto anterior por si lo piden.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <hr />
+
+  <!-- ═══════════════════════════════════════════════
+       PENDIENTE — LO HACES TÚ
+  ════════════════════════════════════════════════ -->
+  <div class="section-title">⚠️ Pendiente — lo haces tú (no es código)</div>
+
+  <div class="item warning">
+    <div class="check check-warning">⚠</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Crear cuentas de desarrollador</div>
+      <div class="item-desc">
+        <ul class="steps" style="list-style:disc;">
+          <li><strong>Apple:</strong> <a href="https://developer.apple.com/programs/" target="_blank">Apple Developer Program</a> — 99 USD/año. Necesitas un Apple ID y tarjeta de crédito.</li>
+          <li><strong>Google:</strong> <a href="https://play.google.com/console/" target="_blank">Google Play Console</a> — 25 USD pago único.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="item warning">
+    <div class="check check-warning">⚠</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-android">Android</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Rellenar Data Safety en Play Console</div>
+      <div class="item-desc">
+        Sección obligatoria en Play Console → <strong>Contenido de la app → Seguridad de los datos</strong>.
+        <ol class="steps">
+          <li>Ubicación: <em>Precisa → Recopilada → No compartida → Necesaria para la funcionalidad principal</em>.</li>
+          <li>Dirección de correo: <em>Recopilada → No compartida → Gestión de cuentas</em>.</li>
+          <li>Fotos: <em>Recopilada → No compartida → Funcionalidad de la app</em>.</li>
+          <li>Nombre de usuario (nickname): <em>Recopilado → Compartido públicamente → Funcionalidad</em>.</li>
+          <li>Marca "Los usuarios pueden solicitar la eliminación de sus datos": ✓ Sí.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="item warning">
+    <div class="check check-warning">⚠</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ios">iOS</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Rellenar Privacy Nutrition Label en App Store Connect</div>
+      <div class="item-desc">
+        En App Store Connect → <strong>App Privacy</strong>, declarar:
+        <ol class="steps">
+          <li>Ubicación precisa → Vinculada al usuario → Funcionalidad de la app.</li>
+          <li>Email → Vinculado al usuario → Inicio de sesión.</li>
+          <li>Fotos → Vinculadas al usuario → Funcionalidad de la app.</li>
+          <li>Identificadores de usuario → Vinculados al usuario → Analytics.</li>
+          <li>Marcar que los datos NO se usan para rastrear al usuario entre apps.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="item warning">
+    <div class="check check-warning">⚠</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Clasificación de edad y contenido</div>
+      <div class="item-desc">
+        <ul class="steps" style="list-style:disc;">
+          <li><strong>App Store:</strong> Rating <strong>4+</strong> (no hay violencia, lenguaje adulto ni compras). Seleccionarlo en App Store Connect → App Information.</li>
+          <li><strong>Google Play:</strong> Completar el cuestionario IARC en Play Console → Contenido de la app → Clasificación de contenido. Selecciona <em>deportes</em> y responde que no hay violencia ni contenido adulto → te asignará <strong>PEGI 3</strong>.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="item warning">
+    <div class="check check-warning">⚠</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Preparar capturas de pantalla y descripción de la app</div>
+      <div class="item-desc">
+        <ul class="steps" style="list-style:disc;">
+          <li><strong>iOS:</strong> Capturas en resolución 6.9" (iPhone 16 Pro Max) y 12.9" (iPad si activas tablet). Mínimo 3, máximo 10.</li>
+          <li><strong>Android:</strong> Capturas en resolución mínima 320px, máximo 3840px. Mínimo 2, máximo 8. Más un icono de 512×512px y un banner de 1024×500px.</li>
+          <li>Descripción corta (30 chars Android / 30 chars iOS) y larga (4000 chars).</li>
+          <li>Keywords para búsqueda (App Store: 100 caracteres).</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <hr />
+
+  <!-- ═══════════════════════════════════════════════
+       COMPLETADO EN CÓDIGO
+  ════════════════════════════════════════════════ -->
+  <div class="section-title">✅ Completado en código</div>
+
+  <div class="item done">
+    <div class="check check-done">✓</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ios">iOS</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">Textos de permisos en español</div>
+      <div class="item-desc">NSLocationWhenInUse, NSLocationAlways, NSPhotoLibrary y NSFaceID con descripciones claras del propósito en <code>app.json</code>.</div>
+    </div>
+  </div>
+
+  <div class="item done">
+    <div class="check check-done">✓</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ios">iOS</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">ITSAppUsesNonExemptEncryption declarado</div>
+      <div class="item-desc">Valor <code>false</code> en <code>app.json</code>. Evita el formulario de exportación de criptografía con el gobierno de EE.UU.</div>
+    </div>
+  </div>
+
+  <div class="item done">
+    <div class="check check-done">✓</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">Moderación de fotos de perfil y grupo</div>
+      <div class="item-desc">Las fotos pasan por revisión manual antes de publicarse. Hay estados pendiente / aprobada / rechazada.</div>
+    </div>
+  </div>
+
+  <div class="item done">
+    <div class="check check-done">✓</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">Filtro de lenguaje inapropiado en nicknames</div>
+      <div class="item-desc">Lista de palabras prohibidas en <code>utils/moderacion.js</code> aplicada al registro y edición de perfil.</div>
+    </div>
+  </div>
+
+  <div class="item done">
+    <div class="check check-done">✓</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">Solicitud de permisos en el momento adecuado</div>
+      <div class="item-desc">Ubicación: se pide al iniciar la primera carrera. Notificaciones: se pide en el primer acceso. Fotos: se pide al tocar el avatar. Nunca en el arranque de la app.</div>
+    </div>
+  </div>
+
+  <div class="item done">
+    <div class="check check-done">✓</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-android">Android</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">Edge-to-edge habilitado</div>
+      <div class="item-desc"><code>edgeToEdgeEnabled: true</code> en <code>app.json</code>. Requerido por Google Play para apps que apuntan a Android 15.</div>
+    </div>
+  </div>
+
+  <hr />
+
+  <!-- ═══════════════════════════════════════════════
+       ANTES DEL LANZAMIENTO
+  ════════════════════════════════════════════════ -->
+  <div class="section-title">○ Antes del lanzamiento (no bloquean la subida, sí la experiencia)</div>
+
+  <div class="item pending">
+    <div class="check check-pending">○</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ios">iOS</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Sign in with Apple (si añades Google Sign-In)</div>
+      <div class="item-desc">
+        Actualmente solo hay login con email/password, que no obliga a ofrecer Sign in with Apple.
+        Si en el futuro añades Google Sign-In u otro proveedor OAuth, Apple lo vuelve obligatorio.
+      </div>
+    </div>
+  </div>
+
+  <div class="item pending">
+    <div class="check check-pending">○</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Términos y condiciones de uso</div>
+      <div class="item-desc">
+        No son obligatorios para publicar, pero protegen legalmente la app ante disputas de usuarios.
+        Especialmente importante por el sistema de conquistas competitivo (disputas entre jugadores).
+      </div>
+    </div>
+  </div>
+
+  <div class="item pending">
+    <div class="check check-pending">○</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-manual">Tú</span></div>
+      <div class="item-title">Proceso de moderación de fotos documentado</div>
+      <div class="item-desc">
+        Apple puede preguntar en la revisión quién modera las fotos y en qué plazo.
+        Ten preparada una respuesta: "El equipo de ConqueRun revisa las fotos en un plazo máximo de 48h antes de publicarlas."
+      </div>
+    </div>
+  </div>
+
+  <div class="item pending">
+    <div class="check check-pending">○</div>
+    <div class="item-body">
+      <div class="platform-row"><span class="badge badge-ambas">Ambas</span><span class="badge badge-code">Código</span></div>
+      <div class="item-title">Cuenta de prueba para los revisores</div>
+      <div class="item-desc">
+        Tanto Apple como Google piden credenciales de una cuenta demo para revisar la app.
+        Crea una cuenta en <code>conquerun.demo@gmail.com</code> con datos de prueba ya cargados
+        e inclúyela en el campo "Demo Account" de ambas consolas.
+      </div>
+    </div>
+  </div>
+
+  <hr />
+
+  <p style="font-size:13px; color:#64748b; text-align:center;">
+    ConqueRun · Checklist actualizado mayo 2026
+  </p>
+
+</div>
+</body>
+</html>

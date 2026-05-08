@@ -33,9 +33,20 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Firebase Admin credentials (NUNCA subir al repo)
+scripts/serviceAccount.json
+
+# Firebase Functions
+functions/node_modules/
+functions/.env
+functions/.secret.local
+
 # typescript
 *.tsbuildinfo
 
 # generated native folders
 /ios
 /android
+
+# Claude Code session data
+.claude/

@@ -1,0 +1,86 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "carreras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "puntos", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "puntos", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "uid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "territorios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dueno", "order": "ASCENDING" },
+        { "fieldPath": "ciudadId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "grupos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "esPublico", "order": "ASCENDING" },
+        { "fieldPath": "puntosTotales", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "grupos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "esPublico", "order": "ASCENDING" },
+        { "fieldPath": "ciudadId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "grupos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "puntosTotales", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "grupos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "esPublico", "order": "ASCENDING" },
+        { "fieldPath": "puntosTotales", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "grupos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "esPublico", "order": "ASCENDING" },
+        { "fieldPath": "puntosTotales", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,1506 @@
+import { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, ImageBackground } from 'react-native';
+import MapView, { Polyline } from 'react-native-maps';
+import * as Location from 'expo-location';
+import { db, auth } from '../firebaseConfig';
+import { serverTimestamp, doc, getDoc, increment, setDoc, updateDoc, writeBatch, arrayUnion } from 'firebase/firestore';
+import { obtenerBarrios, buildIndiceEspacial, calcularBarrio, calcularResumenTerritorial, invalidarCacheTerritorios } from '../utils/barrios';
+import { enviarNotificacion, notificarConquista, notificarLogro } from '../utils/notificaciones';
+import { comprobarYNotificarLogros } from '../utils/comprobarLogros';
+import {
+  calcularAportacionesGrupo,
+  calcularPuntos,
+  obtenerMisGrupos,
+  registrarAportacionesGrupo,
+  validarCarrera,
+} from '../utils/grupos';
+import { crearCarreraConqurun, normalizarCarrera, esCarreraPuntuable } from '../utils/carreras';
+import { calcularRachaIncremental } from '../utils/logros';
+import { idRanking, refRanking } from '../utils/rankingsCiudad';
+import { obtenerCiudadCercana, CIUDAD_FALLBACK } from '../utils/ciudades';
+import { colors, radius } from '../utils/theme';
+import { formatTiempo, formatRitmo } from '../utils/formatters';
+import {
+  agregarPuntosTracking,
+  calcularDistanciaFiltrada,
+  limpiarTrackingCarrera,
+  iniciarTrackingCarrera,
+  iniciarTrackingPrimerPlano,
+  obtenerMetaTracking,
+  obtenerRutaTracking,
+  pausarTrackingCarrera,
+  pararTrackingCarrera,
+  prepararTrackingCarrera,
+  reanudarTrackingCarrera,
+  trackingSegundoPlanoActivo,
+} from '../utils/trackingCarrera';
+
+export default function CorrerScreen() {
+  const [corriendo, setCorriendo] = useState(false);
+  const [ruta, setRuta] = useState([]);
+  const [ubicacion, setUbicacion] = useState(null);
+  const [distancia, setDistancia] = useState(0);
+  const [segundos, setSegundos] = useState(0);
+  const [barrioActual, setBarrioActual] = useState(null);
+  const [ciudadActual, setCiudadActual] = useState(CIUDAD_FALLBACK);
+  const [trackingSegundoPlano, setTrackingSegundoPlano] = useState(false);
+  const [preparandoGps, setPreparandoGps] = useState(false);
+  const [resumenCarrera, setResumenCarrera] = useState(null);
+  const [pausada, setPausada] = useState(false);
+  const [confirmarFin, setConfirmarFin] = useState(false);
+  const [carrerasRecientes, setCarrerasRecientes] = useState([]);
+  const [mostrarInfoPuntos, setMostrarInfoPuntos] = useState(false);
+  const timerRef = useRef(null);
+  const foregroundWatchRef = useRef(null);
+  const barriosRef = useRef([]);
+  const indiceBarriosRef = useRef(null);
+  const ciudadRef = useRef(CIUDAD_FALLBACK);
+  const perfilRef = useRef({});
+  const rutaRef = useRef([]);
+  const distanciaRef = useRef(0);
+  const segundosRef = useRef(0);
+
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    foregroundWatchRef.current?.remove();
+  }, []);
+
+  useEffect(() => {
+    comprobarCarreraPendiente().catch(console.error);
+    cargarUbicacionInicial().catch(console.error);
+    cargarCarrerasRecientes().catch(console.error);
+  }, []);
+
+  const cargarCarrerasRecientes = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const snap = await getDoc(doc(db, 'usuarios', uid));
+    const data = snap.exists() ? snap.data() : {};
+    setCarrerasRecientes((data.ultimasCarreras ?? []).map(normalizarCarrera));
+  };
+
+  const clasificarTerritorio = (territorioCarrera, uid) => territorioCarrera.reduce((acc, barrio) => {
+    if (barrio.dueno === uid) {
+      acc.defendidas.push(`${barrio.nombre} · ${(barrio.distanciaMetros / 1000).toFixed(2)} km`);
+    } else if (!barrio.dueno || barrio.duenoPuntos < barrio.puntos) {
+      acc.conquistadas.push(`${barrio.nombre} · ${(barrio.distanciaMetros / 1000).toFixed(2)} km`);
+    } else {
+      acc.rivalesPendientes.push({
+        nombre: barrio.nombre,
+        puntosDueno: barrio.duenoPuntos ?? 0,
+        puntosCarrera: barrio.puntos,
+      });
+    }
+
+    return acc;
+  }, {
+    conquistadas: [],
+    defendidas: [],
+    rivalesPendientes: [],
+  });
+
+  const cargarCiudadYBarrios = async (punto) => {
+    if (barriosRef.current.length > 0) return;
+
+    const ciudadCercana = await obtenerCiudadCercana(punto);
+    setCiudadActual(ciudadCercana);
+    ciudadRef.current = ciudadCercana;
+    barriosRef.current = await obtenerBarrios(ciudadCercana.id);
+    indiceBarriosRef.current = buildIndiceEspacial(barriosRef.current);
+  };
+
+  const sincronizarTracking = async () => {
+    const [rutaTracking, metaTracking] = await Promise.all([
+      obtenerRutaTracking(),
+      obtenerMetaTracking(),
+    ]);
+
+    // Usar distancia acumulada incrementalmente (O(1)) — calcularDistanciaFiltrada es O(n)
+    const distanciaActual = metaTracking?.distanciaAcumulada ?? calcularDistanciaFiltrada(rutaTracking);
+    const ahoraParaTiempo = metaTracking?.pausada && metaTracking.pausadaEn
+      ? metaTracking.pausadaEn
+      : Date.now();
+    const segundosActuales = metaTracking?.iniciadaEn
+      ? Math.max(0, Math.floor((ahoraParaTiempo - metaTracking.iniciadaEn - (metaTracking.tiempoPausadoMs ?? 0)) / 1000))
+      : segundosRef.current;
+    const ultimoPunto = rutaTracking[rutaTracking.length - 1];
+
+    rutaRef.current = rutaTracking;
+    distanciaRef.current = distanciaActual;
+    segundosRef.current = segundosActuales;
+    setRuta(rutaTracking);
+    setDistancia(distanciaActual);
+    setSegundos(segundosActuales);
+    setPausada(Boolean(metaTracking?.pausada));
+
+    if (!ultimoPunto) return { ruta: rutaTracking, distancia: distanciaActual, segundos: segundosActuales };
+
+    setUbicacion({ ...ultimoPunto, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+    await cargarCiudadYBarrios(ultimoPunto);
+
+    const barrio = calcularBarrio(ultimoPunto, indiceBarriosRef.current ?? barriosRef.current);
+    if (barrio) setBarrioActual(barrio);
+
+    return { ruta: rutaTracking, distancia: distanciaActual, segundos: segundosActuales };
+  };
+
+  const calcularSegundosMeta = (meta) => {
+    if (!meta?.iniciadaEn) return 0;
+    const ahoraParaTiempo = meta.pausada && meta.pausadaEn ? meta.pausadaEn : Date.now();
+    return Math.max(0, Math.floor((ahoraParaTiempo - meta.iniciadaEn - (meta.tiempoPausadoMs ?? 0)) / 1000));
+  };
+
+  const arrancarSincronizacion = () => {
+    clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      sincronizarTracking().catch(console.error);
+    }, 1000);
+  };
+
+  const obtenerPrimeraUbicacion = async () => {
+    const conTimeout = (promise, ms) => Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('GPS_TIMEOUT')), ms)),
+    ]);
+
+    try {
+      return await conTimeout(
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+        20000,
+      );
+    } catch (e) {
+      if (e.message === 'GPS_TIMEOUT') throw e;
+      // Alta precisión no disponible, intentar con precisión menor
+      return await conTimeout(
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        15000,
+      );
+    }
+  };
+
+  const cargarUbicacionInicial = async () => {
+    const permiso = await Location.getForegroundPermissionsAsync();
+    if (permiso.status !== 'granted') return;
+
+    const loc = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+    const punto = {
+      latitude: loc.coords.latitude,
+      longitude: loc.coords.longitude,
+    };
+    setUbicacion({ ...punto, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+    await cargarCiudadYBarrios(punto);
+  };
+
+  const continuarCarreraPendiente = async () => {
+    const metaTracking = await obtenerMetaTracking();
+    const segundoPlanoActivo = await trackingSegundoPlanoActivo();
+    const usaSegundoPlano = Boolean(metaTracking?.segundoPlano && segundoPlanoActivo);
+
+    if (!usaSegundoPlano) {
+      foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
+        sincronizarTracking().catch(console.error);
+      });
+    }
+
+    setTrackingSegundoPlano(usaSegundoPlano);
+    setPausada(Boolean(metaTracking?.pausada));
+    await sincronizarTracking();
+    setCorriendo(true);
+    if (!metaTracking?.pausada) arrancarSincronizacion();
+  };
+
+  const descartarCarreraPendiente = async () => {
+    clearInterval(timerRef.current);
+    foregroundWatchRef.current?.remove();
+    foregroundWatchRef.current = null;
+    await pararTrackingCarrera();
+    await limpiarTrackingCarrera();
+    rutaRef.current = [];
+    distanciaRef.current = 0;
+    segundosRef.current = 0;
+    setRuta([]);
+    setDistancia(0);
+    setSegundos(0);
+    setBarrioActual(null);
+    setTrackingSegundoPlano(false);
+    setPausada(false);
+    setCorriendo(false);
+  };
+
+  const comprobarCarreraPendiente = async () => {
+    const [rutaTracking, metaTracking] = await Promise.all([
+      obtenerRutaTracking(),
+      obtenerMetaTracking(),
+    ]);
+
+    if (!metaTracking || rutaTracking.length === 0) return;
+
+    await sincronizarTracking();
+    const distanciaPendiente = metaTracking.distanciaAcumulada ?? calcularDistanciaFiltrada(rutaTracking);
+    const segundosPendientes = calcularSegundosMeta(metaTracking);
+    Alert.alert(
+      metaTracking.pausada ? 'Carrera pausada' : 'Carrera en curso',
+      `${(distanciaPendiente / 1000).toFixed(2)} km · ${formatTiempo(segundosPendientes)}\n¿Quieres continuarla?`,
+      [
+        { text: 'Descartar', style: 'destructive', onPress: descartarCarreraPendiente },
+        { text: 'Continuar', onPress: () => continuarCarreraPendiente().catch(console.error) },
+      ]
+    );
+  };
+
+  const iniciarCarrera = async () => {
+    if (preparandoGps) return;
+    setPreparandoGps(true);
+    const uid = auth.currentUser.uid;
+
+    try {
+      const userSnap = await getDoc(doc(db, 'usuarios', uid));
+      perfilRef.current = userSnap.exists() ? userSnap.data() : {};
+      const consentimientoUbicacion = Boolean(perfilRef.current.consentimientoUbicacionCarrera);
+
+      if (!consentimientoUbicacion) {
+        const aceptado = await new Promise(resolve => {
+          Alert.alert(
+            'Uso de ubicación',
+            'ConqueRun usa tu ubicación mientras grabas una carrera para medir distancia, ritmo y conquistar barrios. No se usa para publicidad.',
+            [
+              { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Continuar', onPress: () => resolve(true) },
+            ]
+          );
+        });
+
+        if (!aceptado) return;
+
+        await setDoc(doc(db, 'usuarios', uid), {
+          consentimientoUbicacionCarrera: true,
+          consentimientoUbicacionCarreraEn: serverTimestamp(),
+        }, { merge: true });
+      }
+
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu ubicación');
+        return;
+      }
+
+      let permiteSegundoPlano = false;
+      try {
+        const background = await Location.requestBackgroundPermissionsAsync();
+        permiteSegundoPlano = background.status === 'granted';
+      } catch {
+        // El dispositivo no soporta permisos en segundo plano — seguimos en primer plano
+      }
+
+      setRuta([]);
+      setDistancia(0);
+      setSegundos(0);
+      setBarrioActual(null);
+      setTrackingSegundoPlano(permiteSegundoPlano);
+      setPausada(false);
+      rutaRef.current = [];
+      distanciaRef.current = 0;
+      segundosRef.current = 0;
+
+      await prepararTrackingCarrera({ segundoPlano: permiteSegundoPlano });
+      const loc = await obtenerPrimeraUbicacion();
+      await agregarPuntosTracking([loc]);
+
+      if (permiteSegundoPlano) {
+        try {
+          await iniciarTrackingCarrera();
+        } catch {
+          // El tracking en segundo plano no está disponible, continuar en primer plano
+          permiteSegundoPlano = false;
+          setTrackingSegundoPlano(false);
+          foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
+            sincronizarTracking().catch(console.error);
+          });
+        }
+      } else {
+        foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
+          sincronizarTracking().catch(console.error);
+        });
+      }
+
+      await sincronizarTracking();
+      setCorriendo(true);
+      arrancarSincronizacion();
+    } catch (e) {
+      await pararTrackingCarrera().catch(() => {});
+      await limpiarTrackingCarrera().catch(() => {});
+      let mensaje;
+      if (e.message === 'GPS_TIMEOUT') {
+        mensaje = 'No se pudo obtener tu ubicación. Sal al exterior e inténtalo de nuevo.';
+      } else if (e.code === 'E_LOCATION_SERVICES_DISABLED') {
+        mensaje = 'Activa la ubicación en los ajustes del sistema e inténtalo de nuevo.';
+      } else if (e.code === 'E_LOCATION_UNAUTHORIZED') {
+        mensaje = 'Permiso de ubicación denegado. Actívalo en Ajustes > Privacidad > Ubicación.';
+      } else {
+        mensaje = `No se pudo iniciar la carrera.\n\n${e.message ?? 'Error desconocido'}`;
+      }
+      Alert.alert('GPS no disponible', mensaje);
+    } finally {
+      setPreparandoGps(false);
+    }
+  };
+
+  const pararCarrera = async () => {
+    const uid = auth.currentUser.uid;
+    setCorriendo(false);
+    setTrackingSegundoPlano(false);
+    setPausada(false);
+    clearInterval(timerRef.current);
+    foregroundWatchRef.current?.remove();
+    foregroundWatchRef.current = null;
+    await pararTrackingCarrera();
+    const trackingFinal = await sincronizarTracking();
+    const rutaFinal = trackingFinal.ruta;
+    const distanciaFinal = trackingFinal.distancia;
+    const segundosFinales = trackingFinal.segundos;
+
+    if (rutaFinal.length < 2) {
+      await descartarCarreraTerminada(
+        'Carrera terminada',
+        'No se guarda porque todavía no hay suficiente recorrido registrado.'
+      );
+      return;
+    }
+
+    const ritmoMedio = distanciaFinal > 0 ? (segundosFinales / (distanciaFinal / 1000)) : 0;
+    const validacion = validarCarrera(distanciaFinal, segundosFinales);
+
+    if (!validacion.valida) {
+      await descartarCarreraTerminada(
+        'Carrera terminada',
+        `No se guarda porque no cumple las condiciones: ${validacion.motivo}.`
+      );
+      return;
+    }
+
+    await cargarCiudadYBarrios(rutaFinal[0]);
+
+    let misGrupos = [];
+    try {
+      misGrupos = await obtenerMisGrupos();
+    } catch (e) {
+      misGrupos = [];
+    }
+
+    const puntos = calcularPuntos(distanciaFinal, ritmoMedio || 360);
+    const territorioCarrera = calcularResumenTerritorial(
+      rutaFinal,
+      barriosRef.current,
+      puntos,
+      distanciaFinal
+    );
+    const territorio = clasificarTerritorio(territorioCarrera, uid);
+    const randomBytes = new Uint8Array(6);
+    crypto.getRandomValues(randomBytes);
+    const randomHex = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    const carreraId = `${uid}_${Date.now()}_${randomHex}`;
+    const aportacionesGrupo = calcularAportacionesGrupo(misGrupos, puntos, carreraId, uid);
+    const carrera = crearCarreraConqurun({
+        uid,
+        ruta: rutaFinal,
+        distancia: distanciaFinal,
+        duracion: segundosFinales,
+        ritmoMedio,
+        puntos,
+        aportacionesGrupo,
+        territorioCarrera,
+        ciudadId: ciudadRef.current.id,
+        ciudadNombre: ciudadRef.current.nombre,
+        paisCodigo: ciudadRef.current.paisCodigo,
+      fecha: serverTimestamp(),
+    });
+    try {
+      const conquistados = territorioCarrera.filter(b => b.duenoPuntos < b.puntos);
+
+      // Leer pushTokens desde subcollección privada (no el doc público del usuario)
+      const duenosAjenos = [...new Set(
+        conquistados.filter(b => b.dueno && b.dueno !== uid).map(b => b.dueno)
+      )];
+      const privadoSnaps = await Promise.all(
+        duenosAjenos.map(duenoUid => getDoc(doc(db, 'usuarios', duenoUid, 'privado', 'notificaciones')))
+      );
+      const perfil = perfilRef.current;
+
+      const privadoPorUid = Object.fromEntries(
+        duenosAjenos.map((duenoUid, i) => [duenoUid, privadoSnaps[i].data()])
+      );
+      const tokensConquistados = conquistados
+        .filter(b => b.dueno && b.dueno !== uid)
+        .map(b => {
+          const token = privadoPorUid[b.dueno]?.pushToken ?? null;
+          return token ? { token, nombre: b.nombre } : null;
+        })
+        .filter(Boolean);
+
+      const ciudadNuevaId = ciudadRef.current.id;
+
+      const carreraResumen = {
+        id: carreraId,
+        fecha: Date.now(),
+        distancia: Math.round(distanciaFinal),
+        duracion: segundosFinales,
+        ritmoMedio: Math.round(ritmoMedio),
+        puntos,
+        puntosPersonales: puntos,
+        source: 'conqurun',
+        verificationStatus: 'self_recorded',
+      };
+      const ultimasCarreras = [carreraResumen, ...(perfilRef.current.ultimasCarreras ?? [])].slice(0, 3);
+      const nuevaRacha = calcularRachaIncremental(
+        perfilRef.current.ultimasCarreras ?? [],
+        perfilRef.current.racha ?? 0,
+      );
+
+      // Single atomic batch: carrera + usuario + barrios + ranking
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'carreras', carreraId), carrera);
+
+      // Marcas territoriales en subcolección — una por barrio, sin límite de campos en el doc usuario
+      for (const barrio of territorioCarrera) {
+        batch.set(
+          doc(db, 'usuarios', uid, 'marcasTerritoriales', barrio.barrioId),
+          { puntos: increment(barrio.puntos), coleccion: barrio.coleccion, ciudadId: ciudadNuevaId, actualizadoEn: serverTimestamp() },
+          { merge: true }
+        );
+      }
+
+      batch.set(doc(db, 'usuarios', uid), {
+        puntosTotales: increment(puntos),
+        distanciaTotal: increment(Math.round(distanciaFinal)),
+        duracionTotal: increment(segundosFinales),
+        carrerasTotal: increment(1),
+        ...(conquistados.length > 0 && { barriosConquistadosTotal: increment(conquistados.length) }),
+        racha: nuevaRacha,
+        ciudadActualId: ciudadNuevaId,
+        ciudadActualNombre: ciudadRef.current.nombre,
+        paisCodigo: ciudadRef.current.paisCodigo,
+        ultimasCarreras,
+        actualizadoEn: serverTimestamp(),
+      }, { merge: true });
+      // Agrupar barrios conquistados por dueño anterior para decrementar en batch de forma atómica
+      const decrementsPorDueno = {};
+      for (const barrio of conquistados) {
+        batch.update(doc(db, barrio.coleccion, barrio.barrioId), {
+          dueno: uid,
+          duenoPuntos: barrio.puntos,
+          conquistadoEn: serverTimestamp(),
+        });
+        if (barrio.dueno && barrio.dueno !== uid) {
+          decrementsPorDueno[barrio.dueno] = (decrementsPorDueno[barrio.dueno] ?? 0) + 1;
+          batch.set(doc(db, 'usuarios', barrio.dueno, 'privado', 'notificaciones'), {
+            notificacionesPendientes: arrayUnion({
+              tipo: 'territorio_perdido',
+              nombre: barrio.nombre,
+              fecha: Date.now(),
+            }),
+          }, { merge: true });
+        }
+      }
+      // Decrementar contadores de dueños anteriores (usuario + rankingsCiudad)
+      for (const [duenoUid, count] of Object.entries(decrementsPorDueno)) {
+        batch.update(doc(db, 'usuarios', duenoUid), { barriosConquistadosTotal: increment(-count) });
+        batch.set(refRanking(ciudadNuevaId, duenoUid), { barrios: increment(-count) }, { merge: true });
+      }
+
+      // Actualizar rankingsCiudad (1 escritura por carrera, evita leer todas las carreras en el ranking)
+      if (ciudadRef.current.id) {
+        batch.set(refRanking(ciudadRef.current.id, uid), {
+          ciudadId: ciudadRef.current.id,
+          uid,
+          puntos: increment(puntos),
+          carreras: increment(1),
+          totalMetros: increment(Math.round(distanciaFinal)),
+          stravaVerificadas: increment(0),
+          nickname: perfil.nickname ?? 'Corredor anónimo',
+          fotoPerfil: perfil.fotoPerfil ?? null,
+          fotoPerfilEstado: perfil.fotoPerfilEstado ?? null,
+          pais: perfil.pais ?? null,
+          topLogros: (perfil.logros ?? []).slice(0, 3),
+          barrios: increment(conquistados.length),
+          actualizadoEn: serverTimestamp(),
+        }, { merge: true });
+      }
+
+      await batch.commit();
+
+      // Fire-and-forget notifications after successful commit
+      for (const { token, nombre } of tokensConquistados) {
+        enviarNotificacion(token, '¡Te han conquistado!', `Alguien te ha quitado ${nombre}`).catch(() => {});
+      }
+      if (conquistados.length > 0) {
+        const nombresConquistados = [...new Set(conquistados.map(b => b.nombre))];
+        notificarConquista(nombresConquistados).catch(() => {});
+      }
+
+      // Actualizar top10 individual + marcas de grupo — fire-and-forget
+      Promise.all(territorioCarrera.map(async (barrio) => {
+        const barrioDocRef = doc(db, barrio.coleccion, barrio.barrioId);
+        const [marcaSnap, barrioSnap] = await Promise.all([
+          getDoc(doc(db, 'usuarios', uid, 'marcasTerritoriales', barrio.barrioId)),
+          getDoc(barrioDocRef),
+        ]);
+
+        const totalPuntosUsuario = marcaSnap.exists() ? (marcaSnap.data().puntos ?? 0) : barrio.puntos;
+        const barrioData = barrioSnap.data() ?? {};
+
+        const currentTop10 = barrioData.top10 ?? [];
+        const newTop10 = [...currentTop10.filter(e => e.uid !== uid), { uid, puntos: totalPuntosUsuario }]
+          .sort((a, b) => b.puntos - a.puntos).slice(0, 10);
+
+        const updates = { top10: newTop10 };
+
+        // Marcas de grupo: para cada grupo del usuario, sumar puntos y comprobar conquista
+        for (const grupo of misGrupos) {
+          const marcaGrupoRef = doc(db, 'grupoMarcas', grupo.id, 'marcasTerritoriales', barrio.barrioId);
+          // increment() es atómico — evita race condition si dos miembros del grupo corren a la vez
+          await setDoc(marcaGrupoRef, {
+            puntos: increment(barrio.puntos),
+            ciudadId: ciudadRef.current?.id,
+            actualizadoEn: serverTimestamp(),
+          }, { merge: true });
+
+          // Leer el total real tras el increment para comprobar conquista
+          const marcaGrupoSnapPost = await getDoc(marcaGrupoRef);
+          const nuevoTotalGrupo = marcaGrupoSnapPost.data()?.puntos ?? barrio.puntos;
+
+          if (nuevoTotalGrupo > (barrioData.duenoGrupoPuntos ?? 0)) {
+            const anteriorGrupoId = barrioData.duenoGrupo ?? null;
+            updates.duenoGrupo = grupo.id;
+            updates.duenoGrupoPuntos = nuevoTotalGrupo;
+            updateDoc(doc(db, 'grupos', grupo.id), { barriosConquistados: increment(1) }).catch(() => {});
+            if (anteriorGrupoId && anteriorGrupoId !== grupo.id) {
+              updateDoc(doc(db, 'grupos', anteriorGrupoId), { barriosConquistados: increment(-1) }).catch(() => {});
+            }
+          }
+        }
+
+        await updateDoc(barrioDocRef, updates);
+      })).catch(() => {});
+
+      registrarAportacionesGrupo({
+        carreraId,
+        uid,
+        puntosPersonales: puntos,
+        distancia: distanciaFinal,
+        duracion: segundosFinales,
+        aportaciones: aportacionesGrupo,
+      }).catch(() => {});
+
+      const nuevosLogros = await comprobarYNotificarLogros();
+      for (const logro of nuevosLogros) {
+        notificarLogro(logro).catch(() => {});
+      }
+      const barriosUnicos = [...new Set(conquistados.map(b => `${b.nombre} · ${(b.distanciaMetros / 1000).toFixed(2)} km`))];
+      const territorioResumen = {
+        ...territorio,
+        conquistadas: barriosUnicos,
+      };
+
+      await limpiarTrackingCarrera();
+      invalidarCacheTerritorios(ciudadRef.current?.id).catch(() => {});
+      cargarCarrerasRecientes().catch(console.error);
+      setResumenCarrera({
+        distancia: distanciaFinal,
+        duracion: segundosFinales,
+        ritmoMedio,
+        puntos,
+        territorio: territorioResumen,
+        logros: nuevosLogros,
+        aportacionesGrupo,
+      });
+      setRuta([]);
+      setDistancia(0);
+      setSegundos(0);
+      setBarrioActual(null);
+    } catch (e) {
+      Alert.alert('Error', 'No se pudo guardar la carrera. Revisa tu conexión e inténtalo de nuevo.');
+    }
+  };
+
+  const descartarCarreraTerminada = async (titulo, mensaje) => {
+    await limpiarTrackingCarrera();
+    rutaRef.current = [];
+    distanciaRef.current = 0;
+    segundosRef.current = 0;
+    setRuta([]);
+    setDistancia(0);
+    setSegundos(0);
+    setBarrioActual(null);
+    setTrackingSegundoPlano(false);
+    setPausada(false);
+    Alert.alert(titulo, mensaje);
+  };
+
+  const pausarCarrera = async () => {
+    clearInterval(timerRef.current);
+    foregroundWatchRef.current?.remove();
+    foregroundWatchRef.current = null;
+    await pausarTrackingCarrera();
+    setPausada(true);
+    await sincronizarTracking();
+  };
+
+  const reanudarCarrera = async () => {
+    if (preparandoGps) return;
+    setPreparandoGps(true);
+    try {
+      const meta = await reanudarTrackingCarrera();
+      const loc = await obtenerPrimeraUbicacion();
+      await agregarPuntosTracking([{ ...loc, segmentStart: true }]);
+      if (meta?.segundoPlano) {
+        await iniciarTrackingCarrera();
+        setTrackingSegundoPlano(true);
+      } else {
+        foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
+          sincronizarTracking().catch(console.error);
+        });
+        setTrackingSegundoPlano(false);
+      }
+      setPausada(false);
+      await sincronizarTracking();
+      arrancarSincronizacion();
+    } catch (e) {
+      Alert.alert(
+        'GPS no disponible',
+        e.message === 'GPS_TIMEOUT'
+          ? 'No se pudo obtener tu ubicación para reanudar. Prueba en una zona abierta.'
+          : 'No se pudo reanudar la carrera'
+      );
+      await pausarTrackingCarrera();
+      setPausada(true);
+    } finally {
+      setPreparandoGps(false);
+    }
+  };
+
+  const confirmarPararCarrera = () => setConfirmarFin(true);
+
+  return (
+    <ImageBackground
+      source={require('../assets/login-map-flag-centered.jpg')}
+      style={styles.container}
+      resizeMode="cover"
+    >
+      <View style={styles.overlay} />
+      {corriendo ? (
+        ubicacion ? (
+          <MapView style={styles.mapa} region={ubicacion} showsUserLocation>
+            {ruta.length > 1 && (
+              <Polyline coordinates={ruta} strokeColor={colors.gold} strokeWidth={4} />
+            )}
+          </MapView>
+        ) : (
+          <View style={styles.mapaVacio}>
+            <Text style={styles.mapaVacioTitulo}>Buscando señal GPS...</Text>
+          </View>
+        )
+      ) : (
+        <ScrollView style={styles.historial} contentContainerStyle={styles.historialContenido}>
+          <Text style={styles.historialTitulo}>Últimas carreras</Text>
+          {carrerasRecientes.length === 0 ? (
+            <Text style={styles.historialVacio}>Aún no has corrido. ¡A por el primer kilómetro!</Text>
+          ) : (
+            carrerasRecientes.map(carrera => {
+              const puntuable = esCarreraPuntuable(carrera);
+              return (
+                <View key={carrera.id} style={[styles.carreraCard, !puntuable && styles.carreraCardAtenuada]}>
+                  <View style={styles.carreraFila}>
+                    <Text style={styles.carreraFecha}>{formatFecha(carrera.fecha)}</Text>
+                    <Text style={styles.carreraPuntos}>{(carrera.puntosPersonales ?? carrera.puntos ?? 0).toLocaleString()} pts</Text>
+                  </View>
+                  <View style={styles.carreraFila}>
+                    <Text style={styles.carreraMetrica}>{(carrera.distancia / 1000).toFixed(2)} km</Text>
+                    <Text style={styles.carreraMetrica}>{formatRitmo(carrera.ritmoMedio)} min/km</Text>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </ScrollView>
+      )}
+
+      <View style={styles.panel}>
+        {barrioActual && (
+          <EtiquetaBarrio barrio={barrioActual} uid={auth.currentUser?.uid} />
+        )}
+        <View style={styles.stats}>
+          <View style={styles.stat}>
+            <Text style={styles.statValor}>{(distancia / 1000).toFixed(2)}</Text>
+            <Text style={styles.statLabel}>km</Text>
+          </View>
+          <View style={styles.separador} />
+          <View style={styles.stat}>
+            <Text style={styles.statValor}>{formatTiempo(segundos)}</Text>
+            <Text style={styles.statLabel}>tiempo</Text>
+          </View>
+          <View style={styles.separador} />
+          <View style={styles.stat}>
+            <Text style={styles.statValor}>{formatRitmo(distancia > 0 ? segundos / (distancia / 1000) : null)}</Text>
+            <Text style={styles.statLabel}>ritmo medio</Text>
+          </View>
+        </View>
+
+        {corriendo && !pausada && (
+          <BarraMinimo distancia={distancia} segundos={segundos} />
+        )}
+
+        {corriendo && (
+          <View style={[styles.estadoTrackingBox, pausada && styles.estadoTrackingBoxPausado]}>
+            <Text style={[styles.estadoTracking, pausada && styles.estadoTrackingPausado]}>
+              {pausada
+                ? 'Carrera pausada'
+                : trackingSegundoPlano
+                ? 'Grabando con pantalla apagada'
+                : 'Grabando solo con la app abierta'}
+            </Text>
+            {pausada && (
+              <Text style={styles.estadoTrackingDetalle}>No se suma distancia ni tiempo</Text>
+            )}
+          </View>
+        )}
+
+        {corriendo ? (
+          <View style={styles.accionesCarrera}>
+            <TouchableOpacity
+              style={[styles.botonSecundario, pausada && styles.botonReanudar, preparandoGps && styles.botonDesactivado]}
+              onPress={pausada ? reanudarCarrera : pausarCarrera}
+              disabled={preparandoGps}
+            >
+              <Text style={[styles.botonSecundarioTexto, pausada && styles.botonReanudarTexto]}>
+                {preparandoGps ? 'Preparando GPS...' : pausada ? 'Reanudar' : 'Pausar'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.boton, styles.botonParar, styles.botonTerminar]}
+              onPress={confirmarPararCarrera}
+              disabled={preparandoGps}
+            >
+              <Text style={styles.botonTexto}>Terminar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.boton, preparandoGps && styles.botonDesactivado]}
+            onPress={iniciarCarrera}
+            disabled={preparandoGps}
+          >
+            <Text style={styles.botonTexto}>
+              {preparandoGps ? 'Preparando GPS...' : 'Start ConqueR'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Botón info puntos */}
+      {!corriendo && (
+        <TouchableOpacity style={styles.botonInfoPuntos} onPress={() => setMostrarInfoPuntos(true)}>
+          <Text style={styles.botonInfoPuntosTexto}>ⓘ</Text>
+        </TouchableOpacity>
+      )}
+
+      <Modal visible={mostrarInfoPuntos} transparent animationType="slide">
+        <View style={styles.infoPuntosOverlay}>
+          <View style={styles.infoPuntosCard}>
+            <Text style={styles.infoPuntosTitulo}>Cómo se calculan los puntos</Text>
+
+            <Text style={styles.infoPuntosSeccion}>📏 Kilómetros</Text>
+            <Text style={styles.infoPuntosTexto}>La base es <Text style={styles.infoPuntosDestacado}>1 punto por km</Text>. Cuanto más lejos, más puntos.</Text>
+
+            <Text style={styles.infoPuntosSeccion}>⚡ Ritmo</Text>
+            <Text style={styles.infoPuntosTexto}>El ritmo medio multiplica los puntos entre <Text style={styles.infoPuntosDestacado}>×0.5 y ×5</Text>:</Text>
+
+            <View style={styles.infoPuntosTabla}>
+              {[
+                ['2:50 min/km', '×5.0'],
+                ['3:30 min/km', '×4.6'],
+                ['4:00 min/km', '×3.8'],
+                ['4:30 min/km', '×2.6'],
+                ['5:00 min/km', '×1.0'],
+                ['6:00 min/km', '×0.9'],
+                ['8:00 min/km', '×0.7'],
+                ['10:00 min/km', '×0.5'],
+              ].map(([ritmo, factor]) => (
+                <View key={ritmo} style={styles.infoPuntosFilaTabla}>
+                  <Text style={styles.infoPuntosRitmo}>{ritmo}</Text>
+                  <Text style={styles.infoPuntosFactor}>{factor}</Text>
+                </View>
+              ))}
+            </View>
+
+            <Text style={styles.infoPuntosEjemplo}>Ejemplo: 10 km a 4:00 min/km → 10 × 3.8 = <Text style={styles.infoPuntosDestacado}>38 pts</Text></Text>
+
+            <TouchableOpacity style={styles.infoPuntosCerrar} onPress={() => setMostrarInfoPuntos(false)}>
+              <Text style={styles.infoPuntosCerrarTexto}>Entendido</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <ModalConfirmarFin
+        visible={confirmarFin}
+        distancia={distancia}
+        segundos={segundos}
+        onCancelar={() => setConfirmarFin(false)}
+        onConfirmar={() => { setConfirmarFin(false); pararCarrera(); }}
+      />
+
+      <ResumenCarreraModal
+        resumen={resumenCarrera}
+        onClose={() => setResumenCarrera(null)}
+        formatTiempo={formatTiempo}
+        formatRitmo={formatRitmo}
+      />
+    </ImageBackground>
+  );
+}
+
+function ModalConfirmarFin({ visible, distancia, segundos, onCancelar, onConfirmar }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancelar}>
+      <View style={styles.confirmarOverlay}>
+        <View style={styles.confirmarPanel}>
+          <Text style={styles.confirmarTitulo}>¿Terminar carrera?</Text>
+          <View style={styles.confirmarStats}>
+            <View style={styles.confirmarStat}>
+              <Text style={styles.confirmarStatValor}>{(distancia / 1000).toFixed(2)}</Text>
+              <Text style={styles.confirmarStatLabel}>km</Text>
+            </View>
+            <View style={styles.confirmarSeparador} />
+            <View style={styles.confirmarStat}>
+              <Text style={styles.confirmarStatValor}>{formatTiempo(segundos)}</Text>
+              <Text style={styles.confirmarStatLabel}>tiempo</Text>
+            </View>
+          </View>
+          <View style={styles.confirmarBotones}>
+            <TouchableOpacity style={styles.confirmarBotonSeguir} onPress={onCancelar}>
+              <Text style={styles.confirmarBotonSeguirTexto}>Seguir corriendo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.confirmarBotonTerminar} onPress={onConfirmar}>
+              <Text style={styles.confirmarBotonTerminarTexto}>Terminar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ResumenCarreraModal({ resumen, onClose, formatTiempo, formatRitmo }) {
+  if (!resumen) return null;
+
+  const territorio = resumen.territorio ?? {
+    conquistadas: [],
+    defendidas: [],
+    rivalesPendientes: [],
+  };
+  const hayConquistas = territorio.conquistadas.length > 0;
+  const hayTerritorio = hayConquistas
+    || territorio.defendidas.length > 0
+    || territorio.rivalesPendientes.length > 0;
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.resumenOverlay}>
+        <View style={styles.resumenPanel}>
+          <ScrollView contentContainerStyle={styles.resumenContenido}>
+            <Text style={styles.resumenEyebrow}>Carrera completada</Text>
+            <Text style={styles.resumenTitulo}>
+              {hayConquistas
+                ? `Has conquistado ${territorio.conquistadas.length} ${territorio.conquistadas.length === 1 ? 'zona' : 'zonas'}`
+                : 'Buen entrenamiento'}
+            </Text>
+            <Text style={styles.resumenSubtitulo}>
+              {hayConquistas
+                ? 'Tu bandera gana terreno.'
+                : 'No has conquistado zonas esta vez.'}
+            </Text>
+
+            <View style={styles.resumenPuntos}>
+              <Text style={styles.resumenPuntosValor}>{resumen.puntos.toLocaleString()}</Text>
+              <Text style={styles.resumenPuntosLabel}>puntos</Text>
+            </View>
+
+            <View style={styles.resumenGrid}>
+              <ResumenMetrica label="Distancia" value={`${(resumen.distancia / 1000).toFixed(2)} km`} />
+              <ResumenMetrica label="Tiempo" value={formatTiempo(resumen.duracion)} />
+              <ResumenMetrica label="Ritmo medio" value={`${formatRitmo(resumen.ritmoMedio)} min/km`} />
+              <ResumenMetrica label="Grupos" value={resumen.aportacionesGrupo.length > 0 ? `${resumen.aportacionesGrupo.length}` : 'Sin grupo'} />
+            </View>
+
+            <ResumenTerritorio territorio={territorio} />
+
+            {resumen.aportacionesGrupo.length > 0 && (
+              <View style={styles.resumenSeccion}>
+                <Text style={styles.resumenSeccionTitulo}>Aportación a grupos</Text>
+                {resumen.aportacionesGrupo.map(aportacion => (
+                  <View key={aportacion.id} style={styles.resumenAportacionFila}>
+                    <View style={styles.resumenAportacionInfo}>
+                      <Text style={styles.resumenAportacionNombre}>{aportacion.grupoNombre}</Text>
+                      <Text style={styles.resumenAportacionDetalle}>
+                        {aportacion.miembrosGrupoEnEseMomento} miembros · x{aportacion.multiplicadorGrupo.toFixed(2)}
+                      </Text>
+                    </View>
+                    <Text style={styles.resumenAportacionPuntos}>
+                      {aportacion.puntosGrupo.toLocaleString()} pts
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {resumen.logros.length > 0 && (
+              <View style={styles.resumenSeccion}>
+                <Text style={styles.resumenSeccionTitulo}>Logros desbloqueados</Text>
+                {resumen.logros.map(logro => (
+                  <View key={logro.id ?? logro.nombre} style={styles.resumenLogroFila}>
+                    <Text style={styles.resumenLogroEmoji}>{logro.emoji}</Text>
+                    <View style={styles.resumenLogroInfo}>
+                      <Text style={styles.resumenLogroNombre}>{logro.nombre}</Text>
+                      <Text style={styles.resumenLogroDesc}>{logro.desc}</Text>
+                    </View>
+                    <View style={styles.resumenLogroBadge}>
+                      <Text style={styles.resumenLogroBadgeTexto}>+{logro.bonus.toLocaleString()} pts</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <TouchableOpacity style={styles.resumenBoton} onPress={onClose}>
+              <Text style={styles.resumenBotonTexto}>Cerrar</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ResumenTerritorio({ territorio }) {
+  const hayDatos = territorio.conquistadas.length > 0
+    || territorio.defendidas.length > 0
+    || territorio.rivalesPendientes.length > 0;
+
+  return (
+    <View style={styles.resumenSeccion}>
+      <Text style={styles.resumenSeccionTitulo}>Territorio</Text>
+      <ResumenListaTerritorio titulo="Zonas conquistadas" items={territorio.conquistadas} variante="conquista" />
+      <ResumenListaTerritorio titulo="Zonas defendidas" items={territorio.defendidas} variante="defensa" />
+      <ResumenListaTerritorio
+        titulo="Rivales pendientes"
+        items={territorio.rivalesPendientes.map(item => `${item.nombre} · ${item.puntosDueno.toLocaleString()} pts`)}
+        variante="rival"
+      />
+      {!hayDatos && (
+        <Text style={styles.resumenTexto}>Sigue sumando puntos para atacar zonas cercanas.</Text>
+      )}
+    </View>
+  );
+}
+
+function ResumenListaTerritorio({ titulo, items, variante }) {
+  if (items.length === 0) return null;
+
+  return (
+    <View style={styles.resumenTerritorioGrupo}>
+      <Text style={styles.resumenTerritorioTitulo}>{titulo}</Text>
+      {items.map((item, i) => (
+        <View key={i} style={[styles.resumenTerritorioChip, styles[`resumenTerritorio_${variante}`]]}>
+          <Text style={styles.resumenTerritorioTexto}>{item}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function ResumenMetrica({ label, value }) {
+  return (
+    <View style={styles.resumenMetrica}>
+      <Text style={styles.resumenMetricaValor}>{value}</Text>
+      <Text style={styles.resumenMetricaLabel}>{label}</Text>
+    </View>
+  );
+}
+
+const formatFecha = (fecha) => {
+  if (!fecha) return '';
+  const ms = fecha?.toDate ? fecha.toDate().getTime() : new Date(fecha).getTime();
+  if (!ms) return '';
+  return new Date(ms).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+};
+
+function EtiquetaBarrio({ barrio, uid }) {
+  const esPropio = barrio.dueno === uid;
+  const esLibre = !barrio.dueno;
+  const label = esPropio
+    ? `Defendiendo ${barrio.nombre}`
+    : esLibre
+    ? `Zona libre · ${barrio.nombre}`
+    : `Atacando ${barrio.nombre}`;
+  const color = esPropio ? colors.gold : esLibre ? colors.muted : colors.conquest;
+  return <Text style={[styles.barrio, { color }]}>📍 {label}</Text>;
+}
+
+function BarraMinimo({ distancia, segundos }) {
+  const DIST_MIN = 200;
+  const SEG_MIN = 60;
+  const progDist = Math.min(1, distancia / DIST_MIN);
+  const progSeg = Math.min(1, segundos / SEG_MIN);
+  const cumple = progDist >= 1 && progSeg >= 1;
+  if (cumple) return null;
+
+  return (
+    <View style={styles.barraMinimo}>
+      <View style={styles.barraMinimoFila}>
+        <Text style={styles.barraMinimoTexto}>
+          {Math.round(distancia)} / {DIST_MIN} m
+        </Text>
+        <Text style={styles.barraMinimoTexto}>
+          {segundos} / {SEG_MIN} s
+        </Text>
+      </View>
+      <View style={styles.barraMinimoTrack}>
+        <View style={[styles.barraMinimoRelleno, { width: `${Math.min(progDist, progSeg) * 100}%` }]} />
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,7,18,0.78)' },
+  mapa: { flex: 1 },
+  mapaVacio: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapaVacioTitulo: { color: colors.muted, fontSize: 14, textAlign: 'center' },
+  historial: { flex: 1 },
+  historialContenido: { padding: 16, paddingBottom: 8 },
+  historialTitulo: { color: colors.muted, fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 10 },
+  historialVacio: { color: colors.subdued, fontSize: 14, textAlign: 'center', marginTop: 20 },
+  carreraCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: 12,
+    marginBottom: 8,
+    borderColor: colors.border,
+    borderWidth: 1,
+  },
+  carreraCardAtenuada: { opacity: 0.5 },
+  carreraFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  carreraFecha: { color: colors.text, fontSize: 13, fontWeight: 'bold' },
+  carreraPuntos: { color: colors.gold, fontSize: 13, fontWeight: 'bold' },
+  carreraMetrica: { color: colors.muted, fontSize: 12 },
+  panel: {
+    backgroundColor: colors.surface,
+    padding: 24,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  barrio: { color: colors.gold, fontSize: 13, textAlign: 'center', marginBottom: 12 },
+  stats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  stat: { alignItems: 'center', flex: 1 },
+  statValor: { fontSize: 28, fontWeight: 'bold', color: colors.text },
+  statLabel: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  separador: { width: 1, height: 40, backgroundColor: colors.border },
+  estadoTrackingBox: {
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  estadoTrackingBoxPausado: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.gold,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  estadoTracking: {
+    color: colors.muted,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  estadoTrackingPausado: {
+    color: colors.gold,
+    fontWeight: 'bold',
+  },
+  estadoTrackingDetalle: {
+    color: colors.muted,
+    fontSize: 12,
+    marginTop: 3,
+    textAlign: 'center',
+  },
+  accionesCarrera: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  boton: {
+    backgroundColor: colors.gold,
+    padding: 18,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+  },
+  botonParar: { backgroundColor: colors.conquest },
+  botonTerminar: { flex: 1 },
+  botonSecundario: {
+    flex: 1,
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderWidth: 1,
+    padding: 18,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+  },
+  botonSecundarioTexto: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  botonReanudar: {
+    backgroundColor: colors.gold,
+    borderColor: colors.gold,
+  },
+  botonReanudarTexto: {
+    color: colors.bg,
+  },
+  botonDesactivado: { opacity: 0.65 },
+  botonTexto: { color: colors.bg, fontSize: 18, fontWeight: 'bold' },
+  confirmarOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  confirmarPanel: {
+    width: '100%',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderColor: colors.border,
+    borderWidth: 1,
+    padding: 24,
+  },
+  confirmarTitulo: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  confirmarStats: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+    gap: 24,
+  },
+  confirmarStat: { alignItems: 'center' },
+  confirmarStatValor: { color: colors.text, fontSize: 32, fontWeight: 'bold' },
+  confirmarStatLabel: { color: colors.muted, fontSize: 13, marginTop: 2 },
+  confirmarSeparador: { width: 1, height: 40, backgroundColor: colors.border },
+  confirmarBotones: { flexDirection: 'row', gap: 10 },
+  confirmarBotonSeguir: {
+    flex: 1,
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: 16,
+    alignItems: 'center',
+  },
+  confirmarBotonSeguirTexto: { color: colors.text, fontSize: 15, fontWeight: 'bold' },
+  confirmarBotonTerminar: {
+    flex: 1,
+    backgroundColor: colors.conquest,
+    borderRadius: radius.lg,
+    padding: 16,
+    alignItems: 'center',
+  },
+  confirmarBotonTerminarTexto: { color: colors.text, fontSize: 15, fontWeight: 'bold' },
+  resumenOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'flex-end',
+  },
+  resumenPanel: {
+    maxHeight: '88%',
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderColor: colors.border,
+    borderWidth: 1,
+  },
+  resumenContenido: {
+    padding: 22,
+    paddingBottom: 32,
+  },
+  resumenEyebrow: {
+    color: colors.gold,
+    fontSize: 13,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  resumenTitulo: {
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  resumenSubtitulo: {
+    color: colors.muted,
+    fontSize: 15,
+    marginBottom: 20,
+  },
+  resumenPuntos: {
+    backgroundColor: colors.surface,
+    borderColor: colors.gold,
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    padding: 18,
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  resumenPuntosValor: {
+    color: colors.gold,
+    fontSize: 38,
+    fontWeight: 'bold',
+  },
+  resumenPuntosLabel: {
+    color: colors.muted,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  resumenGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 18,
+  },
+  resumenMetrica: {
+    width: '48%',
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: 14,
+  },
+  resumenMetricaValor: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  resumenMetricaLabel: {
+    color: colors.muted,
+    fontSize: 12,
+  },
+  resumenSeccion: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: 14,
+    marginBottom: 12,
+  },
+  resumenSeccionTitulo: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  resumenZona: {
+    color: colors.muted,
+    fontSize: 14,
+    paddingVertical: 5,
+  },
+  resumenAportacionFila: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.bg,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    padding: 10,
+    marginBottom: 8,
+  },
+  resumenAportacionInfo: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  resumenAportacionNombre: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  resumenAportacionDetalle: {
+    color: colors.muted,
+    fontSize: 12,
+  },
+  resumenAportacionPuntos: {
+    color: colors.gold,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  resumenLogroFila: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bg,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    padding: 10,
+    marginBottom: 8,
+  },
+  resumenLogroEmoji: {
+    fontSize: 24,
+    marginRight: 10,
+  },
+  resumenLogroInfo: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  resumenLogroNombre: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  resumenLogroDesc: {
+    color: colors.muted,
+    fontSize: 12,
+  },
+  resumenLogroBadge: {
+    backgroundColor: '#38bdf820',
+    borderColor: colors.route,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  resumenLogroBadgeTexto: {
+    color: colors.route,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  resumenTerritorioGrupo: {
+    marginTop: 12,
+  },
+  resumenTerritorioTitulo: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  resumenTerritorioChip: {
+    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 8,
+    borderWidth: 1,
+  },
+  resumenTerritorio_conquista: {
+    backgroundColor: '#e6394620',
+    borderColor: colors.conquest,
+  },
+  resumenTerritorio_defensa: {
+    backgroundColor: '#d6aa4c20',
+    borderColor: colors.gold,
+  },
+  resumenTerritorio_rival: {
+    backgroundColor: '#38bdf820',
+    borderColor: colors.route,
+  },
+  resumenTerritorioTexto: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  resumenTexto: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  barraMinimo: {
+    marginBottom: 10,
+  },
+  barraMinimoFila: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 5,
+  },
+  barraMinimoTexto: {
+    color: colors.muted,
+    fontSize: 11,
+  },
+  barraMinimoTrack: {
+    height: 3,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  barraMinimoRelleno: {
+    height: '100%',
+    backgroundColor: colors.gold,
+    borderRadius: 2,
+  },
+  resumenBoton: {
+    backgroundColor: colors.gold,
+    borderRadius: radius.lg,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  resumenBotonTexto: {
+    color: colors.bg,
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  botonInfoPuntos: {
+    position: 'absolute', top: 12, right: 16,
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1,
+    alignItems: 'center', justifyContent: 'center', zIndex: 10,
+  },
+  botonInfoPuntosTexto: { color: colors.muted, fontSize: 16, fontWeight: 'bold' },
+  infoPuntosOverlay: { flex: 1, backgroundColor: '#000000aa', justifyContent: 'flex-end' },
+  infoPuntosCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 24,
+  },
+  infoPuntosTitulo: { fontSize: 18, fontWeight: '900', color: colors.text, marginBottom: 16 },
+  infoPuntosSeccion: { fontSize: 14, fontWeight: '800', color: colors.gold, marginTop: 12, marginBottom: 4 },
+  infoPuntosTexto: { fontSize: 14, color: colors.muted, lineHeight: 20 },
+  infoPuntosDestacado: { color: colors.text, fontWeight: '700' },
+  infoPuntosTabla: { marginTop: 8, marginBottom: 8, borderRadius: radius.sm, overflow: 'hidden' },
+  infoPuntosFilaTabla: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    paddingVertical: 6, paddingHorizontal: 12,
+    backgroundColor: colors.bg, marginBottom: 2,
+  },
+  infoPuntosRitmo: { fontSize: 13, color: colors.muted },
+  infoPuntosFactor: { fontSize: 13, color: colors.gold, fontWeight: '700' },
+  infoPuntosEjemplo: {
+    fontSize: 13, color: colors.muted, fontStyle: 'italic',
+    marginTop: 8, marginBottom: 16,
+  },
+  infoPuntosCerrar: {
+    backgroundColor: colors.gold, borderRadius: radius.md,
+    padding: 14, alignItems: 'center',
+  },
+  infoPuntosCerrarTexto: { color: colors.bg, fontWeight: '900', fontSize: 15 },
+});

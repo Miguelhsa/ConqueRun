@@ -1,0 +1,501 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.esAdmin == true;
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function oldNumber(field) {
+      return field in resource.data ? resource.data[field] : 0;
+    }
+
+    function isGroupMember(grupoId) {
+      return signedIn() &&
+        request.auth.uid in get(/databases/$(database)/documents/grupos/$(grupoId)).data.nicknames;
+    }
+
+    // Nickname: mínimo 3 chars, máximo 20, solo alfanuméricos y guion bajo
+    function nicknameValido(nickname) {
+      return nickname is string &&
+        nickname.size() >= 3 &&
+        nickname.size() <= 20 &&
+        nickname.matches('^[a-zA-Z0-9_áéíóúÁÉÍÓÚñÑüÜ]+$');
+    }
+
+    // Nombre de grupo: 1-40 chars, no vacío
+    function nombreGrupoValido(nombre) {
+      return nombre is string &&
+        nombre.size() >= 1 &&
+        nombre.size() <= 40;
+    }
+
+    // Descripción de grupo: vacía o máximo 120 chars
+    function descripcionGrupoValida(desc) {
+      return desc is string && desc.size() <= 120;
+    }
+
+    function validUserCreate(uid) {
+      return isOwner(uid) &&
+        !request.resource.data.keys().hasAny(['esAdmin']) &&
+        (
+          !request.resource.data.keys().hasAny(['nickname']) ||
+          nicknameValido(request.resource.data.nickname)
+        ) &&
+        request.resource.data.keys().hasOnly([
+          'nickname',
+          'edad',
+          'pais',
+          'fechaNacimiento',
+          'fechaNacimientoGuardadaEn',
+          'fotoPendiente',
+          'fotoPerfilEstado',
+          'fotoMotivoRechazo',
+          'fotoRevisadaEn',
+          'pushToken',
+          'logros',
+          'racha',
+          'usuariosBloqueados',
+          'consentimientoUbicacionCarrera',
+          'consentimientoUbicacionCarreraEn',
+          'onboardingPendiente',
+          'onboardingCompletado',
+          'onboardingCompletadoEn',
+          'ciudadActualId',
+          'ciudadActualNombre',
+          'marcasCiudadActualId',
+          'paisCodigo',
+          'eliminacionSolicitada',
+          'eliminacionSolicitadaEn'
+        ]);
+    }
+
+    function validUserUpdate(uid) {
+      return isOwner(uid) &&
+        !changedKeys().hasAny(['esAdmin', 'fotoPerfil']) &&
+        (
+          !changedKeys().hasAny(['nickname']) ||
+          nicknameValido(request.resource.data.nickname)
+        ) &&
+        changedKeys().hasOnly([
+          'nickname',
+          'edad',
+          'pais',
+          'fechaNacimiento',
+          'fechaNacimientoGuardadaEn',
+          'fotoPendiente',
+          'fotoPerfilEstado',
+          'fotoMotivoRechazo',
+          'fotoRevisadaEn',
+          'pushToken',
+          'logros',
+          'racha',
+          'usuariosBloqueados',
+          'consentimientoUbicacionCarrera',
+          'consentimientoUbicacionCarreraEn',
+          'onboardingPendiente',
+          'onboardingCompletado',
+          'onboardingCompletadoEn',
+          'ciudadActualId',
+          'ciudadActualNombre',
+          'marcasCiudadActualId',
+          'paisCodigo',
+          'eliminacionSolicitada',
+          'eliminacionSolicitadaEn',
+          'puntosTotales',
+          'distanciaTotal',
+          'duracionTotal',
+          'carrerasTotal',
+          'barriosConquistadosTotal',
+          'marcasTerritoriales',
+          'marcasColecciones',
+          'ultimasCarreras',
+          'actualizadoEn'
+        ]) &&
+        (
+          !changedKeys().hasAny(['ultimasCarreras']) ||
+          (
+            request.resource.data.ultimasCarreras is list &&
+            request.resource.data.ultimasCarreras.size() <= 3
+          )
+        ) &&
+        (
+          !changedKeys().hasAny(['fotoPerfilEstado']) ||
+          request.resource.data.fotoPerfilEstado == 'pendiente'
+        ) &&
+        (
+          !changedKeys().hasAny(['puntosTotales']) ||
+          (
+            request.resource.data.puntosTotales is number &&
+            request.resource.data.puntosTotales >= oldNumber('puntosTotales') &&
+            request.resource.data.puntosTotales <= oldNumber('puntosTotales') + 200000
+          )
+        ) &&
+        (
+          !changedKeys().hasAny(['distanciaTotal']) ||
+          (
+            request.resource.data.distanciaTotal is number &&
+            request.resource.data.distanciaTotal >= oldNumber('distanciaTotal') &&
+            request.resource.data.distanciaTotal <= oldNumber('distanciaTotal') + 100000
+          )
+        ) &&
+        (
+          !changedKeys().hasAny(['duracionTotal']) ||
+          (
+            request.resource.data.duracionTotal is number &&
+            request.resource.data.duracionTotal >= oldNumber('duracionTotal') &&
+            request.resource.data.duracionTotal <= oldNumber('duracionTotal') + 86400
+          )
+        ) &&
+        (
+          !changedKeys().hasAny(['carrerasTotal']) ||
+          request.resource.data.carrerasTotal == oldNumber('carrerasTotal') + 1
+        ) &&
+        (
+          !changedKeys().hasAny(['barriosConquistadosTotal']) ||
+          (
+            request.resource.data.barriosConquistadosTotal is number &&
+            request.resource.data.barriosConquistadosTotal > oldNumber('barriosConquistadosTotal') &&
+            request.resource.data.barriosConquistadosTotal <= oldNumber('barriosConquistadosTotal') + 50
+          )
+        );
+    }
+
+    function validCarreraCreate() {
+      return signedIn() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'uid',
+          'ruta',
+          'distancia',
+          'duracion',
+          'ritmoMedio',
+          'puntos',
+          'puntosPersonales',
+          'aportacionesGrupo',
+          'gruposAportados',
+          'territorioCarrera',
+          'ciudadId',
+          'ciudadNombre',
+          'paisCodigo',
+          'fecha',
+          'source',
+          'externalProvider',
+          'externalActivityId',
+          'verificationStatus',
+          'importedAt',
+          'stravaActivityUrl'
+        ]) &&
+        request.resource.data.source == 'conqurun' &&
+        request.resource.data.verificationStatus == 'self_recorded' &&
+        request.resource.data.externalProvider == null &&
+        request.resource.data.externalActivityId == null &&
+        request.resource.data.distancia is number &&
+        request.resource.data.distancia >= 50 &&
+        request.resource.data.distancia <= 100000 &&
+        request.resource.data.duracion is number &&
+        request.resource.data.duracion >= 30 &&
+        request.resource.data.duracion <= 86400 &&
+        request.resource.data.ruta is list &&
+        request.resource.data.ruta.size() <= 20000 &&
+        request.resource.data.ritmoMedio is number &&
+        request.resource.data.ritmoMedio >= 150 &&
+        request.resource.data.ritmoMedio <= 1200 &&
+        request.resource.data.puntos is number &&
+        request.resource.data.puntos >= 0 &&
+        request.resource.data.puntos <= 200000 &&
+        request.resource.data.puntosPersonales is number &&
+        request.resource.data.puntosPersonales == request.resource.data.puntos;
+    }
+
+    function validGrupoCreate() {
+      return signedIn() &&
+        request.resource.data.creador == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'nombre',
+          'descripcion',
+          'esPublico',
+          'codigo',
+          'creador',
+          'miembros',
+          'nicknames',
+          'ciudadId',
+          'ciudadNombre',
+          'foto',
+          'fotoPendiente',
+          'fotoEstado',
+          'fotoMotivoRechazo',
+          'fotoRevisadaEn',
+          'puntosTotales',
+          'carrerasTotales',
+          'distanciaTotal',
+          'creadoEn'
+        ]) &&
+        request.resource.data.miembros.size() == 1 &&
+        request.resource.data.miembros.hasAll([request.auth.uid]) &&
+        request.resource.data.puntosTotales == 0 &&
+        nombreGrupoValido(request.resource.data.nombre) &&
+        descripcionGrupoValida(request.resource.data.descripcion);
+    }
+
+    function validGrupoMemberUpdate() {
+      return signedIn() &&
+        changedKeys().hasOnly(['miembros', 'nicknames']) &&
+        request.resource.data.miembros.hasAll(resource.data.miembros) &&
+        request.resource.data.miembros.hasAll([request.auth.uid]);
+    }
+
+    function validGrupoLeave() {
+      return signedIn() &&
+        changedKeys().hasOnly(['miembros', 'nicknames']) &&
+        resource.data.creador != request.auth.uid &&
+        resource.data.miembros.hasAll([request.auth.uid]) &&
+        !request.resource.data.miembros.hasAll([request.auth.uid]) &&
+        request.resource.data.miembros.size() == resource.data.miembros.size() - 1 &&
+        resource.data.miembros.hasAll(request.resource.data.miembros);
+    }
+
+    function validGrupoKick() {
+      return signedIn() &&
+        resource.data.creador == request.auth.uid &&
+        changedKeys().hasOnly(['miembros', 'nicknames']) &&
+        request.resource.data.miembros.size() == resource.data.miembros.size() - 1 &&
+        resource.data.miembros.hasAll(request.resource.data.miembros) &&
+        request.resource.data.miembros.hasAll([resource.data.creador]);
+    }
+
+    function validGrupoOwnerUpdate() {
+      return signedIn() &&
+        resource.data.creador == request.auth.uid &&
+        changedKeys().hasOnly([
+          'nombre',
+          'descripcion',
+          'esPublico',
+          'codigo',
+          'fotoPendiente',
+          'fotoEstado',
+          'fotoMotivoRechazo',
+          'fotoRevisadaEn'
+        ]) &&
+        (
+          !changedKeys().hasAny(['fotoEstado']) ||
+          request.resource.data.fotoEstado == 'pendiente'
+        ) &&
+        (
+          !changedKeys().hasAny(['nombre']) ||
+          nombreGrupoValido(request.resource.data.nombre)
+        ) &&
+        (
+          !changedKeys().hasAny(['descripcion']) ||
+          descripcionGrupoValida(request.resource.data.descripcion)
+        );
+    }
+
+    function validGrupoStatsUpdate() {
+      return signedIn() &&
+        request.auth.uid in resource.data.nicknames &&
+        changedKeys().hasOnly([
+          'puntosTotales',
+          'carrerasTotales',
+          'distanciaTotal',
+          'duracionTotal',
+          'actualizadoEn'
+        ]) &&
+        (
+          !changedKeys().hasAny(['puntosTotales']) ||
+          (
+            request.resource.data.puntosTotales is number &&
+            request.resource.data.puntosTotales >= oldNumber('puntosTotales') &&
+            request.resource.data.puntosTotales <= oldNumber('puntosTotales') + 200000
+          )
+        ) &&
+        (
+          !changedKeys().hasAny(['carrerasTotales']) ||
+          request.resource.data.carrerasTotales == oldNumber('carrerasTotales') + 1
+        ) &&
+        (
+          !changedKeys().hasAny(['distanciaTotal']) ||
+          (
+            request.resource.data.distanciaTotal is number &&
+            request.resource.data.distanciaTotal >= oldNumber('distanciaTotal') &&
+            request.resource.data.distanciaTotal <= oldNumber('distanciaTotal') + 100000
+          )
+        );
+    }
+
+    function validAportacionGrupoCreate() {
+      return signedIn() &&
+        request.resource.data.uid == request.auth.uid &&
+        isGroupMember(request.resource.data.grupoId) &&
+        request.resource.data.keys().hasOnly([
+          'id',
+          'carreraId',
+          'grupoId',
+          'grupoNombre',
+          'uid',
+          'puntosBase',
+          'multiplicadorGrupo',
+          'puntosGrupo',
+          'miembrosGrupoEnEseMomento',
+          'distancia',
+          'fecha'
+        ]) &&
+        request.resource.data.puntosBase is number &&
+        request.resource.data.puntosBase >= 0 &&
+        request.resource.data.puntosBase <= 200000 &&
+        request.resource.data.multiplicadorGrupo == 1 &&
+        request.resource.data.puntosGrupo is number &&
+        request.resource.data.puntosGrupo == request.resource.data.puntosBase &&
+        request.resource.data.puntosGrupo <= 200000;
+    }
+
+    function validTerritoryConquestUpdate() {
+      return signedIn() &&
+        changedKeys().hasOnly(['dueno', 'duenoPuntos', 'conquistadoEn']) &&
+        request.resource.data.dueno == request.auth.uid &&
+        request.resource.data.duenoPuntos is number &&
+        request.resource.data.duenoPuntos >= 0 &&
+        request.resource.data.duenoPuntos <= 200000;
+    }
+
+    // Rate limit de reportes: máximo 1 reporte por usuario por recurso
+    function noReporteRepetido() {
+      return !exists(/databases/$(database)/documents/reportes/$(request.auth.uid + '_' + request.resource.data.recursoId));
+    }
+
+    match /usuarios/{uid} {
+      allow read: if signedIn();
+      allow create: if validUserCreate(uid) || isAdmin();
+      allow update: if validUserUpdate(uid) || isAdmin();
+      allow delete: if isAdmin();
+
+      // Historial de ciudades visitadas
+      match /ciudadesHistorico/{ciudadId} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid);
+      }
+
+      // Marcas territoriales por barrio — subcolección sin límite de campos en el doc usuario
+      match /marcasTerritoriales/{barrioId} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid) && request.resource.data.ciudadId is string;
+      }
+
+      // Datos privados: pushToken, notificacionesPendientes — solo el propio usuario
+      match /privado/{docId} {
+        allow read, delete: if isOwner(uid);
+        // Escritura propia (token, notificaciones propias)
+        allow write: if isOwner(uid);
+        // Escritura de notificaciones por otros usuarios autenticados (territorios perdidos)
+        allow create, update: if signedIn() && docId == 'notificaciones';
+      }
+    }
+
+    match /carreras/{id} {
+      allow read: if signedIn();
+      allow create: if validCarreraCreate();
+      allow update, delete: if isAdmin();
+    }
+
+    match /barrios/{id} {
+      allow read: if signedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || validTerritoryConquestUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /territorios/{id} {
+      allow read: if signedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || validTerritoryConquestUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /ciudades/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /grupos/{id} {
+      allow read: if signedIn();
+      allow create: if validGrupoCreate();
+      allow update: if validGrupoMemberUpdate() || validGrupoOwnerUpdate() || validGrupoStatsUpdate() || validGrupoLeave() || validGrupoKick() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /aportacionesGrupo/{id} {
+      allow read: if signedIn();
+      allow create: if validAportacionGrupoCreate();
+      allow update, delete: if isAdmin();
+    }
+
+    match /rankingsCiudad/{id} {
+      allow read: if signedIn();
+      // Cualquier usuario puede crear/actualizar su propia entrada de ranking
+      allow write: if isAdmin() || (
+        signedIn() &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'uid', 'ciudadId', 'puntos', 'carreras', 'totalMetros', 'totalKm',
+          'barrios', 'stravaVerificadas', 'nickname', 'fotoPerfil', 'fotoPerfilEstado',
+          'pais', 'topLogros', 'actualizadoEn'
+        ])
+      );
+    }
+
+    match /grupoMarcas/{grupoId} {
+      allow read: if signedIn();
+      match /marcasTerritoriales/{barrioId} {
+        allow read: if signedIn();
+        allow write: if signedIn() &&
+          request.resource.data.ciudadId is string &&
+          request.resource.data.puntos is number &&
+          request.resource.data.puntos >= 0;
+      }
+    }
+
+    match /reportes/{id} {
+      allow create: if signedIn() &&
+        noReporteRepetido() &&
+        request.resource.data.keys().hasOnly([
+          'tipo',
+          'recursoId',
+          'motivo',
+          'reportadoPor',
+          'estado',
+          'creadoEn'
+        ]) &&
+        request.resource.data.reportadoPor == request.auth.uid &&
+        request.resource.data.estado == 'pendiente' &&
+        request.resource.data.tipo in ['usuario', 'grupo', 'carrera'] &&
+        request.resource.data.motivo in ['contenido_inapropiado', 'trampa', 'spam'];
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /solicitudesEliminacion/{id} {
+      allow create: if signedIn() &&
+        request.resource.data.keys().hasOnly([
+          'uid',
+          'email',
+          'estado',
+          'solicitadoEn'
+        ]) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.estado == 'pendiente';
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}
