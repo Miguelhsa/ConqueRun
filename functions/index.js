@@ -1,14 +1,16 @@
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
+const { HttpsError, onCall } = require('firebase-functions/v2/https');
 const { defineString } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
 const nodemailer = require('nodemailer');
 
 initializeApp();
 
-const GMAIL_USER = defineString('GMAIL_USER');
-const GMAIL_PASS = defineString('GMAIL_PASS');
-const ADMIN_EMAIL = defineString('ADMIN_EMAIL');
+const GMAIL_USER = defineString('GMAIL_USER', { default: '' });
+const GMAIL_PASS = defineString('GMAIL_PASS', { default: '' });
+const ADMIN_EMAIL = defineString('ADMIN_EMAIL', { default: '' });
 
 const TIPO_LABELS = {
   grupo: 'Grupo',
@@ -22,6 +24,154 @@ const MOTIVO_LABELS = {
   acoso: 'Acoso o intimidación',
   otro: 'Otro',
 };
+
+async function commitEnChunks(ops, chunkSize = 450) {
+  const db = getFirestore();
+  for (let i = 0; i < ops.length; i += chunkSize) {
+    const batch = db.batch();
+    ops.slice(i, i + chunkSize).forEach((op) => {
+      if (op.type === 'delete') batch.delete(op.ref);
+      if (op.type === 'update') batch.update(op.ref, op.data);
+      if (op.type === 'set') batch.set(op.ref, op.data, op.options ?? {});
+    });
+    await batch.commit();
+  }
+}
+
+async function descontarTerritorioPerdido(event) {
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+  if (!before || !after) return;
+
+  const duenoAnterior = before.dueno ?? null;
+  const duenoNuevo = after.dueno ?? null;
+  if (!duenoAnterior || duenoAnterior === duenoNuevo) return;
+
+  const ciudadId = after.ciudadId ?? before.ciudadId ?? null;
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+  const batch = db.batch();
+
+  batch.set(db.collection('usuarios').doc(duenoAnterior), {
+    barriosConquistadosTotal: FieldValue.increment(-1),
+  }, { merge: true });
+
+  if (ciudadId) {
+    batch.set(db.collection('rankingsCiudad').doc(`${ciudadId}_${duenoAnterior}`), {
+      barrios: FieldValue.increment(-1),
+    }, { merge: true });
+  }
+
+  await batch.commit();
+}
+
+exports.descontarTerritorioSegmentadoPerdido = onDocumentWritten(
+  'territorios/{territorioId}/segmentos/{segmentoId}',
+  descontarTerritorioPerdido
+);
+
+exports.descontarBarrioSegmentadoPerdido = onDocumentWritten(
+  'barrios/{territorioId}/segmentos/{segmentoId}',
+  descontarTerritorioPerdido
+);
+
+exports.eliminarCuenta = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para eliminar la cuenta.');
+  }
+
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+  const ops = [];
+
+  const [territoriosSnap, barriosSnap, gruposSnap, carrerasSnap, rankingSnap, aportacionesSnap, marcasSnap, historicoSnap, privadoSnap] = await Promise.all([
+    db.collection('territorios').where('dueno', '==', uid).get(),
+    db.collection('barrios').where('dueno', '==', uid).get(),
+    db.collection('grupos').where('miembros', 'array-contains', uid).get(),
+    db.collection('carreras').where('uid', '==', uid).get(),
+    db.collection('rankingsCiudad').where('uid', '==', uid).get(),
+    db.collection('aportacionesGrupo').where('uid', '==', uid).get(),
+    db.collection('usuarios').doc(uid).collection('marcasTerritoriales').get(),
+    db.collection('usuarios').doc(uid).collection('ciudadesHistorico').get(),
+    db.collection('usuarios').doc(uid).collection('privado').get(),
+  ]);
+
+  [...territoriosSnap.docs, ...barriosSnap.docs].forEach((docSnap) => {
+    ops.push({
+      type: 'update',
+      ref: docSnap.ref,
+      data: {
+        dueno: null,
+        duenoPuntos: 0,
+        conquistadoEn: FieldValue.delete(),
+      },
+    });
+  });
+
+  gruposSnap.docs.forEach((docSnap) => {
+    const data = docSnap.data();
+    ops.push({
+      type: 'update',
+      ref: docSnap.ref,
+      data: {
+        miembros: FieldValue.arrayRemove(uid),
+        [`nicknames.${uid}`]: FieldValue.delete(),
+        ...(data.creador === uid ? { creador: null } : {}),
+      },
+    });
+  });
+
+  [...carrerasSnap.docs, ...rankingSnap.docs, ...aportacionesSnap.docs, ...marcasSnap.docs, ...historicoSnap.docs, ...privadoSnap.docs].forEach((docSnap) => {
+    ops.push({ type: 'delete', ref: docSnap.ref });
+  });
+
+  ops.push({ type: 'delete', ref: db.collection('usuarios').doc(uid) });
+
+  await commitEnChunks(ops);
+  await getAuth().deleteUser(uid);
+
+  return { ok: true };
+});
+
+exports.unirseAGrupoConCodigo = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  const codigo = String(request.data?.codigo ?? '').trim().toUpperCase();
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para unirte a un grupo.');
+  }
+  if (!/^[A-Z0-9]{6}$/.test(codigo)) {
+    throw new HttpsError('invalid-argument', 'Código de grupo no válido.');
+  }
+
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+  const [usuarioSnap, gruposSnap] = await Promise.all([
+    db.collection('usuarios').doc(uid).get(),
+    db.collection('grupos').where('codigo', '==', codigo).limit(1).get(),
+  ]);
+
+  if (gruposSnap.empty) {
+    throw new HttpsError('not-found', 'Código incorrecto.');
+  }
+  if (!usuarioSnap.exists) {
+    throw new HttpsError('failed-precondition', 'Perfil de usuario no encontrado.');
+  }
+
+  const usuario = usuarioSnap.data();
+  const grupoDoc = gruposSnap.docs[0];
+  const grupo = grupoDoc.data();
+  if (grupo.ciudadId && usuario.ciudadActualId && usuario.ciudadActualId !== grupo.ciudadId) {
+    throw new HttpsError('permission-denied', `Este grupo es de ${grupo.ciudadNombre}.`);
+  }
+
+  await grupoDoc.ref.update({
+    miembros: FieldValue.arrayUnion(uid),
+    [`nicknames.${uid}`]: usuario.nickname ?? 'Corredor',
+  });
+
+  return { grupoId: grupoDoc.id };
+});
 
 // ─── Validación server-side de carreras (Críticos 1, 2, 4) ───────────────────
 
@@ -144,18 +294,29 @@ exports.notificarReporte = onDocumentCreated('reportes/{reportId}', async (event
   const motivoLabel = MOTIVO_LABELS[motivo] ?? motivo;
   const fechaStr = new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' });
   const urlAdmin = `https://console.firebase.google.com/project/conquerrun-8d30e/firestore/data/reportes`;
+  const gmailUser = GMAIL_USER.value();
+  const gmailPass = GMAIL_PASS.value();
+  const adminEmail = ADMIN_EMAIL.value();
+
+  if (
+    !gmailUser || !gmailPass || !adminEmail ||
+    gmailUser === 'disabled' || gmailPass === 'disabled' || adminEmail === 'disabled'
+  ) {
+    console.warn('Reporte recibido, pero faltan GMAIL_USER, GMAIL_PASS o ADMIN_EMAIL para enviar email.');
+    return;
+  }
 
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-      user: GMAIL_USER.value(),
-      pass: GMAIL_PASS.value(),
+      user: gmailUser,
+      pass: gmailPass,
     },
   });
 
   await transporter.sendMail({
-    from: `"ConqueRun Admin" <${GMAIL_USER.value()}>`,
-    to: ADMIN_EMAIL.value(),
+    from: `"ConqueRun Admin" <${gmailUser}>`,
+    to: adminEmail,
     subject: `[ConqueRun] Nuevo reporte: ${tipoLabel} – ${nombreRecurso}`,
     html: `
       <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#080b14;color:#f8fafc;padding:32px;border-radius:12px;">

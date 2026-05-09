@@ -52,6 +52,83 @@ export const calcularDistanciaFiltrada = (puntos) => puntos.reduce((total, punto
   return total + getDistancia(anterior, punto);
 }, 0);
 
+const distanciaPuntoSegmentoMetros = (punto, inicio, fin) => {
+  const latReferencia = ((inicio.latitude + fin.latitude) / 2) * (Math.PI / 180);
+  const metrosPorLatitud = 111320;
+  const metrosPorLongitud = 111320 * Math.cos(latReferencia);
+  const ax = inicio.longitude * metrosPorLongitud;
+  const ay = inicio.latitude * metrosPorLatitud;
+  const bx = fin.longitude * metrosPorLongitud;
+  const by = fin.latitude * metrosPorLatitud;
+  const px = punto.longitude * metrosPorLongitud;
+  const py = punto.latitude * metrosPorLatitud;
+  const dx = bx - ax;
+  const dy = by - ay;
+
+  if (dx === 0 && dy === 0) {
+    return getDistancia(punto, inicio);
+  }
+
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+  const x = ax + t * dx;
+  const y = ay + t * dy;
+  return Math.hypot(px - x, py - y);
+};
+
+const limitarPuntosRuta = (puntos, maxPuntos) => {
+  if (puntos.length <= maxPuntos) return puntos;
+  if (maxPuntos <= 2) return [puntos[0], puntos[puntos.length - 1]];
+
+  const reducida = [];
+  for (let i = 0; i < maxPuntos; i += 1) {
+    const indice = Math.round((i * (puntos.length - 1)) / (maxPuntos - 1));
+    if (reducida[reducida.length - 1] !== puntos[indice]) {
+      reducida.push(puntos[indice]);
+    }
+  }
+  return reducida;
+};
+
+export const simplificarRutaParaGuardar = (
+  puntos = [],
+  { toleranciaMetros = 8, maxPuntos = 1000 } = {}
+) => {
+  if (!Array.isArray(puntos) || puntos.length <= 2) return puntos;
+
+  const mantener = new Array(puntos.length).fill(false);
+  mantener[0] = true;
+  mantener[puntos.length - 1] = true;
+
+  puntos.forEach((punto, index) => {
+    if (punto.segmentStart) mantener[index] = true;
+  });
+
+  const tramos = [[0, puntos.length - 1]];
+  while (tramos.length > 0) {
+    const [inicio, fin] = tramos.pop();
+    let distanciaMaxima = 0;
+    let indiceMaximo = null;
+
+    for (let i = inicio + 1; i < fin; i += 1) {
+      const distancia = distanciaPuntoSegmentoMetros(puntos[i], puntos[inicio], puntos[fin]);
+      if (distancia > distanciaMaxima) {
+        distanciaMaxima = distancia;
+        indiceMaximo = i;
+      }
+    }
+
+    if (indiceMaximo != null && distanciaMaxima > toleranciaMetros) {
+      mantener[indiceMaximo] = true;
+      tramos.push([inicio, indiceMaximo], [indiceMaximo, fin]);
+    }
+  }
+
+  return limitarPuntosRuta(
+    puntos.filter((_, index) => mantener[index]),
+    maxPuntos
+  );
+};
+
 export const obtenerRutaTracking = () => leerJson(RUTA_KEY, []);
 
 export const obtenerMetaTracking = () => leerJson(META_KEY, null);

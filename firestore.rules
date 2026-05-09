@@ -28,6 +28,53 @@ service cloud.firestore {
         request.auth.uid in get(/databases/$(database)/documents/grupos/$(grupoId)).data.nicknames;
     }
 
+    function validSegmentCommunityCreate(segmentoId) {
+      return signedIn() &&
+        request.resource.data.segmentoCompetitivo == segmentoId &&
+        request.resource.data.keys().hasOnly([
+          'segmentoCompetitivo',
+          'territorioId',
+          'ciudadId',
+          'ciudadNombre',
+          'paisCodigo',
+          'top10',
+          'duenoGrupo',
+          'duenoGrupoPuntos',
+          'actualizadoGrupoEn',
+          'actualizadoEn'
+        ]) &&
+        (
+          !request.resource.data.keys().hasAny(['duenoGrupo']) ||
+          (
+            request.resource.data.duenoGrupo is string &&
+            isGroupMember(request.resource.data.duenoGrupo) &&
+            request.resource.data.duenoGrupoPuntos is number &&
+            request.resource.data.duenoGrupoPuntos >= 0
+          )
+        );
+    }
+
+    function validSegmentCommunityUpdate(segmentoId) {
+      return signedIn() &&
+        request.resource.data.segmentoCompetitivo == segmentoId &&
+        changedKeys().hasOnly([
+          'top10',
+          'duenoGrupo',
+          'duenoGrupoPuntos',
+          'actualizadoGrupoEn',
+          'actualizadoEn'
+        ]) &&
+        (
+          !changedKeys().hasAny(['duenoGrupo', 'duenoGrupoPuntos']) ||
+          (
+            request.resource.data.duenoGrupo is string &&
+            isGroupMember(request.resource.data.duenoGrupo) &&
+            request.resource.data.duenoGrupoPuntos is number &&
+            request.resource.data.duenoGrupoPuntos >= oldNumber('duenoGrupoPuntos')
+          )
+        );
+    }
+
     // Nickname: mínimo 3 chars, máximo 20, solo alfanuméricos y guion bajo
     function nicknameValido(nickname) {
       return nickname is string &&
@@ -59,6 +106,7 @@ service cloud.firestore {
           'nickname',
           'edad',
           'pais',
+          'genero',
           'fechaNacimiento',
           'fechaNacimientoGuardadaEn',
           'fotoPendiente',
@@ -78,8 +126,17 @@ service cloud.firestore {
           'ciudadActualNombre',
           'marcasCiudadActualId',
           'paisCodigo',
+          'ritmo30d',
+          'segmentoRitmo',
+          'segmentoGenero',
+          'segmentoEdad',
+          'segmentoCompetitivo',
+          'segmentoEtiqueta',
+          'notificacionSegmentoClave',
+          'notificacionSegmentoEn',
           'eliminacionSolicitada',
-          'eliminacionSolicitadaEn'
+          'eliminacionSolicitadaEn',
+          'actualizadoEn'
         ]);
     }
 
@@ -94,6 +151,7 @@ service cloud.firestore {
           'nickname',
           'edad',
           'pais',
+          'genero',
           'fechaNacimiento',
           'fechaNacimientoGuardadaEn',
           'fotoPendiente',
@@ -120,6 +178,14 @@ service cloud.firestore {
           'duracionTotal',
           'carrerasTotal',
           'barriosConquistadosTotal',
+          'ritmo30d',
+          'segmentoRitmo',
+          'segmentoGenero',
+          'segmentoEdad',
+          'segmentoCompetitivo',
+          'segmentoEtiqueta',
+          'notificacionSegmentoClave',
+          'notificacionSegmentoEn',
           'marcasTerritoriales',
           'marcasColecciones',
           'ultimasCarreras',
@@ -186,11 +252,20 @@ service cloud.firestore {
           'puntos',
           'puntosPersonales',
           'aportacionesGrupo',
+          'grupoActivoId',
+          'grupoActivoNombre',
           'gruposAportados',
           'territorioCarrera',
           'ciudadId',
           'ciudadNombre',
           'paisCodigo',
+          'ritmo30d',
+          'segmentoRitmo',
+          'segmentoGenero',
+          'segmentoEdad',
+          'grupoEdad',
+          'segmentoCompetitivo',
+          'segmentoEtiqueta',
           'fecha',
           'source',
           'externalProvider',
@@ -253,9 +328,12 @@ service cloud.firestore {
 
     function validGrupoMemberUpdate() {
       return signedIn() &&
+        resource.data.esPublico == true &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.ciudadActualId == resource.data.ciudadId &&
         changedKeys().hasOnly(['miembros', 'nicknames']) &&
         request.resource.data.miembros.hasAll(resource.data.miembros) &&
-        request.resource.data.miembros.hasAll([request.auth.uid]);
+        request.resource.data.miembros.hasAll([request.auth.uid]) &&
+        request.resource.data.miembros.size() == resource.data.miembros.size() + 1;
     }
 
     function validGrupoLeave() {
@@ -312,6 +390,7 @@ service cloud.firestore {
           'carrerasTotales',
           'distanciaTotal',
           'duracionTotal',
+          'barriosConquistados',
           'actualizadoEn'
         ]) &&
         (
@@ -332,6 +411,14 @@ service cloud.firestore {
             request.resource.data.distanciaTotal is number &&
             request.resource.data.distanciaTotal >= oldNumber('distanciaTotal') &&
             request.resource.data.distanciaTotal <= oldNumber('distanciaTotal') + 100000
+          )
+        ) &&
+        (
+          !changedKeys().hasAny(['barriosConquistados']) ||
+          (
+            request.resource.data.barriosConquistados is number &&
+            request.resource.data.barriosConquistados >= oldNumber('barriosConquistados') - 1 &&
+            request.resource.data.barriosConquistados <= oldNumber('barriosConquistados') + 50
           )
         );
     }
@@ -399,8 +486,13 @@ service cloud.firestore {
         allow read, delete: if isOwner(uid);
         // Escritura propia (token, notificaciones propias)
         allow write: if isOwner(uid);
-        // Escritura de notificaciones por otros usuarios autenticados (territorios perdidos)
-        allow create, update: if signedIn() && docId == 'notificaciones';
+        // Otros usuarios solo pueden añadir avisos pendientes; nunca leer ni tocar pushToken.
+        allow create: if signedIn() &&
+          docId == 'notificaciones' &&
+          request.resource.data.keys().hasOnly(['notificacionesPendientes']);
+        allow update: if signedIn() &&
+          docId == 'notificaciones' &&
+          changedKeys().hasOnly(['notificacionesPendientes']);
       }
     }
 
@@ -415,6 +507,23 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow update: if isAdmin() || validTerritoryConquestUpdate();
       allow delete: if isAdmin();
+
+      match /segmentos/{segmentoId} {
+        allow read: if signedIn();
+        allow create: if isAdmin() || (
+          signedIn() &&
+          request.resource.data.segmentoCompetitivo == segmentoId &&
+          request.resource.data.dueno == request.auth.uid
+        ) || validSegmentCommunityCreate(segmentoId);
+        allow update: if isAdmin() || (
+          signedIn() &&
+          request.resource.data.segmentoCompetitivo == segmentoId &&
+          (
+            request.resource.data.dueno == request.auth.uid ||
+            resource.data.dueno == request.auth.uid
+          )
+        ) || validSegmentCommunityUpdate(segmentoId);
+      }
     }
 
     match /territorios/{id} {
@@ -422,6 +531,23 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow update: if isAdmin() || validTerritoryConquestUpdate();
       allow delete: if isAdmin();
+
+      match /segmentos/{segmentoId} {
+        allow read: if signedIn();
+        allow create: if isAdmin() || (
+          signedIn() &&
+          request.resource.data.segmentoCompetitivo == segmentoId &&
+          request.resource.data.dueno == request.auth.uid
+        ) || validSegmentCommunityCreate(segmentoId);
+        allow update: if isAdmin() || (
+          signedIn() &&
+          request.resource.data.segmentoCompetitivo == segmentoId &&
+          (
+            request.resource.data.dueno == request.auth.uid ||
+            resource.data.dueno == request.auth.uid
+          )
+        ) || validSegmentCommunityUpdate(segmentoId);
+      }
     }
 
     match /ciudades/{id} {
@@ -451,7 +577,8 @@ service cloud.firestore {
         request.resource.data.keys().hasOnly([
           'uid', 'ciudadId', 'puntos', 'carreras', 'totalMetros', 'totalKm',
           'barrios', 'stravaVerificadas', 'nickname', 'fotoPerfil', 'fotoPerfilEstado',
-          'pais', 'topLogros', 'actualizadoEn'
+          'pais', 'genero', 'grupoEdad', 'ritmo30d', 'segmentoRitmo', 'segmentoGenero',
+          'segmentoEdad', 'segmentoCompetitivo', 'segmentoEtiqueta', 'topLogros', 'actualizadoEn'
         ])
       );
     }

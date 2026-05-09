@@ -429,6 +429,8 @@ export default function GruposScreen() {
 }
 
 function GrupoCard({ grupo, esMio, uid, onUnirse, onSalir, onExpulsar, onRegenerarCodigo, onReportar }) {
+  const esCreador = esMio && grupo.creador === uid;
+
   return (
     <View style={styles.grupoCard}>
       <View style={styles.grupoHeaderRow}>
@@ -473,9 +475,9 @@ function GrupoCard({ grupo, esMio, uid, onUnirse, onSalir, onExpulsar, onRegener
         )}
       </View>
 
-      {esMio && (
+      {esCreador && (
         <View style={styles.codigoBox}>
-          <Text style={styles.codigoLabel}>Código de invitación</Text>
+          <Text style={styles.codigoLabel}>Gestión del grupo</Text>
           <Text style={styles.codigoTexto}>{grupo.codigo}</Text>
           <View style={styles.codigoAcciones}>
             <TouchableOpacity
@@ -501,8 +503,8 @@ function GrupoCard({ grupo, esMio, uid, onUnirse, onSalir, onExpulsar, onRegener
               <Text style={styles.miembroItem}>
                 {memberId === grupo.creador ? '👑 ' : '• '}{nick}
               </Text>
-              {onExpulsar && memberId !== grupo.creador && (
-                <TouchableOpacity onPress={() => onExpulsar(memberId, nick)}>
+              {esCreador && onExpulsar && memberId !== grupo.creador && (
+                <TouchableOpacity style={styles.botonExpulsar} onPress={() => onExpulsar(memberId, nick)}>
                   <Text style={styles.botonExpulsarTexto}>Expulsar</Text>
                 </TouchableOpacity>
               )}
@@ -572,9 +574,22 @@ const styles = StyleSheet.create({
   },
   codigoLabel: { fontSize: 11, color: colors.subdued, marginBottom: 4 },
   codigoTexto: { fontSize: 22, fontWeight: 'bold', color: colors.gold, letterSpacing: 4 },
-  miembrosTitle: { fontSize: 12, color: colors.subdued, marginBottom: 4 },
-  miembroRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
-  miembroItem: { fontSize: 14, color: colors.muted },
+  miembrosTitle: { fontSize: 12, color: colors.subdued, marginBottom: 6 },
+  miembroRow: {
+    minHeight: 34,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  miembroItem: { fontSize: 14, color: colors.muted, flex: 1 },
+  botonExpulsar: {
+    borderColor: colors.conquest,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
   botonExpulsarTexto: { fontSize: 12, color: colors.conquest, fontWeight: '600' },
 
   botonUnirse: {

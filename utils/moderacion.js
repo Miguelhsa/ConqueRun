@@ -1,9 +1,8 @@
 import { db, auth } from '../firebaseConfig';
-import { EmailAuthProvider, reauthenticateWithCredential, deleteUser } from 'firebase/auth';
-import { getStorage, ref, deleteObject } from 'firebase/storage';
+import { EmailAuthProvider, reauthenticateWithCredential, signOut } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
-  addDoc, arrayRemove, arrayUnion, collection, collectionGroup,
-  deleteDoc, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where, writeBatch,
+  arrayUnion, doc, getDoc, serverTimestamp, setDoc,
 } from 'firebase/firestore';
 
 export const FOTO_ESTADOS = {
@@ -48,50 +47,13 @@ export const eliminarCuentaCompleta = async (password) => {
   const user = auth.currentUser;
   if (!user) throw new Error('no_session');
 
-  // 1. Reautenticar (Firebase exige sesión reciente para borrar cuenta)
+  // Firebase exige sesión reciente; la limpieza real necesita privilegios admin.
   const credential = EmailAuthProvider.credential(user.email, password);
   await reauthenticateWithCredential(user, credential);
 
-  const uid = user.uid;
-  const batch = writeBatch(db);
-
-  // 2. Liberar territorios conquistados
-  const terSnap = await getDocs(
-    query(collection(db, 'territorios'), where('dueno', '==', uid))
-  );
-  terSnap.docs.forEach(d => batch.update(d.ref, { dueno: null, duenoPuntos: 0 }));
-
-  // 3. Eliminar del ranking de su ciudad
-  const userSnap = await getDocs(query(collection(db, 'usuarios'), where('__name__', '==', uid)));
-  const userData = userSnap.docs[0]?.data() ?? {};
-  if (userData.ciudadActualId) {
-    batch.delete(doc(db, 'rankings', userData.ciudadActualId, 'corredores', uid));
-  }
-
-  // 4. Salir de grupos
-  const gruposSnap = await getDocs(
-    query(collection(db, 'grupos'), where('miembros', 'array-contains', uid))
-  );
-  gruposSnap.docs.forEach(d => batch.update(d.ref, { miembros: arrayRemove(uid) }));
-
-  // 5. Borrar marcasTerritoriales (subcollección)
-  const marcasSnap = await getDocs(collection(db, 'usuarios', uid, 'marcasTerritoriales'));
-  marcasSnap.docs.forEach(d => batch.delete(d.ref));
-
-  // 6. Borrar documento de usuario
-  batch.delete(doc(db, 'usuarios', uid));
-
-  await batch.commit();
-
-  // 7. Borrar foto de Storage (no crítico si falla)
-  if (userData.fotoPerfil) {
-    try {
-      await deleteObject(ref(getStorage(), userData.fotoPerfil));
-    } catch {}
-  }
-
-  // 8. Borrar cuenta de Firebase Auth (debe ser lo último)
-  await deleteUser(user);
+  const eliminarCuenta = httpsCallable(getFunctions(), 'eliminarCuenta');
+  await eliminarCuenta();
+  await signOut(auth).catch(() => {});
 };
 
 const PALABRAS_PROHIBIDAS = [

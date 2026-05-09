@@ -71,6 +71,8 @@ Problemas encontrados en la revision de codigo que deben resolverse independient
 - **Busqueda lineal O(n) de barrios** (`barrios.js:30`): `calcularBarrio` itera todos los territorios para cada punto de la ruta. Con 300 territorios y 1.000 puntos GPS son 300.000 comparaciones por carrera.
 - ~~**`formatTiempo` duplicada**: resuelto en `utils/formatters.js`.~~
 - **Codigo de grupo no criptografico** (`grupos.js:9`): `Math.random()` para generar codigos de invitacion de grupos privados. No es criptograficamente seguro.
+- **Migrar Firebase Functions fuera de Node.js 20**: Google marca Node.js 20 como deprecado desde el 30 de abril de 2026 y lo descontinua el 30 de octubre de 2026. Actualizar runtime y `firebase-functions` antes de esa fecha para evitar bloqueo de despliegues.
+- **Configurar credenciales reales de email admin en Functions**: `GMAIL_USER`, `GMAIL_PASS` y `ADMIN_EMAIL` estan en modo `disabled` para poder desplegar sin secretos locales. Hasta configurarlas con valores reales, `notificarReporte` registra el reporte pero no envia email al admin.
 
 ### Medios — afectan UX
 

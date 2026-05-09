@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, Image, TouchableOpacity, Alert, ImageBackground } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { PantallaCargando, EstadoVacio } from '../components/ui';
 import { db, auth } from '../firebaseConfig';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
@@ -14,15 +15,17 @@ export default function RankingScreen() {
   const [rankingGrupos, setRankingGrupos] = useState([]);
   const [ciudad, setCiudad] = useState(CIUDAD_FALLBACK);
   const [miResumen, setMiResumen] = useState(null);
+  const [miSegmentoCompetitivo, setMiSegmentoCompetitivo] = useState(null);
+  const [miSegmentoEtiqueta, setMiSegmentoEtiqueta] = useState(null);
   const [miPosicion, setMiPosicion] = useState(null);
   const [miPosicionFueroTop, setMiPosicionFueraTop] = useState(false);
   const [totalCorredores, setTotalCorredores] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [tab, setTab] = useState('individual');
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     cargarInicial();
-  }, []);
+  }, []));
 
   useEffect(() => {
     if (!cargando) cargarRankingCiudad(ciudad);
@@ -30,9 +33,9 @@ export default function RankingScreen() {
 
   const cargarInicial = async () => {
     try {
-      const ciudadUsuario = await cargarCiudadUsuario();
+      const { ciudad: ciudadUsuario, segmentoCompetitivo } = await cargarCiudadUsuario();
       await Promise.all([
-        cargarRankingCiudad(ciudadUsuario),
+        cargarRankingCiudad(ciudadUsuario, segmentoCompetitivo),
         cargarMiResumen(),
         cargarGrupos(ciudadUsuario.id),
       ]);
@@ -43,7 +46,7 @@ export default function RankingScreen() {
 
   const cargarCiudadUsuario = async () => {
     const uid = auth.currentUser?.uid;
-    if (!uid) return CIUDAD_FALLBACK;
+    if (!uid) return { ciudad: CIUDAD_FALLBACK, segmentoCompetitivo: null };
     const snap = await getDoc(doc(db, 'usuarios', uid));
     const data = snap.exists() ? snap.data() : {};
     const c = {
@@ -51,8 +54,11 @@ export default function RankingScreen() {
       id: data.ciudadActualId ?? CIUDAD_FALLBACK.id,
       nombre: data.ciudadActualNombre ?? CIUDAD_FALLBACK.nombre,
     };
+    const segmentoCompetitivo = data.segmentoCompetitivo ?? null;
+    setMiSegmentoCompetitivo(segmentoCompetitivo);
+    setMiSegmentoEtiqueta(data.segmentoEtiqueta ?? null);
     setCiudad(c);
-    return c;
+    return { ciudad: c, segmentoCompetitivo };
   };
 
   const cargarMiResumen = async () => {
@@ -60,27 +66,28 @@ export default function RankingScreen() {
     if (!uid) return;
     const [snap, snapTerritorios, snapBarrios] = await Promise.all([
       getDoc(doc(db, 'usuarios', uid)),
-      getDocs(query(collection(db, 'territorios'), where('dueno', '==', uid))),
-      getDocs(query(collection(db, 'barrios'), where('dueno', '==', uid))),
+      Promise.resolve({ size: 0 }),
+      Promise.resolve({ size: 0 }),
     ]);
     if (!snap.exists()) return;
     const data = snap.data();
     setMiResumen({
-      barrios: snapTerritorios.size + snapBarrios.size,
+      barrios: data.barriosConquistadosTotal ?? snapTerritorios.size + snapBarrios.size,
       puntos: data.puntosTotales ?? 0,
       nickname: data.nickname ?? 'Tú',
       fotoPerfil: data.fotoPerfil ?? null,
       fotoPerfilEstado: data.fotoPerfilEstado ?? null,
+      segmentoEtiqueta: data.segmentoEtiqueta ?? null,
     });
   };
 
-  const cargarRankingCiudad = async (c) => {
+  const cargarRankingCiudad = async (c, segmentoCompetitivo = miSegmentoCompetitivo) => {
     const uid = auth.currentUser?.uid;
 
     const [lista, miEntrada, total] = await Promise.all([
-      cargarTopRankingCiudad(c.id),
-      uid ? cargarMiEntradaRanking(c.id, uid) : Promise.resolve(null),
-      cargarTotalCorredoresCiudad(c.id),
+      cargarTopRankingCiudad(c.id, segmentoCompetitivo),
+      uid ? cargarMiEntradaRanking(c.id, uid, segmentoCompetitivo) : Promise.resolve(null),
+      cargarTotalCorredoresCiudad(c.id, segmentoCompetitivo),
     ]);
 
     setRankingCiudad(lista);
@@ -91,7 +98,7 @@ export default function RankingScreen() {
     if (uid && miEntrada) {
       const posicion = estaEnTop
         ? lista.find(item => item.uid === uid)?.posicion ?? null
-        : await cargarPosicionUsuario(c.id, miEntrada.puntos);
+        : await cargarPosicionUsuario(c.id, miEntrada.puntos, segmentoCompetitivo);
       setMiPosicion(posicion);
       setMiPosicionFueraTop(!estaEnTop);
     } else {
@@ -275,6 +282,9 @@ export default function RankingScreen() {
                       <Text style={styles.miResumenSub}>
                         {miPosicion ? `#${miPosicion} en ${ciudad.nombre}` : 'Sin carreras en esta ciudad'}
                       </Text>
+                      {miResumen.segmentoEtiqueta && (
+                        <Text style={styles.miResumenSegmento}>{miResumen.segmentoEtiqueta}</Text>
+                      )}
                     </View>
                     <View style={styles.miResumenBarrios}>
                       <Text style={styles.miResumenBarriosNum}>{miResumen.barrios}</Text>
@@ -286,7 +296,9 @@ export default function RankingScreen() {
 
               <View style={styles.headerBox}>
                 <Text style={styles.titulo}>Top 10 {ciudad.nombre}</Text>
-                <Text style={styles.subtitulo}>Puntos logrados en carreras de esta ciudad</Text>
+                <Text style={styles.subtitulo}>
+                  {miSegmentoEtiqueta ? `Tu liga: ${miSegmentoEtiqueta}` : 'Tu liga competitiva'}
+                </Text>
               </View>
             </>
           }
@@ -351,6 +363,7 @@ const styles = StyleSheet.create({
   miResumenInfo: { flex: 1 },
   miResumenNombre: { color: colors.text, fontSize: 15, fontWeight: 'bold' },
   miResumenSub: { color: colors.muted, fontSize: 12, marginTop: 2 },
+  miResumenSegmento: { color: colors.gold, fontSize: 11, fontWeight: '800', marginTop: 4 },
   miResumenBarrios: { alignItems: 'center' },
   miResumenBarriosNum: { color: colors.gold, fontSize: 22, fontWeight: 'bold' },
   miResumenBarriosLabel: { color: colors.muted, fontSize: 11 },

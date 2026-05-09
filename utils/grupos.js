@@ -1,5 +1,6 @@
 import { db, auth } from '../firebaseConfig';
 import { enviarNotificacion } from './notificaciones';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   collection, doc, addDoc, getDoc, getDocs, setDoc,
   updateDoc, arrayUnion, arrayRemove, deleteField, query, where, limit, serverTimestamp,
@@ -140,7 +141,7 @@ const comprobarLimiteGrupos = async (uid) => {
 
 const notificarCreador = async (grupoData, nicknameMiembro) => {
   if (!grupoData.creador) return;
-  const creadorSnap = await getDoc(doc(db, 'usuarios', grupoData.creador));
+  const creadorSnap = await getDoc(doc(db, 'usuarios', grupoData.creador, 'privado', 'notificaciones'));
   const token = creadorSnap.exists() ? creadorSnap.data().pushToken : null;
   if (token) {
     enviarNotificacion(token, '¡Nuevo miembro!', `${nicknameMiembro} se ha unido a ${grupoData.nombre}`).catch(() => {});
@@ -187,29 +188,10 @@ export const crearGrupo = async ({ nombre, descripcion, esPublico }, { grupoRef,
 
 // Unirse a grupo por código
 export const unirseACodigo = async (codigo) => {
-  const uid = auth.currentUser.uid;
-  const q = query(collection(db, 'grupos'), where('codigo', '==', codigo.toUpperCase()));
-  const snap = await getDocs(q);
-  if (snap.empty) throw new Error('Código incorrecto');
-
-  const grupoDoc = snap.docs[0];
-  const grupoData = grupoDoc.data();
-  const userSnap = await getDoc(doc(db, 'usuarios', uid));
-  const userData = userSnap.exists() ? userSnap.data() : {};
-  const nickname = userData.nickname ?? 'Corredor';
-
-  if (grupoData.ciudadId && userData.ciudadActualId && userData.ciudadActualId !== grupoData.ciudadId) {
-    throw new Error(`Este grupo es de ${grupoData.ciudadNombre}. Solo puedes unirte a grupos de tu ciudad.`);
-  }
-  await comprobarLimiteGrupos(uid);
-
-  await updateDoc(doc(db, 'grupos', grupoDoc.id), {
-    miembros: arrayUnion(uid),
-    [`nicknames.${uid}`]: nickname,
-  });
-
-  notificarCreador(grupoData, nickname).catch(() => {});
-  return grupoDoc.id;
+  await comprobarLimiteGrupos(auth.currentUser.uid);
+  const unirse = httpsCallable(getFunctions(), 'unirseAGrupoConCodigo');
+  const result = await unirse({ codigo });
+  return result.data?.grupoId;
 };
 
 // Unirse a grupo público

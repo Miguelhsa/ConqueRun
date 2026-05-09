@@ -1,39 +1,116 @@
 import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { db, auth } from '../firebaseConfig';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { contieneTextoProhibido } from '../utils/moderacion';
 import { PAISES } from '../utils/paises';
 import { colors, radius } from '../utils/theme';
 
+const NICKNAME_REGEX = /^[a-zA-Z0-9_áéíóúÁÉÍÓÚñÑüÜ]+$/;
+
+const normalizarFecha = (valor) => {
+  const match = valor.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return null;
+  const dia = Number(match[1]);
+  const mes = Number(match[2]);
+  const anio = Number(match[3]);
+  const fecha = new Date(anio, mes - 1, dia);
+  const ahora = new Date();
+  if (
+    fecha.getFullYear() !== anio ||
+    fecha.getMonth() !== mes - 1 ||
+    fecha.getDate() !== dia ||
+    fecha > ahora ||
+    anio < 1900
+  ) return null;
+  return `${anio}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+};
+
+const calcularEdad = (fechaISO) => {
+  const hoy = new Date();
+  const nac = new Date(fechaISO);
+  let edad = hoy.getFullYear() - nac.getFullYear();
+  const m = hoy.getMonth() - nac.getMonth();
+  if (m < 0 || (m === 0 && hoy.getDate() < nac.getDate())) edad--;
+  return edad;
+};
+
+const formatearFechaInput = (raw) => {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+};
+
 export default function NicknameScreen({ onGuardado }) {
   const [nickname, setNickname] = useState('');
-  const [pais, setPais] = useState(null);
-  const [mostrarPaises, setMostrarPaises] = useState(false);
+  const [nacionalidad, setNacionalidad] = useState(null);
+  const [genero, setGenero] = useState(null);
+  const [fechaInput, setFechaInput] = useState('');
+  const [mostrarNacionalidades, setMostrarNacionalidades] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+
+  const listo = nickname.trim().length >= 3 && nacionalidad && genero && fechaInput.length === 10;
 
   const guardar = async () => {
-    if (nickname.trim().length < 3) {
+    const nicknameLimpio = nickname.trim();
+    const usuario = auth.currentUser;
+
+    if (!usuario) {
+      Alert.alert('Sesión no disponible', 'Vuelve a iniciar sesión para continuar.');
+      return;
+    }
+    if (nicknameLimpio.length < 3) {
       Alert.alert('Nickname muy corto', 'Debe tener al menos 3 caracteres.');
       return;
     }
-    if (contieneTextoProhibido(nickname)) {
+    if (!NICKNAME_REGEX.test(nicknameLimpio)) {
+      Alert.alert('Nickname no válido', 'Usa solo letras, números y guion bajo. No incluyas espacios.');
+      return;
+    }
+    if (contieneTextoProhibido(nicknameLimpio)) {
       Alert.alert('Nickname no permitido', 'Elige un nombre que respete a la comunidad.');
       return;
     }
-    if (!pais) {
-      Alert.alert('Selecciona tu país', 'Es necesario para el ranking.');
+    if (!nacionalidad) {
+      Alert.alert('Selecciona tu nacionalidad', 'Es necesaria para mostrar tu bandera en el ranking.');
       return;
     }
+    if (!genero) {
+      Alert.alert('Selecciona tu género', 'Es necesario para las categorías del ranking.');
+      return;
+    }
+    const fechaNacimiento = normalizarFecha(fechaInput);
+    if (!fechaNacimiento) {
+      Alert.alert('Fecha no válida', 'Comprueba que la fecha esté en formato DD/MM/AAAA y sea correcta.');
+      return;
+    }
+    const edad = calcularEdad(fechaNacimiento);
+    if (edad < 13) {
+      Alert.alert('Edad mínima', 'Debes tener al menos 13 años para usar ConqueRun.');
+      return;
+    }
+    setGuardando(true);
     try {
-      await setDoc(doc(db, 'usuarios', auth.currentUser.uid), {
-        nickname,
-        pais,
+      await setDoc(doc(db, 'usuarios', usuario.uid), {
+        nickname: nicknameLimpio,
+        pais: nacionalidad,
+        genero,
+        fechaNacimiento,
+        fechaNacimientoGuardadaEn: serverTimestamp(),
         onboardingPendiente: true,
         onboardingCompletado: false,
+        actualizadoEn: serverTimestamp(),
       }, { merge: true });
       onGuardado();
-    } catch {
-      Alert.alert('Error', 'No se pudo guardar. Inténtalo de nuevo.');
+    } catch (e) {
+      console.error('[NicknameScreen] guardar perfil inicial:', e);
+      const mensaje = e.code === 'permission-denied'
+        ? 'No se pudo guardar por permisos de base de datos. Revisa que las reglas publicadas acepten género y fecha de nacimiento.'
+        : 'No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.';
+      Alert.alert('Error', mensaje);
+    } finally {
+      setGuardando(false);
     }
   };
 
@@ -44,7 +121,9 @@ export default function NicknameScreen({ onGuardado }) {
       keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.titulo}>¿Cómo te llamamos?</Text>
-      <Text style={styles.subtitulo}>Estos datos aparecerán en el ranking.</Text>
+      <Text style={styles.subtitulo}>
+        Estos datos aparecerán en el ranking. Género, nacionalidad y fecha de nacimiento no se podrán cambiar después.
+      </Text>
 
       <Text style={styles.label}>Nickname</Text>
       <TextInput
@@ -57,38 +136,65 @@ export default function NicknameScreen({ onGuardado }) {
         maxLength={20}
       />
 
-      <Text style={styles.label}>País</Text>
+      <Text style={styles.label}>Género</Text>
+      <View style={styles.generoRow}>
+        <TouchableOpacity
+          style={[styles.generoBoton, genero === 'hombre' && styles.generoActivo]}
+          onPress={() => setGenero('hombre')}
+        >
+          <Text style={[styles.generoTexto, genero === 'hombre' && styles.generoTextoActivo]}>♂ Hombre</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.generoBoton, genero === 'mujer' && styles.generoActivo]}
+          onPress={() => setGenero('mujer')}
+        >
+          <Text style={[styles.generoTexto, genero === 'mujer' && styles.generoTextoActivo]}>♀ Mujer</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.label}>Fecha de nacimiento</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="DD/MM/AAAA"
+        placeholderTextColor={colors.subdued}
+        value={fechaInput}
+        onChangeText={raw => setFechaInput(formatearFechaInput(raw))}
+        keyboardType="number-pad"
+        maxLength={10}
+      />
+
+      <Text style={styles.label}>Nacionalidad</Text>
       <TouchableOpacity
-        style={[styles.selectorBoton, pais && styles.selectorBotonActivo]}
-        onPress={() => setMostrarPaises(v => !v)}
+        style={[styles.selectorBoton, nacionalidad && styles.selectorBotonActivo]}
+        onPress={() => setMostrarNacionalidades(v => !v)}
       >
-        <Text style={[styles.selectorTexto, pais && styles.selectorTextoActivo]}>
-          {pais ? `${pais.bandera}  ${pais.nombre}` : 'Selecciona tu país'}
+        <Text style={[styles.selectorTexto, nacionalidad && styles.selectorTextoActivo]}>
+          {nacionalidad ? `${nacionalidad.bandera}  ${nacionalidad.nombre}` : 'Selecciona tu nacionalidad'}
         </Text>
-        <Text style={styles.chevron}>{mostrarPaises ? '▲' : '▼'}</Text>
+        <Text style={styles.chevron}>{mostrarNacionalidades ? '▲' : '▼'}</Text>
       </TouchableOpacity>
 
-      {mostrarPaises && (
+      {mostrarNacionalidades && (
         <View style={styles.lista}>
           {PAISES.map(p => (
             <TouchableOpacity
               key={p.nombre}
-              style={[styles.opcion, pais?.nombre === p.nombre && styles.opcionActiva]}
-              onPress={() => { setPais(p); setMostrarPaises(false); }}
+              style={[styles.opcion, nacionalidad?.nombre === p.nombre && styles.opcionActiva]}
+              onPress={() => { setNacionalidad(p); setMostrarNacionalidades(false); }}
             >
               <Text style={styles.opcionTexto}>{p.bandera}  {p.nombre}</Text>
-              {pais?.nombre === p.nombre && <Text style={styles.check}>✓</Text>}
+              {nacionalidad?.nombre === p.nombre && <Text style={styles.check}>✓</Text>}
             </TouchableOpacity>
           ))}
         </View>
       )}
 
       <TouchableOpacity
-        style={[styles.boton, (!nickname.trim() || !pais) && styles.botonDesactivado]}
+        style={[styles.boton, (!listo || guardando) && styles.botonDesactivado]}
         onPress={guardar}
-        disabled={!nickname.trim() || !pais}
+        disabled={!listo || guardando}
       >
-        <Text style={styles.botonTexto}>Entrar a conquistar</Text>
+        <Text style={styles.botonTexto}>{guardando ? 'Guardando...' : 'Continuar'}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -103,7 +209,7 @@ const styles = StyleSheet.create({
     paddingBottom: 48,
   },
   titulo: { fontSize: 32, fontWeight: '900', color: colors.text, marginBottom: 8 },
-  subtitulo: { fontSize: 15, color: colors.muted, marginBottom: 36, lineHeight: 22 },
+  subtitulo: { fontSize: 14, color: colors.muted, marginBottom: 36, lineHeight: 20 },
   label: { fontSize: 13, fontWeight: 'bold', color: colors.muted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   input: {
     backgroundColor: colors.surface,
@@ -115,6 +221,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginBottom: 24,
   },
+  generoRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 24,
+  },
+  generoBoton: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: 16,
+    alignItems: 'center',
+  },
+  generoActivo: { borderColor: colors.gold, backgroundColor: '#d6aa4c18' },
+  generoTexto: { fontSize: 16, color: colors.subdued, fontWeight: '600' },
+  generoTextoActivo: { color: colors.gold },
   selectorBoton: {
     backgroundColor: colors.surface,
     borderColor: colors.border,

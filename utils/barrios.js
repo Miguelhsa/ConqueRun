@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../firebaseConfig';
-import { collection, getDocs, doc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, updateDoc, query, where } from 'firebase/firestore';
 import { obtenerTerritoriosSeed } from './territoriosSeed';
 
 const COLECCION_TERRITORIOS = 'territorios';
@@ -203,3 +203,61 @@ export const obtenerTerritorios = async (ciudadId = null) => {
 };
 
 export const obtenerBarrios = obtenerTerritorios;
+
+export const aplicarSegmentoCompetitivo = async (territorios, segmentoCompetitivo) => {
+  if (!segmentoCompetitivo || !Array.isArray(territorios) || territorios.length === 0) {
+    return territorios;
+  }
+
+  const resultados = await Promise.all(territorios.map(territorio =>
+    getDoc(doc(db, territorio.coleccion ?? COLECCION_TERRITORIOS, territorio.id, 'segmentos', segmentoCompetitivo))
+      .then(snap => ({ snap }))
+      .catch(error => ({ error, territorio }))
+  ));
+
+  const errores = resultados.filter(r => r.error);
+  if (errores.length > 0) {
+    console.warn('[barrios] No se pudieron leer segmentos territoriales; usando propietarios base como fallback.', {
+      segmentoCompetitivo,
+      errores: errores.slice(0, 3).map(r => ({
+        id: r.territorio?.id,
+        code: r.error?.code,
+        message: r.error?.message,
+      })),
+    });
+    return territorios.map(territorio => ({
+      ...territorio,
+      segmentoCompetitivo,
+      segmentoFallback: true,
+      top10: [],
+    }));
+  }
+
+  return territorios.map((territorio, index) => {
+    const snap = resultados[index].snap;
+    if (!snap?.exists()) {
+      return {
+        ...territorio,
+        segmentoCompetitivo,
+        dueno: null,
+        duenoPuntos: 0,
+        top10: [],
+      };
+    }
+    const data = snap.data();
+    return {
+      ...territorio,
+      ...data,
+      id: territorio.id,
+      barrioId: territorio.barrioId,
+      territorioId: territorio.territorioId,
+      coleccion: territorio.coleccion,
+      segmentoCompetitivo,
+    };
+  });
+};
+
+export const obtenerBarriosSegmentados = async (ciudadId = null, segmentoCompetitivo = null) => {
+  const territorios = await obtenerTerritorios(ciudadId);
+  return aplicarSegmentoCompetitivo(territorios, segmentoCompetitivo);
+};

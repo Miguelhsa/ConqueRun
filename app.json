@@ -23,7 +23,8 @@
         {
           "faceIDPermission": "ConqueRun usa Face ID para desbloquear tu sesión guardada."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "splash": {
       "image": "./assets/splash-icon.png",

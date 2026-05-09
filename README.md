@@ -295,6 +295,7 @@ npx expo start    # servidor de desarrollo
 
 ## Roadmap
 
+- [ ] CRÍTICO: desacoplar la capa de mapa del proveedor actual y evaluar migración a MapLibre + tiles de bajo coste para reducir dependencia de Google Maps, controlar costes en Android y mantener intacta la lógica de territorios/conquistas.
 - [ ] Publicación en App Store y Google Play
 - [ ] Historial de carreras con mapa de ruta
 - [ ] Grupos: chat interno y salidas organizadas
@@ -302,6 +303,8 @@ npx expo start    # servidor de desarrollo
 - [ ] Integración con Strava
 - [ ] Expansión territorial: resto de España y ciudades internacionales
 - [ ] Conquista de ciudades completas ("Conquistador forastero")
+- [ ] Mapa de equipos: cambiar el listado de zonas para mostrar solo las conquistas agrupadas por cada grupo del usuario, sin incluir equipos rivales.
+- [x] Revisar naming de los segmentos de ritmo para que sean mas motivadores y menos jerarquicos que `Elite`, `Oro`, `Plata`, etc. Naming elegido: Explorador, Marcador, Retador, Conquistador, Señor del mapa y Leyenda.
 
 ---
 

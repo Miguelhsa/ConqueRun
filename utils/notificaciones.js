@@ -70,6 +70,17 @@ export const notificarLogro = async (logro) => {
   });
 };
 
+export const notificarSegmento = async (titulo, mensaje) => {
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: titulo,
+      body: mensaje,
+      sound: true,
+    },
+    trigger: null,
+  });
+};
+
 export const obtenerEstadoPermiso = async () => {
   const { status } = await Notifications.getPermissionsAsync();
   return status;

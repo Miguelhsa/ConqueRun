@@ -1,11 +1,12 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, Modal, FlatList, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { PantallaCargando } from '../components/ui';
 import MapView, { Polygon, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
-import { obtenerBarrios } from '../utils/barrios';
+import { obtenerBarriosSegmentados } from '../utils/barrios';
 import { obtenerCiudadCercana, obtenerCiudades, CIUDAD_FALLBACK } from '../utils/ciudades';
 import {
   getEstiloTerritorio,
@@ -32,10 +33,14 @@ export default function MapaScreen() {
   const [todasCiudades, setTodasCiudades] = useState([]);
   const [modoMapa, setModoMapa] = useState('individual');
   const [misGruposIds, setMisGruposIds] = useState(new Set());
+  const [gruposInfo, setGruposInfo] = useState({});
+  const [listadoEquiposVisible, setListadoEquiposVisible] = useState(false);
+  const [segmentoCompetitivo, setSegmentoCompetitivo] = useState(null);
+  const [segmentoEtiqueta, setSegmentoEtiqueta] = useState(null);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     cargarDatos();
-  }, []);
+  }, []));
 
   useEffect(() => {
     if (!barrioSeleccionado?.dueno) {
@@ -68,8 +73,9 @@ export default function MapaScreen() {
     setCiudad(nuevaCiudad);
     setCargando(true);
     try {
-      const data = await obtenerBarrios(nuevaCiudad.id);
+      const data = await obtenerBarriosSegmentados(nuevaCiudad.id, segmentoCompetitivo);
       setBarrios(data);
+      await cargarInfoGruposTerritoriales(data);
       setUbicacion({
         latitude: nuevaCiudad.lat,
         longitude: nuevaCiudad.lng,
@@ -79,6 +85,31 @@ export default function MapaScreen() {
     } finally {
       setCargando(false);
     }
+  };
+
+  const cargarInfoGruposTerritoriales = async (barriosData, gruposPropios = []) => {
+    const gruposPropiosPorId = Object.fromEntries(gruposPropios.map(grupo => [grupo.id, grupo]));
+    const ids = [...new Set(barriosData.map(barrio => barrio.duenoGrupo).filter(Boolean))];
+
+    if (ids.length === 0) {
+      setGruposInfo({});
+      return;
+    }
+
+    const entries = await Promise.all(ids.map(async (grupoId) => {
+      if (gruposPropiosPorId[grupoId]) {
+        return [grupoId, gruposPropiosPorId[grupoId]];
+      }
+
+      try {
+        const snap = await getDoc(doc(db, 'grupos', grupoId));
+        return [grupoId, snap.exists() ? { id: grupoId, ...snap.data() } : { id: grupoId, nombre: 'Equipo' }];
+      } catch (e) {
+        return [grupoId, { id: grupoId, nombre: 'Equipo' }];
+      }
+    }));
+
+    setGruposInfo(Object.fromEntries(entries));
   };
 
   const cargarDatos = async () => {
@@ -101,14 +132,38 @@ export default function MapaScreen() {
         setUbicacion(regionInicial);
         setRegionActual(regionInicial);
       }
-      const [ciudadCercana, misGrupos] = await Promise.all([
+      const uid = auth.currentUser?.uid;
+      const [ciudadCercana, misGrupos, userSnap, ciudades] = await Promise.all([
         obtenerCiudadCercana(puntoActual),
         obtenerMisGrupos().catch(() => []),
+        uid ? getDoc(doc(db, 'usuarios', uid)) : Promise.resolve(null),
+        obtenerCiudades().catch(() => []),
       ]);
-      setCiudad(ciudadCercana);
+      const userData = userSnap?.exists?.() ? userSnap.data() : {};
+      const segmento = userData.segmentoCompetitivo ?? null;
+      const ciudadPerfil = userData.ciudadActualId
+        ? ciudades.find(c => c.id === userData.ciudadActualId)
+        : null;
+      const ciudadObjetivo = ciudadPerfil ?? ciudadCercana;
+      setSegmentoCompetitivo(segmento);
+      setSegmentoEtiqueta(userData.segmentoEtiqueta ?? null);
+      setCiudad(ciudadObjetivo);
       setMisGruposIds(new Set(misGrupos.map(g => g.id)));
-      const data = await obtenerBarrios(ciudadCercana.id);
+      setUbicacion({
+        latitude: ciudadObjetivo.lat,
+        longitude: ciudadObjetivo.lng,
+        latitudeDelta: 0.18,
+        longitudeDelta: 0.18,
+      });
+      setRegionActual({
+        latitude: ciudadObjetivo.lat,
+        longitude: ciudadObjetivo.lng,
+        latitudeDelta: 0.18,
+        longitudeDelta: 0.18,
+      });
+      const data = await obtenerBarriosSegmentados(ciudadObjetivo.id, segmento);
       setBarrios(data);
+      await cargarInfoGruposTerritoriales(data, misGrupos);
     } catch (e) {
       console.error(e);
     } finally {
@@ -136,12 +191,45 @@ export default function MapaScreen() {
   const voronoi = useMemo(() => calcularVoronoi(barrios), [barrios]);
   const mostrarEtiquetas = shouldMostrarEtiquetas(regionActual ?? regionMapa);
   const uid = auth.currentUser?.uid;
+  const resumenEquipos = useMemo(() => barrios.reduce((acc, barrio) => {
+    if (!barrio.duenoGrupo) return acc;
+    if (misGruposIds.has(barrio.duenoGrupo)) {
+      acc.propios += 1;
+    }
+    return acc;
+  }, { propios: 0 }), [barrios, misGruposIds]);
+  const zonasPorEquipo = useMemo(() => {
+    const porEquipo = barrios.reduce((acc, barrio) => {
+      if (!barrio.duenoGrupo) return acc;
+      const grupo = gruposInfo[barrio.duenoGrupo] ?? {};
+      if (!acc[barrio.duenoGrupo]) {
+        acc[barrio.duenoGrupo] = {
+          id: barrio.duenoGrupo,
+          nombre: grupo.nombre ?? 'Equipo',
+          esPropio: misGruposIds.has(barrio.duenoGrupo),
+          zonas: [],
+          puntos: 0,
+        };
+      }
+      acc[barrio.duenoGrupo].zonas.push(barrio);
+      acc[barrio.duenoGrupo].puntos += barrio.duenoGrupoPuntos ?? 0;
+      return acc;
+    }, {});
+
+    return Object.values(porEquipo)
+      .map(equipo => ({
+        ...equipo,
+        zonas: [...equipo.zonas].sort((a, b) => getNombreTerritorio(a).localeCompare(getNombreTerritorio(b))),
+      }))
+      .sort((a, b) => Number(b.esPropio) - Number(a.esPropio) || b.zonas.length - a.zonas.length || a.nombre.localeCompare(b.nombre));
+  }, [barrios, gruposInfo, misGruposIds]);
 
   if (cargando) return <PantallaCargando />;
 
   return (
     <View style={styles.container}>
       <MapView
+        key={`${ciudad.id}_${segmentoCompetitivo ?? 'general'}_${regionMapa.latitude}_${regionMapa.longitude}`}
         style={styles.mapa}
         initialRegion={regionMapa}
         onRegionChangeComplete={setRegionActual}
@@ -154,6 +242,9 @@ export default function MapaScreen() {
           const estilo = modoMapa === 'grupos'
             ? getEstiloTerritorioGrupo(barrio, misGruposIds, seleccionado)
             : getEstiloTerritorio(barrio, seleccionado);
+          const grupoNombre = modoMapa === 'grupos' && barrio.duenoGrupo
+            ? gruposInfo[barrio.duenoGrupo]?.nombre
+            : null;
 
           return (
             <React.Fragment key={barrio.id}>
@@ -173,6 +264,9 @@ export default function MapaScreen() {
                 >
                   <View style={[styles.etiqueta, seleccionado && styles.etiquetaSeleccionada]}>
                     <Text style={styles.etiquetaTexto}>{getNombreTerritorio(barrio)}</Text>
+                    {seleccionado && grupoNombre && (
+                      <Text style={styles.etiquetaEquipoTexto}>{grupoNombre}</Text>
+                    )}
                   </View>
                 </Marker>
               )}
@@ -199,6 +293,9 @@ export default function MapaScreen() {
           barrio={barrioSeleccionado}
           duenoInfo={duenoInfo}
           uid={uid}
+          modoMapa={modoMapa}
+          misGruposIds={misGruposIds}
+          grupoInfo={barrioSeleccionado.duenoGrupo ? gruposInfo[barrioSeleccionado.duenoGrupo] : null}
           onNavegar={() => abrirNavegacion(barrioSeleccionado)}
           onCerrar={() => setBarrioSeleccionado(null)}
           onDetalle={() => setBarrioDetalle(barrioSeleccionado)}
@@ -232,6 +329,21 @@ export default function MapaScreen() {
           </TouchableOpacity>
         </View>
         <Text style={styles.ciudadTexto}>{ciudad.nombre} · {barrios.length}</Text>
+        {modoMapa === 'individual' && segmentoEtiqueta && (
+          <Text style={styles.segmentoTexto}>{segmentoEtiqueta}</Text>
+        )}
+        {modoMapa === 'grupos' && (
+          <View style={styles.resumenEquipos}>
+            <Text style={styles.resumenEquiposTexto}>Tus equipos: {resumenEquipos.propios} zonas</Text>
+            <TouchableOpacity
+              style={styles.resumenEquiposBoton}
+              onPress={() => setListadoEquiposVisible(true)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.resumenEquiposBotonTexto}>Ver zonas</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <View style={styles.leyendaItem}>
           <View style={[styles.leyendaColor, { backgroundColor: colors.gold }]} />
           <Text style={styles.leyendaTexto}>{modoMapa === 'grupos' ? 'Tu equipo' : 'Tuyo'}</Text>
@@ -252,7 +364,59 @@ export default function MapaScreen() {
         onSeleccionar={seleccionarCiudad}
         onCerrar={() => setSelectorVisible(false)}
       />
+      <ListadoZonasEquipo
+        visible={listadoEquiposVisible}
+        equipos={zonasPorEquipo}
+        onCerrar={() => setListadoEquiposVisible(false)}
+      />
     </View>
+  );
+}
+
+function ListadoZonasEquipo({ visible, equipos, onCerrar }) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onCerrar}>
+      <View style={styles.listadoOverlay}>
+        <View style={styles.listadoPanel}>
+          <View style={styles.listadoCabecera}>
+            <Text style={styles.listadoTitulo}>Zonas por equipo</Text>
+            <TouchableOpacity onPress={onCerrar}>
+              <Text style={styles.selectorCerrar}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {equipos.length === 0 ? (
+            <View style={styles.listadoVacio}>
+              <Text style={styles.listadoVacioTitulo}>Sin conquistas de equipo</Text>
+              <Text style={styles.listadoVacioTexto}>Cuando un equipo conquiste zonas, aparecerán aquí agrupadas.</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={equipos}
+              keyExtractor={item => item.id}
+              contentContainerStyle={styles.listadoContenido}
+              renderItem={({ item }) => (
+                <View style={styles.equipoBloque}>
+                  <View style={styles.equipoCabecera}>
+                    <Text style={styles.equipoNombre}>{item.nombre}</Text>
+                    <Text style={[styles.equipoTipo, item.esPropio ? styles.equipoTipoPropio : styles.equipoTipoRival]}>
+                      {item.esPropio ? 'Tu equipo' : 'Rival'}
+                    </Text>
+                  </View>
+                  <Text style={styles.equipoMeta}>{item.zonas.length} zonas · {item.puntos.toLocaleString()} pts</Text>
+                  {item.zonas.map(zona => (
+                    <View key={zona.id} style={styles.zonaFila}>
+                      <Text style={styles.zonaNombre}>{getNombreTerritorio(zona)}</Text>
+                      <Text style={styles.zonaPuntos}>{(zona.duenoGrupoPuntos ?? 0).toLocaleString()} pts</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            />
+          )}
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -350,13 +514,18 @@ function SelectorCiudad({ visible, ciudades, onSeleccionar, onCerrar }) {
   );
 }
 
-function PanelTerritorio({ barrio, duenoInfo, uid, onNavegar, onCerrar, onDetalle }) {
-  const esPropio = barrio.dueno === uid;
-  const esLibre = !barrio.dueno;
-  const esRival = barrio.dueno && !esPropio;
+function PanelTerritorio({ barrio, duenoInfo, uid, modoMapa, misGruposIds, grupoInfo, onNavegar, onCerrar, onDetalle }) {
+  const esModoGrupos = modoMapa === 'grupos';
+  const esPropio = esModoGrupos
+    ? Boolean(barrio.duenoGrupo && misGruposIds.has(barrio.duenoGrupo))
+    : barrio.dueno === uid;
+  const esLibre = esModoGrupos ? !barrio.duenoGrupo : !barrio.dueno;
+  const esRival = esModoGrupos ? Boolean(barrio.duenoGrupo && !esPropio) : Boolean(barrio.dueno && !esPropio);
+  const puntosActuales = esModoGrupos ? (barrio.duenoGrupoPuntos ?? 0) : (barrio.duenoPuntos ?? 0);
 
-  const fechaConquista = barrio.conquistadoEn?.toDate
-    ? barrio.conquistadoEn.toDate().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
+  const fechaBase = esModoGrupos ? barrio.actualizadoGrupoEn : barrio.conquistadoEn;
+  const fechaConquista = fechaBase?.toDate
+    ? fechaBase.toDate().toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
     : null;
 
   return (
@@ -365,7 +534,7 @@ function PanelTerritorio({ barrio, duenoInfo, uid, onNavegar, onCerrar, onDetall
         <Text style={styles.infoCerrarTexto}>✕</Text>
       </TouchableOpacity>
 
-      <Text style={styles.infoEyebrow}>Territorio ConqueRun</Text>
+      <Text style={styles.infoEyebrow}>{esModoGrupos ? 'Territorio de equipo' : 'Territorio ConqueRun'}</Text>
       <Text style={styles.infoNombre}>{getNombreTerritorio(barrio)}</Text>
       {barrio.distrito && (
         <Text style={styles.infoZona}>{barrio.distrito}</Text>
@@ -378,26 +547,34 @@ function PanelTerritorio({ barrio, duenoInfo, uid, onNavegar, onCerrar, onDetall
           esPropio && styles.infoDuenoPropio,
           esRival && styles.infoDuenoRival,
         ]}>
-          {esLibre ? 'Sin conquistar' : esPropio ? 'Tuyo' : 'Rival'}
+          {esLibre ? 'Sin conquistar' : esPropio ? (esModoGrupos ? 'Tu equipo' : 'Tuyo') : (esModoGrupos ? 'Otro equipo' : 'Rival')}
         </Text>
-        {duenoInfo && (
+        {!esModoGrupos && duenoInfo && (
           <Text style={styles.infoDuenoNickname}>@{duenoInfo.nickname}</Text>
         )}
       </View>
 
-      {barrio.duenoPuntos > 0 && (
+      {esModoGrupos && !esLibre && (
+        <Text style={styles.infoGrupoNombre}>
+          {esPropio ? 'Equipo tuyo' : 'Equipo rival'}: {grupoInfo?.nombre ?? 'Equipo'}
+        </Text>
+      )}
+
+      {puntosActuales > 0 && (
         <Text style={styles.infoPuntos}>
-          Marca actual: {barrio.duenoPuntos.toLocaleString()} pts
-          {esRival && ' — supérala para conquistarlo'}
+          Marca actual: {puntosActuales.toLocaleString()} pts
+          {esRival && (esModoGrupos ? ' — superadla para conquistarlo' : ' — supérala para conquistarlo')}
         </Text>
       )}
 
       {fechaConquista && (
-        <Text style={styles.infoFecha}>Conquistado el {fechaConquista}</Text>
+        <Text style={styles.infoFecha}>{esModoGrupos ? 'Actualizado el' : 'Conquistado el'} {fechaConquista}</Text>
       )}
 
       {esLibre && (
-        <Text style={styles.infoAyuda}>Zona libre. Corre aquí para conquistarla.</Text>
+        <Text style={styles.infoAyuda}>
+          {esModoGrupos ? 'Zona libre para equipos. Corre aquí con un equipo para conquistarla.' : 'Zona libre. Corre aquí para conquistarla.'}
+        </Text>
       )}
 
       <View style={styles.infoBotones}>
@@ -427,6 +604,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   etiquetaTexto: { color: colors.text, fontSize: 10, fontWeight: 'bold' },
+  etiquetaEquipoTexto: { color: colors.gold, fontSize: 9, fontWeight: '800', marginTop: 1 },
   infoPanel: {
     position: 'absolute',
     bottom: 80,
@@ -460,6 +638,7 @@ const styles = StyleSheet.create({
   infoDuenoPropio: { color: colors.gold },
   infoDuenoRival: { color: colors.conquest },
   infoDuenoNickname: { color: colors.muted, fontSize: 13 },
+  infoGrupoNombre: { color: colors.text, fontSize: 13, fontWeight: '700', marginBottom: 4 },
   infoPuntos: { fontSize: 13, color: colors.muted, marginBottom: 2 },
   infoFecha: { fontSize: 12, color: colors.subdued, marginBottom: 6 },
   infoAyuda: { fontSize: 12, color: colors.subdued, lineHeight: 17, marginBottom: 6 },
@@ -521,6 +700,18 @@ const styles = StyleSheet.create({
   modoTabTextoActivo: { color: '#080b14' },
   leyendaTitulo: { color: colors.text, fontSize: 13, fontWeight: 'bold' },
   ciudadTexto: { color: colors.gold, fontSize: 12, fontWeight: 'bold', marginBottom: 6 },
+  segmentoTexto: { color: colors.subdued, fontSize: 11, fontWeight: '700', marginBottom: 6 },
+  resumenEquipos: { borderTopColor: 'rgba(255,255,255,0.12)', borderTopWidth: 1, paddingTop: 6, marginBottom: 2, gap: 2 },
+  resumenEquiposTexto: { color: colors.subdued, fontSize: 11, fontWeight: '700' },
+  resumenEquiposBoton: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.gold,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginTop: 4,
+  },
+  resumenEquiposBotonTexto: { color: colors.bg, fontSize: 11, fontWeight: '900' },
   leyendaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   leyendaColor: { width: 12, height: 12, borderRadius: 6 },
   leyendaTexto: { color: colors.text, fontSize: 12 },
@@ -593,4 +784,54 @@ const styles = StyleSheet.create({
   selectorVolver: { flexDirection: 'row', alignItems: 'center' },
   selectorVolverTexto: { color: colors.gold, fontSize: 15, fontWeight: 'bold' },
   selectorFlecha: { color: colors.subdued, fontSize: 20 },
+  listadoOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  listadoPanel: {
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '78%',
+    paddingBottom: 16,
+  },
+  listadoCabecera: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+  },
+  listadoTitulo: { color: colors.text, fontSize: 16, fontWeight: '900' },
+  listadoContenido: { padding: 12, gap: 10 },
+  listadoVacio: { padding: 18 },
+  listadoVacioTitulo: { color: colors.text, fontSize: 15, fontWeight: '800', marginBottom: 4 },
+  listadoVacioTexto: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+  equipoBloque: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: 12,
+    gap: 7,
+  },
+  equipoCabecera: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  equipoNombre: { color: colors.text, fontSize: 15, fontWeight: '900', flex: 1 },
+  equipoTipo: { fontSize: 11, fontWeight: '900' },
+  equipoTipoPropio: { color: colors.gold },
+  equipoTipoRival: { color: colors.conquest },
+  equipoMeta: { color: colors.muted, fontSize: 12 },
+  zonaFila: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    borderTopWidth: 1,
+    paddingTop: 7,
+    gap: 10,
+  },
+  zonaNombre: { color: colors.text, fontSize: 13, fontWeight: '700', flex: 1 },
+  zonaPuntos: { color: colors.subdued, fontSize: 12, fontWeight: '700' },
 });
