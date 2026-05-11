@@ -67,6 +67,8 @@ Problemas encontrados en la revision de codigo que deben resolverse independient
 ### Altos — afectan correctitud
 
 - ~~**Bug de timezone en calcularRacha**: resuelto con normalizacion UTC.~~
+- **Post-lanzamiento critico: validar Strava OAuth en entorno real**. Probar el flujo completo fuera de Expo Go con builds instaladas de iOS y Android: boton "Importar conquistas de Strava" → login/autorizacion Strava → retorno automatico a ConqueRun → importacion de actividades → conquistas reflejadas en mapa, ranking, historial y perfil. Confirmar que el puente HTTPS de Firebase abre `conquerun://strava` en produccion y que no queda al usuario en Safari/Chrome.
+- **Post-lanzamiento critico: monitorizar errores y abandono en Strava**. Revisar logs de `stravaOAuthCallback` e `importarConquistasStrava`, errores de `redirect_uri`, usuarios que conectan pero no importan, tokens caducados, limites de API y casos sin actividades recientes. Medir coste/lecturas/escrituras de cada importacion real.
 - **AsyncStorage leido cada segundo en dos sitios a la vez** (`App.js:98` y `CorrerScreen.js:150`): el banner de carrera activa y la pantalla de correr leen AsyncStorage en paralelo cada 1 segundo durante toda la carrera. Impacto en bateria y rendimiento.
 - **Busqueda lineal O(n) de barrios** (`barrios.js:30`): `calcularBarrio` itera todos los territorios para cada punto de la ruta. Con 300 territorios y 1.000 puntos GPS son 300.000 comparaciones por carrera.
 - ~~**`formatTiempo` duplicada**: resuelto en `utils/formatters.js`.~~
@@ -304,30 +306,39 @@ La app movil envia los datos brutos de la carrera. El backend decide todo lo dem
 
 ## Fase 3 — Strava
 
-Objetivo: usar Strava como verificacion y reducir friccion para corredores que ya registran sus actividades. Estimacion: 2-5 semanas.
+Objetivo: usar Strava como fuente externa de rutas GPS para conquistar territorios, no como sustituto de estadisticas deportivas. Estimacion: 2-5 semanas.
 
 ### Arquitectura
 
-- OAuth de Strava en backend. Guardar refresh tokens protegidos en backend, nunca en el cliente.
-- Importar solo actividades tipo running.
-- Evitar duplicados por `externalActivityId`.
-- Crear proceso de importacion manual y luego automatico.
+- Hecho MVP: prueba real de Strava validada; `/activities/{id}/streams` devuelve `latlng` suficiente para calcular conquistas.
+- Hecho MVP: OAuth de Strava en backend mediante callable Firebase. Guardar refresh tokens protegidos en backend, nunca en el cliente.
+- Hecho MVP: callback HTTP de Firebase que devuelve al usuario a la app mediante deep link `conquerun://strava`.
+- Hecho MVP: boton manual en Correr para importar conquistas Strava.
+- Hecho MVP: importar solo actividades tipo running con `latlng` stream valido; si no hay ruta GPS suficiente, no se importa para ConqueRun.
+- Hecho MVP: evitar duplicados por `externalActivityId`.
+- Hecho MVP: al conectar Strava por primera vez, importar como maximo 10 carreras de los ultimos 30 dias.
+- Hecho MVP: despues de la conexion inicial, importar solo actividades nuevas desde la ultima importacion.
+- Pendiente produccion: sustituir el dominio tecnico de Cloud Functions por dominio propio/deep link universal.
+- Pendiente produccion: cifrar tokens o moverlos a almacenamiento secreto dedicado.
+- Pendiente produccion: importacion automatica mediante webhook o sincronizacion periodica con limites para no agotar la API.
 - Permitir desconectar Strava.
 - Borrar tokens si el usuario elimina la cuenta.
 
 ### Producto
 
-- Boton "Conectar Strava" en perfil.
-- Importar ultimas carreras.
-- Mostrar badge "Verificada por Strava" con datos reales importados desde backend.
+- Boton "Importar conquistas de Strava" en Correr.
+- Importar solo carreras recientes que puedan conquistar territorios.
+- Mostrar badge "Verificada por Strava" en carreras importadas que hayan sido aceptadas para conquista.
 - No publicar datos privados de Strava sin permiso claro.
-- Usar Strava principalmente para validar distancia, duracion y fecha.
+- Usar Strava principalmente para validar ruta GPS, distancia, duracion y fecha.
 
 ### Reglas
 
 - Solo backend puede crear carreras con `source = strava`.
 - Solo backend puede asignar `verificationStatus = strava_verified`.
 - El cliente nunca toca tokens de Strava.
+- Las carreras Strava solo pueden conquistar si tienen `latlng`, no son manuales, no son indoor/virtual/trainer, no estan marcadas como sospechosas y pasan las mismas validaciones de ritmo/distancia que ConqueRun.
+- No se importan carreras antiguas de mas de 30 dias para conquista.
 
 ---
 

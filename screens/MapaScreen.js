@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, Modal, FlatList, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { PantallaCargando } from '../components/ui';
-import MapView, { Polygon, Marker } from 'react-native-maps';
+import { TerritoryMap, TerritoryMarker, TerritoryPolygon } from '../components/map/MapAdapter';
 import * as Location from 'expo-location';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
@@ -228,7 +228,7 @@ export default function MapaScreen() {
 
   return (
     <View style={styles.container}>
-      <MapView
+      <TerritoryMap
         key={`${ciudad.id}_${segmentoCompetitivo ?? 'general'}_${regionMapa.latitude}_${regionMapa.longitude}`}
         style={styles.mapa}
         initialRegion={regionMapa}
@@ -248,7 +248,7 @@ export default function MapaScreen() {
 
           return (
             <React.Fragment key={barrio.id}>
-              <Polygon
+              <TerritoryPolygon
                 coordinates={polygon}
                 fillColor={estilo.fillColor}
                 strokeColor={estilo.strokeColor}
@@ -257,7 +257,7 @@ export default function MapaScreen() {
                 onPress={() => setBarrioSeleccionado(barrio)}
               />
               {(mostrarEtiquetas || seleccionado) && (
-                <Marker
+                <TerritoryMarker
                   coordinate={{ latitude: barrio.lat, longitude: barrio.lng }}
                   onPress={() => setBarrioSeleccionado(barrio)}
                   anchor={{ x: 0.5, y: 0.5 }}
@@ -268,12 +268,12 @@ export default function MapaScreen() {
                       <Text style={styles.etiquetaEquipoTexto}>{grupoNombre}</Text>
                     )}
                   </View>
-                </Marker>
+                </TerritoryMarker>
               )}
             </React.Fragment>
           );
         })}
-      </MapView>
+      </TerritoryMap>
 
       {permisoUbicacion && permisoUbicacion !== 'granted' && (
         <View style={styles.permisoPanel}>

@@ -1,5 +1,5 @@
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
-const { HttpsError, onCall } = require('firebase-functions/v2/https');
+const { HttpsError, onCall, onRequest } = require('firebase-functions/v2/https');
 const { defineString } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
@@ -11,6 +11,11 @@ initializeApp();
 const GMAIL_USER = defineString('GMAIL_USER', { default: '' });
 const GMAIL_PASS = defineString('GMAIL_PASS', { default: '' });
 const ADMIN_EMAIL = defineString('ADMIN_EMAIL', { default: '' });
+const STRAVA_CLIENT_ID = defineString('STRAVA_CLIENT_ID', { default: '' });
+const STRAVA_CLIENT_SECRET = defineString('STRAVA_CLIENT_SECRET', { default: '' });
+const STRAVA_REDIRECT_URI = defineString('STRAVA_REDIRECT_URI', {
+  default: 'https://us-central1-conquerrun-8d30e.cloudfunctions.net/stravaOAuthCallback',
+});
 
 const TIPO_LABELS = {
   grupo: 'Grupo',
@@ -203,6 +208,626 @@ function calcularPuntosSv(distancia, ritmoMedio) {
     : Math.min(1, Math.max(0.5, 1 - 0.5 * (ritmoMedio - 300) / 300));
   return Math.round(km * factorRitmo);
 }
+
+const SEGMENTOS_RITMO_SV = [
+  { id: 'elite', nombre: 'Leyenda', max: 255 },
+  { id: 'oro', nombre: 'Señor del mapa', min: 255, max: 300 },
+  { id: 'plata', nombre: 'Conquistador', min: 300, max: 345 },
+  { id: 'bronce', nombre: 'Retador', min: 345, max: 390 },
+  { id: 'popular', nombre: 'Marcador', min: 390, max: 480 },
+  { id: 'iniciacion', nombre: 'Explorador', min: 480, max: 720 },
+];
+
+function calcularGrupoEdadSv(fechaNacimiento) {
+  if (!fechaNacimiento) return 'sin_edad';
+  const hoy = new Date();
+  const nac = new Date(fechaNacimiento);
+  let edad = hoy.getFullYear() - nac.getFullYear();
+  const m = hoy.getMonth() - nac.getMonth();
+  if (m < 0 || (m === 0 && hoy.getDate() < nac.getDate())) edad--;
+  if (edad < 18) return '13-17';
+  if (edad < 30) return '18-30';
+  if (edad < 45) return '30-45';
+  if (edad < 60) return '45-60';
+  return '60+';
+}
+
+function calcularSegmentoRitmoSv(ritmoSegundosKm) {
+  if (!ritmoSegundosKm || !isFinite(ritmoSegundosKm)) return 'popular';
+  const segmento = SEGMENTOS_RITMO_SV.find(s =>
+    (s.min == null || ritmoSegundosKm >= s.min) &&
+    (s.max == null || ritmoSegundosKm < s.max)
+  );
+  return segmento?.id ?? 'popular';
+}
+
+function normalizarGeneroSegmentoSv(genero) {
+  return genero === 'hombre' || genero === 'mujer' ? genero : 'sin_genero';
+}
+
+function etiquetaSegmentoRitmoSv(segmentoRitmo) {
+  return SEGMENTOS_RITMO_SV.find(s => s.id === segmentoRitmo)?.nombre ?? 'Marcador';
+}
+
+function calcularSegmentosDesdePerfilYRitmoSv(perfil = {}, ritmo30d = null) {
+  const segmentoRitmo = calcularSegmentoRitmoSv(ritmo30d);
+  const segmentoGenero = normalizarGeneroSegmentoSv(perfil.genero);
+  const segmentoEdad = calcularGrupoEdadSv(perfil.fechaNacimiento);
+  const segmentoCompetitivo = `${segmentoRitmo}_${segmentoGenero}_${segmentoEdad}`;
+  const generoLabel = segmentoGenero === 'hombre' ? 'Hombre' : segmentoGenero === 'mujer' ? 'Mujer' : 'General';
+  return {
+    ritmo30d: ritmo30d ?? null,
+    segmentoRitmo,
+    segmentoGenero,
+    segmentoEdad,
+    grupoEdad: segmentoEdad,
+    segmentoCompetitivo,
+    segmentoEtiqueta: `${etiquetaSegmentoRitmoSv(segmentoRitmo)} · ${generoLabel} · ${segmentoEdad}`,
+  };
+}
+
+function calcularRitmo30dDesdeCarrerasSv(carreras = []) {
+  const totales = carreras.reduce((acc, carrera) => {
+    const distancia = carrera.distancia ?? carrera.totalMetros ?? 0;
+    const duracion = carrera.duracion ?? 0;
+    if (distancia <= 0 || duracion <= 0) return acc;
+    return { distancia: acc.distancia + distancia, duracion: acc.duracion + duracion };
+  }, { distancia: 0, duracion: 0 });
+
+  if (totales.distancia < 1000 || totales.duracion <= 0) return null;
+  return Math.round(totales.duracion / (totales.distancia / 1000));
+}
+
+function getDistanciaSv(a, b) {
+  return haversineMetros(a.latitude, a.longitude, b.latitude, b.longitude);
+}
+
+function calcularBarrioSv(punto, barrios) {
+  let mejor = null;
+  let mejorDist = Infinity;
+  for (const barrio of barrios) {
+    const d = getDistanciaSv(punto, { latitude: barrio.lat, longitude: barrio.lng });
+    if (d < mejorDist) {
+      mejorDist = d;
+      mejor = barrio;
+    }
+  }
+  return mejor;
+}
+
+function puntoMedioSv(a, b) {
+  return {
+    latitude: (a.latitude + b.latitude) / 2,
+    longitude: (a.longitude + b.longitude) / 2,
+  };
+}
+
+function calcularResumenTerritorialSv(ruta, barrios, puntosPersonales, distanciaTotal) {
+  if (!Array.isArray(ruta) || ruta.length < 2 || !Array.isArray(barrios) || barrios.length === 0) {
+    return [];
+  }
+
+  const acumulado = new Map();
+  for (let i = 1; i < ruta.length; i++) {
+    const anterior = ruta[i - 1];
+    const actual = ruta[i];
+    const distanciaTramo = getDistanciaSv(anterior, actual);
+    if (!distanciaTramo || !isFinite(distanciaTramo)) continue;
+
+    const barrio = calcularBarrioSv(puntoMedioSv(anterior, actual), barrios)
+      ?? calcularBarrioSv(actual, barrios)
+      ?? calcularBarrioSv(anterior, barrios);
+    if (!barrio) continue;
+
+    const previo = acumulado.get(barrio.id) ?? {
+      barrioId: barrio.id,
+      territorioId: barrio.territorioId ?? barrio.id,
+      coleccion: barrio.coleccion ?? 'barrios',
+      nombre: barrio.nombre,
+      nombreVisible: barrio.nombreVisible ?? barrio.nombre,
+      tipo: barrio.tipo ?? 'barrio',
+      ciudadId: barrio.ciudadId ?? null,
+      dueno: barrio.dueno ?? null,
+      duenoPuntos: barrio.duenoPuntos ?? 0,
+      distanciaMetros: 0,
+    };
+
+    acumulado.set(barrio.id, {
+      ...previo,
+      distanciaMetros: previo.distanciaMetros + distanciaTramo,
+    });
+  }
+
+  return [...acumulado.values()]
+    .map(item => {
+      const proporcion = distanciaTotal > 0 ? item.distanciaMetros / distanciaTotal : 0;
+      return {
+        ...item,
+        distanciaMetros: Math.round(item.distanciaMetros),
+        proporcion,
+        puntos: Math.round(puntosPersonales * proporcion),
+      };
+    })
+    .filter(item => item.distanciaMetros > 0 && item.puntos > 0)
+    .sort((a, b) => b.distanciaMetros - a.distanciaMetros);
+}
+
+function normalizarTerritorioSv(id, data, coleccion) {
+  return {
+    ...data,
+    id,
+    barrioId: id,
+    territorioId: id,
+    coleccion,
+    tipo: data.tipo ?? 'barrio',
+    nombreVisible: data.nombreVisible ?? data.nombre,
+    nombreBase: data.nombreBase ?? data.nombre,
+    radio: data.radio ?? 800,
+    dueno: data.dueno ?? null,
+    duenoPuntos: data.duenoPuntos ?? 0,
+  };
+}
+
+async function obtenerTerritoriosSegmentadosSv(ciudadId, segmentoCompetitivo) {
+  const db = getFirestore();
+  const cargar = async (coleccion) => {
+    const snap = await db.collection(coleccion).where('ciudadId', '==', ciudadId).get();
+    return snap.docs
+      .map(d => normalizarTerritorioSv(d.id, d.data(), coleccion))
+      .filter(t => typeof t.lat === 'number' && typeof t.lng === 'number' && isFinite(t.lat) && isFinite(t.lng));
+  };
+
+  let territorios = await cargar('territorios');
+  if (territorios.length === 0) territorios = await cargar('barrios');
+  if (!segmentoCompetitivo || territorios.length === 0) return territorios;
+
+  const segmentados = await Promise.all(territorios.map(async (territorio) => {
+    const snap = await db.collection(territorio.coleccion).doc(territorio.id)
+      .collection('segmentos').doc(segmentoCompetitivo).get();
+    return snap.exists ? { ...territorio, ...snap.data() } : territorio;
+  }));
+  return segmentados;
+}
+
+async function stravaFetch(path, accessToken, options = {}) {
+  const res = await fetch(`https://www.strava.com/api/v3${path}`, {
+    ...options,
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      ...(options.headers ?? {}),
+    },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new HttpsError('internal', 'Error consultando Strava.', { status: res.status, data });
+  }
+  return data;
+}
+
+async function obtenerTokenStrava(uid, code = null) {
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+  const ref = db.collection('usuarios').doc(uid).collection('privado').doc('strava');
+  const clientId = STRAVA_CLIENT_ID.value();
+  const clientSecret = STRAVA_CLIENT_SECRET.value();
+  if (!clientId || !clientSecret) {
+    throw new HttpsError('failed-precondition', 'Strava no está configurado en backend.');
+  }
+
+  if (code) {
+    const res = await fetch('https://www.strava.com/oauth/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: STRAVA_REDIRECT_URI.value(),
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new HttpsError('invalid-argument', 'No se pudo conectar Strava con ese código.', data);
+    }
+
+    await ref.set({
+      athleteId: data.athlete?.id ?? null,
+      athleteUsername: data.athlete?.username ?? null,
+      athleteFirstname: data.athlete?.firstname ?? null,
+      refreshToken: data.refresh_token,
+      accessToken: data.access_token,
+      expiresAt: data.expires_at,
+      scope: data.scope ?? null,
+      conectadoEn: FieldValue.serverTimestamp(),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    await db.collection('usuarios').doc(uid).set({
+      stravaConectado: true,
+      stravaAthleteId: data.athlete?.id ?? null,
+      stravaConectadoEn: FieldValue.serverTimestamp(),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return { accessToken: data.access_token, ref, primeraConexion: true };
+  }
+
+  const snap = await ref.get();
+  if (!snap.exists || !snap.data().refreshToken) {
+    throw new HttpsError('failed-precondition', 'Necesitas conectar Strava antes de importar.');
+  }
+  const strava = snap.data();
+  const ahora = Math.floor(Date.now() / 1000);
+  if (strava.accessToken && strava.expiresAt && strava.expiresAt > ahora + 120) {
+    return { accessToken: strava.accessToken, ref, primeraConexion: false };
+  }
+
+  const res = await fetch('https://www.strava.com/oauth/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: strava.refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new HttpsError('internal', 'No se pudo refrescar la conexión con Strava.', data);
+  }
+
+  await ref.set({
+    refreshToken: data.refresh_token,
+    accessToken: data.access_token,
+    expiresAt: data.expires_at,
+    actualizadoEn: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return { accessToken: data.access_token, ref, primeraConexion: false };
+}
+
+function motivoIgnorarActividad(activity) {
+  const tipo = activity.sport_type ?? activity.type;
+  if (!['Run', 'TrailRun'].includes(tipo)) return 'no_running';
+  if (activity.manual) return 'manual';
+  if (activity.trainer) return 'indoor_trainer';
+  if (activity.flagged) return 'flagged';
+  if ((activity.distance ?? 0) < 200) return 'distancia_minima';
+  if ((activity.moving_time ?? 0) < 60) return 'duracion_minima';
+  const ritmo = activity.distance > 0 ? activity.moving_time / (activity.distance / 1000) : 0;
+  if (!ritmo || !isFinite(ritmo)) return 'ritmo_invalido';
+  if (ritmo < 150) return 'ritmo_demasiado_rapido';
+  if (ritmo > 1200) return 'ritmo_demasiado_lento';
+  return null;
+}
+
+exports.stravaOAuthCallback = onRequest((req, res) => {
+  const code = String(req.query.code ?? '').trim();
+  const error = String(req.query.error ?? '').trim();
+  const scope = String(req.query.scope ?? '').trim();
+  const state = String(req.query.state ?? '').trim();
+  const params = new URLSearchParams();
+  if (code) params.set('code', code);
+  if (error) params.set('error', error);
+  if (scope) params.set('scope', scope);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  let stateDeepLink = null;
+  try {
+    const stateData = state ? JSON.parse(state) : {};
+    const returnUrl = String(stateData.returnUrl ?? '').trim();
+    const parsed = new URL(returnUrl);
+    if (['conquerun:', 'exp:', 'exps:', 'exp+conqurun:'].includes(parsed.protocol)) {
+      stateDeepLink = `${returnUrl}${returnUrl.includes('?') ? '&' : '?'}${params.toString()}`;
+    }
+  } catch (e) {
+    stateDeepLink = null;
+  }
+  const deepLink = `conquerun://strava${query}`;
+  const expoDeepLink = `exp+conqurun://strava${query}`;
+  const primaryDeepLink = stateDeepLink ?? deepLink;
+
+  res.status(200).send(`<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Volviendo a ConqueRun</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#080b14;color:#f7f1df;margin:0;display:grid;min-height:100vh;place-items:center;padding:24px}
+    main{max-width:420px;text-align:center}
+    h1{font-size:24px;margin:0 0 12px}
+    p{color:#aeb6c8;line-height:1.45}
+    a{display:block;margin-top:14px;background:#fc4c02;color:white;text-decoration:none;font-weight:800;padding:14px 18px;border-radius:10px}
+    a.secondary{background:#1d2638}
+  </style>
+  <script>
+    const appLink = ${JSON.stringify(primaryDeepLink)};
+    const devLink = ${JSON.stringify(expoDeepLink)};
+    window.location.href = appLink;
+    setTimeout(() => { window.location.href = devLink; }, 900);
+  </script>
+</head>
+<body>
+  <main>
+    <h1>Volviendo a ConqueRun</h1>
+    <p>Si la app no se abre automaticamente, toca una de estas opciones.</p>
+    <a href="${primaryDeepLink}">Abrir ConqueRun</a>
+    <a class="secondary" href="${expoDeepLink}">Abrir version de desarrollo</a>
+  </main>
+</body>
+</html>`);
+});
+
+exports.importarConquistasStrava = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para importar desde Strava.');
+  }
+
+  const db = getFirestore();
+  const { FieldValue, Timestamp } = require('firebase-admin/firestore');
+  const code = String(request.data?.code ?? '').trim() || null;
+  const { accessToken, ref: stravaRef, primeraConexion } = await obtenerTokenStrava(uid, code);
+
+  const usuarioSnap = await db.collection('usuarios').doc(uid).get();
+  if (!usuarioSnap.exists) {
+    throw new HttpsError('failed-precondition', 'Perfil de usuario no encontrado.');
+  }
+  const perfil = usuarioSnap.data();
+  const ciudadId = perfil.ciudadActualId ?? 'es-madrid';
+  const ciudadNombre = perfil.ciudadActualNombre ?? 'Madrid';
+  const paisCodigo = perfil.paisCodigo ?? 'ES';
+
+  const stravaSnap = await stravaRef.get();
+  const stravaData = stravaSnap.data() ?? {};
+  const ultimaImportacionMs = stravaData.ultimaImportacionEn?.toMillis?.() ?? null;
+  const afterMs = ultimaImportacionMs ?? (Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const after = Math.floor(afterMs / 1000);
+  const activities = await stravaFetch(`/athlete/activities?per_page=30&after=${after}`, accessToken);
+  const candidatas = activities
+    .filter(activity => ['Run', 'TrailRun'].includes(activity.sport_type ?? activity.type))
+    .slice(0, primeraConexion ? 10 : 30)
+    .reverse();
+
+  const desde30d = Timestamp.fromMillis(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const carreras30dSnap = await db.collection('carreras')
+    .where('uid', '==', uid)
+    .where('fecha', '>=', desde30d)
+    .get();
+  const carreras30dBase = carreras30dSnap.docs.map(d => d.data());
+  const resultados = [];
+  let ultimasCarrerasBase = perfil.ultimasCarreras ?? [];
+  let importadas = 0;
+  let conquistadasTotal = 0;
+
+  for (const activity of candidatas) {
+    const carreraId = `${uid}_strava_${activity.id}`;
+    const carreraRef = db.collection('carreras').doc(carreraId);
+    const existente = await carreraRef.get();
+    if (existente.exists) {
+      resultados.push({ id: activity.id, nombre: activity.name, estado: 'ignorada', motivo: 'duplicada' });
+      continue;
+    }
+
+    const motivoBase = motivoIgnorarActividad(activity);
+    if (motivoBase) {
+      resultados.push({ id: activity.id, nombre: activity.name, estado: 'ignorada', motivo: motivoBase });
+      continue;
+    }
+
+    const streams = await stravaFetch(
+      `/activities/${activity.id}/streams?keys=latlng,time,distance,moving&key_by_type=true`,
+      accessToken
+    );
+    const latlng = streams?.latlng?.data ?? [];
+    if (!Array.isArray(latlng) || latlng.length < 2) {
+      resultados.push({ id: activity.id, nombre: activity.name, estado: 'ignorada', motivo: 'sin_latlng' });
+      continue;
+    }
+
+    const startMs = new Date(activity.start_date).getTime();
+    const tiempos = streams?.time?.data ?? [];
+    const ruta = latlng.map(([latitude, longitude], index) => ({
+      latitude,
+      longitude,
+      timestamp: startMs + ((tiempos[index] ?? 0) * 1000),
+      segmentStart: index === 0,
+    }));
+    const distancia = Math.round(activity.distance ?? (streams?.distance?.data?.at?.(-1) ?? calcularDistanciaRuta(ruta)));
+    const duracion = Math.round(activity.moving_time ?? activity.elapsed_time ?? 0);
+    const ritmoMedio = distancia > 0 ? Math.round(duracion / (distancia / 1000)) : 0;
+    const puntos = calcularPuntosSv(distancia, ritmoMedio);
+    const ritmo30d = calcularRitmo30dDesdeCarrerasSv([
+      ...carreras30dBase,
+      ...resultados.filter(r => r.carreraResumen).map(r => r.carreraResumen),
+      { distancia, duracion },
+    ]);
+    const segmentos = calcularSegmentosDesdePerfilYRitmoSv(perfil, ritmo30d);
+    const territorios = await obtenerTerritoriosSegmentadosSv(ciudadId, segmentos.segmentoCompetitivo);
+    const territorioCarrera = calcularResumenTerritorialSv(ruta, territorios, puntos, distancia);
+    if (territorioCarrera.length === 0) {
+      resultados.push({ id: activity.id, nombre: activity.name, estado: 'ignorada', motivo: 'sin_territorio' });
+      continue;
+    }
+
+    const conquistados = territorioCarrera.filter(b => b.duenoPuntos < b.puntos);
+    const nuevosTerritorios = conquistados.filter(b => b.dueno !== uid);
+    const fechaCarrera = Timestamp.fromDate(new Date(activity.start_date));
+    const carreraResumen = {
+      id: carreraId,
+      fecha: new Date(activity.start_date).getTime(),
+      distancia,
+      duracion,
+      ritmoMedio,
+      puntos,
+      puntosPersonales: puntos,
+      source: 'strava',
+      externalProvider: 'strava',
+      externalActivityId: String(activity.id),
+      verificationStatus: 'strava_verified',
+      stravaActivityUrl: `https://www.strava.com/activities/${activity.id}`,
+    };
+    const ultimasCarreras = [carreraResumen, ...ultimasCarrerasBase]
+      .sort((a, b) => (b.fecha ?? 0) - (a.fecha ?? 0))
+      .slice(0, 3);
+
+    const batch = db.batch();
+    batch.set(carreraRef, {
+      uid,
+      ruta,
+      distancia,
+      duracion,
+      ritmoMedio,
+      puntos,
+      puntosPersonales: puntos,
+      aportacionesGrupo: [],
+      grupoActivoId: null,
+      grupoActivoNombre: null,
+      gruposAportados: [],
+      territorioCarrera,
+      ciudadId,
+      ciudadNombre,
+      paisCodigo,
+      ...segmentos,
+      fecha: fechaCarrera,
+      source: 'strava',
+      externalProvider: 'strava',
+      externalActivityId: String(activity.id),
+      verificationStatus: 'strava_verified',
+      importedAt: FieldValue.serverTimestamp(),
+      stravaActivityUrl: `https://www.strava.com/activities/${activity.id}`,
+      stravaSportType: activity.sport_type ?? activity.type ?? null,
+      stravaRawVisibility: activity.visibility ?? null,
+    });
+
+    for (const barrio of territorioCarrera) {
+      batch.set(
+        db.collection('usuarios').doc(uid).collection('marcasTerritoriales').doc(`${barrio.barrioId}_${segmentos.segmentoCompetitivo}`),
+        {
+          territorioId: barrio.barrioId,
+          puntos: FieldValue.increment(barrio.puntos),
+          coleccion: barrio.coleccion,
+          ciudadId,
+          segmentoCompetitivo: segmentos.segmentoCompetitivo,
+          actualizadoEn: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    batch.set(db.collection('usuarios').doc(uid), {
+      puntosTotales: FieldValue.increment(puntos),
+      distanciaTotal: FieldValue.increment(distancia),
+      duracionTotal: FieldValue.increment(duracion),
+      carrerasTotal: FieldValue.increment(1),
+      ...(nuevosTerritorios.length > 0 && { barriosConquistadosTotal: FieldValue.increment(nuevosTerritorios.length) }),
+      ciudadActualId: ciudadId,
+      ciudadActualNombre: ciudadNombre,
+      paisCodigo,
+      ...segmentos,
+      ultimasCarreras,
+      actualizadoEn: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    for (const barrio of conquistados) {
+      batch.set(
+        db.collection(barrio.coleccion).doc(barrio.barrioId).collection('segmentos').doc(segmentos.segmentoCompetitivo),
+        {
+          territorioId: barrio.barrioId,
+          ciudadId,
+          ciudadNombre,
+          paisCodigo,
+          segmentoRitmo: segmentos.segmentoRitmo,
+          segmentoGenero: segmentos.segmentoGenero,
+          segmentoEdad: segmentos.segmentoEdad,
+          segmentoCompetitivo: segmentos.segmentoCompetitivo,
+          segmentoEtiqueta: segmentos.segmentoEtiqueta,
+          dueno: uid,
+          duenoPuntos: barrio.puntos,
+          conquistadoEn: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    batch.set(db.collection('rankingsCiudad').doc(`${ciudadId}_${uid}`), {
+      ciudadId,
+      uid,
+      puntos: FieldValue.increment(puntos),
+      carreras: FieldValue.increment(1),
+      totalMetros: FieldValue.increment(distancia),
+      stravaVerificadas: FieldValue.increment(1),
+      nickname: perfil.nickname ?? 'Corredor anónimo',
+      fotoPerfil: perfil.fotoPerfil ?? null,
+      fotoPerfilEstado: perfil.fotoPerfilEstado ?? null,
+      pais: perfil.pais ?? null,
+      genero: perfil.genero ?? null,
+      grupoEdad: segmentos.segmentoEdad,
+      ritmo30d: segmentos.ritmo30d,
+      segmentoRitmo: segmentos.segmentoRitmo,
+      segmentoGenero: segmentos.segmentoGenero,
+      segmentoEdad: segmentos.segmentoEdad,
+      segmentoCompetitivo: segmentos.segmentoCompetitivo,
+      segmentoEtiqueta: segmentos.segmentoEtiqueta,
+      topLogros: (perfil.logros ?? []).slice(0, 3),
+      barrios: FieldValue.increment(nuevosTerritorios.length),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    await batch.commit();
+
+    for (const barrio of territorioCarrera) {
+      const barrioSegmentoRef = db.collection(barrio.coleccion).doc(barrio.barrioId)
+        .collection('segmentos').doc(segmentos.segmentoCompetitivo);
+      const [marcaSnap, barrioSnap] = await Promise.all([
+        db.collection('usuarios').doc(uid).collection('marcasTerritoriales')
+          .doc(`${barrio.barrioId}_${segmentos.segmentoCompetitivo}`).get(),
+        barrioSegmentoRef.get(),
+      ]);
+      const totalPuntosUsuario = marcaSnap.exists ? (marcaSnap.data().puntos ?? 0) : barrio.puntos;
+      const currentTop10 = barrioSnap.data()?.top10 ?? [];
+      const newTop10 = [...currentTop10.filter(e => e.uid !== uid), { uid, puntos: totalPuntosUsuario }]
+        .sort((a, b) => b.puntos - a.puntos)
+        .slice(0, 10);
+      await barrioSegmentoRef.set({
+        top10: newTop10,
+        segmentoCompetitivo: segmentos.segmentoCompetitivo,
+        territorioId: barrio.barrioId,
+        ciudadId,
+        ciudadNombre,
+        paisCodigo,
+        actualizadoEn: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    importadas += 1;
+    conquistadasTotal += nuevosTerritorios.length;
+    ultimasCarrerasBase = ultimasCarreras;
+    resultados.push({
+      id: activity.id,
+      nombre: activity.name,
+      estado: 'importada',
+      puntos,
+      distancia,
+      territorios: territorioCarrera.length,
+      conquistas: nuevosTerritorios.length,
+      carreraResumen,
+    });
+  }
+
+  await stravaRef.set({
+    ultimaImportacionEn: FieldValue.serverTimestamp(),
+    actualizadoEn: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  return {
+    ok: true,
+    primeraConexion,
+    revisadas: candidatas.length,
+    importadas,
+    conquistadas: conquistadasTotal,
+    resultados: resultados.map(({ carreraResumen, ...rest }) => rest),
+  };
+});
 
 exports.validarCarrera = onDocumentCreated('carreras/{carreraId}', async (event) => {
   const data = event.data.data();

@@ -29,12 +29,20 @@ Ideas buenas para implementar cuando ConqueRun pase revisión de App Store / Goo
 
 ## Strava
 
-- Implementar OAuth de Strava en backend, nunca en la app móvil.
-- Guardar tokens de Strava cifrados o protegidos en backend.
-- Implementar refresh token automático.
-- Importar solo actividades tipo running.
-- Evitar duplicados por `externalActivityId`.
-- Marcar actividades importadas como `strava_verified`.
+- Hecho MVP: prueba real con GPS validada; Strava devuelve `latlng` en `/activities/{id}/streams`.
+- Hecho MVP: OAuth de Strava en backend, nunca en la app móvil.
+- Hecho MVP: refresh token automático.
+- Hecho MVP: importacion manual desde pantalla Correr.
+- Hecho MVP: callback de Firebase + deep link para que el usuario vuelva automaticamente a ConqueRun sin copiar codigos.
+- Hecho MVP: importar solo actividades tipo running con `latlng` stream valido para conquista.
+- Hecho MVP: al conectar Strava por primera vez, importar maximo 10 carreras de los ultimos 30 dias.
+- Hecho MVP: despues de conectar, importar solo actividades nuevas desde la ultima importacion.
+- Hecho MVP: no importar carreras Strava solo para estadisticas; si no pueden conquistar, se ignoran.
+- Hecho MVP: evitar duplicados por `externalActivityId`.
+- Hecho MVP: marcar actividades importadas como `strava_verified`.
+- Sustituir el dominio tecnico de callback OAuth de Strava por dominio propio/deep link universal antes de producción.
+- Guardar tokens de Strava cifrados o protegidos en almacenamiento dedicado antes de producción.
+- Añadir importacion automatica mediante webhook o sincronizacion programada con limites.
 - Mostrar "View on Strava" solo cuando esté permitido.
 - Revisar cumplimiento de Strava API Agreement antes de mostrar datos de actividad a otros usuarios.
 - Añadir desconexión de Strava y eliminación de tokens.

@@ -234,6 +234,15 @@ Las marcas territoriales (puntos acumulados por barrio) viven en `usuarios/{uid}
 ### Rate limiting de reportes
 El ID del documento es `{uid}_{recursoId}`. Si el doc ya existe, la escritura falla por la regla `noReporteRepetido()`. Sin coste de Cloud Functions.
 
+### Capa de mapa desacoplada
+Las pantallas no deben importar directamente `react-native-maps`. Deben usar `components/map/MapAdapter.js` (`TerritoryMap`, `TerritoryPolygon`, `TerritoryMarker`, `RouteLine`, `TerritoryCircle`). La lógica de territorios, segmentos, puntos y conquistas vive fuera del proveedor de mapa para poder migrar a MapLibre + tiles de bajo coste sin tocar la lógica competitiva.
+
+### Google Maps en iOS
+El adaptador fuerza Google Maps como proveedor en iOS. Para compilar la app iOS hay que habilitar **Maps SDK for iOS** en Google Cloud, crear una API key restringida al bundle `com.conquerun.app` y sustituir `REPLACE_WITH_GOOGLE_MAPS_IOS_API_KEY` en `ios/ConqueRun/Info.plist`. Despues hay que ejecutar `pod install` dentro de `ios/` o regenerar el build nativo.
+
+### Google Maps en Android
+Android usa Google Maps mediante `react-native-maps`. La key vive en `app.json` (`android.config.googleMaps.apiKey`) y en el `AndroidManifest.xml` nativo. En Google Cloud debe estar restringida a **Maps SDK for Android**, package `com.conquerun.app` y el SHA-1 del keystore de producción.
+
 ---
 
 ## Scripts de datos
@@ -295,12 +304,12 @@ npx expo start    # servidor de desarrollo
 
 ## Roadmap
 
-- [ ] CRÍTICO: desacoplar la capa de mapa del proveedor actual y evaluar migración a MapLibre + tiles de bajo coste para reducir dependencia de Google Maps, controlar costes en Android y mantener intacta la lógica de territorios/conquistas.
+- [ ] CRÍTICO: evaluar migración del adaptador de mapa a MapLibre + tiles de bajo coste para reducir dependencia de Google Maps, controlar costes en Android y mantener intacta la lógica de territorios/conquistas.
 - [ ] Publicación en App Store y Google Play
 - [ ] Historial de carreras con mapa de ruta
 - [ ] Grupos: chat interno y salidas organizadas
 - [ ] Selector de país en ranking (filtro por país)
-- [ ] Integración con Strava
+- [x] Integración MVP con Strava orientada a conquistas: botón en Correr, OAuth backend, callback automático a la app, importar máximo 10 carreras de los últimos 30 días al conectar y después solo actividades nuevas con `latlng` válido.
 - [ ] Expansión territorial: resto de España y ciudades internacionales
 - [ ] Conquista de ciudades completas ("Conquistador forastero")
 - [ ] Mapa de equipos: cambiar el listado de zonas para mostrar solo las conquistas agrupadas por cada grupo del usuario, sin incluir equipos rivales.

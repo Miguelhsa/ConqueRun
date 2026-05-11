@@ -3,7 +3,7 @@ import { colors } from './theme';
 
 export const MAP_PROVIDER = {
   ACTUAL: 'react-native-maps',
-  FUTURO: 'google-maps',
+  FUTURO: 'maplibre',
 };
 
 export const getEstadoTerritorio = (territorio, uid = auth.currentUser?.uid) => {

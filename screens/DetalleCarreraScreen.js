@@ -1,5 +1,5 @@
 import { Modal, View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import MapView, { Polyline } from 'react-native-maps';
+import { RouteLine, TerritoryMap } from '../components/map/MapAdapter';
 import { colors, radius } from '../utils/theme';
 import { formatTiempo, formatRitmo } from '../utils/formatters';
 import { esCarreraPuntuable, esCarreraStravaVerificada, ESTADOS_VERIFICACION } from '../utils/carreras';
@@ -47,9 +47,9 @@ export default function DetalleCarreraScreen({ carrera, onClose }) {
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.container}>
         {region && ruta.length > 1 ? (
-          <MapView style={styles.mapa} initialRegion={region} scrollEnabled={false} zoomEnabled={false}>
-            <Polyline coordinates={ruta} strokeColor={colors.gold} strokeWidth={4} />
-          </MapView>
+          <TerritoryMap style={styles.mapa} initialRegion={region} scrollEnabled={false} zoomEnabled={false}>
+            <RouteLine coordinates={ruta} strokeColor={colors.gold} strokeWidth={4} />
+          </TerritoryMap>
         ) : (
           <View style={styles.mapaVacio}>
             <Text style={styles.mapaVacioTexto}>Sin ruta registrada</Text>

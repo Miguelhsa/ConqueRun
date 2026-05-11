@@ -2,6 +2,7 @@
   "expo": {
     "name": "ConqueRun",
     "slug": "conqurun",
+    "scheme": "conquerun",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -46,6 +47,11 @@
       "bundleIdentifier": "com.conquerun.app"
     },
     "android": {
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDLx9lkmn7dtcDKAN6E3bvfbD0-WWWoULI"
+        }
+      },
       "permissions": [
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",

@@ -1,5 +1,5 @@
 import { Modal, View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking } from 'react-native';
-import MapView, { Circle, Marker } from 'react-native-maps';
+import { TerritoryCircle, TerritoryMap, TerritoryMarker } from '../components/map/MapAdapter';
 import { auth } from '../firebaseConfig';
 import { getNombreTerritorio } from '../utils/mapaTerritorios';
 import { colors, radius } from '../utils/theme';
@@ -40,23 +40,23 @@ export default function DetalleBarrioScreen({ barrio, duenoInfo, onClose }) {
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.container}>
-        <MapView style={styles.mapa} initialRegion={regionMapa} scrollEnabled={false} zoomEnabled={false}>
-          <Circle
+        <TerritoryMap style={styles.mapa} initialRegion={regionMapa} scrollEnabled={false} zoomEnabled={false}>
+          <TerritoryCircle
             center={{ latitude: barrio.lat, longitude: barrio.lng }}
             radius={barrio.radio}
             fillColor={`${colorEstado}44`}
             strokeColor={colorEstado}
             strokeWidth={3}
           />
-          <Marker
+          <TerritoryMarker
             coordinate={{ latitude: barrio.lat, longitude: barrio.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
           >
             <View style={[styles.etiquetaMapa, { borderColor: colorEstado }]}>
               <Text style={styles.etiquetaMapaTexto}>{getNombreTerritorio(barrio)}</Text>
             </View>
-          </Marker>
-        </MapView>
+          </TerritoryMarker>
+        </TerritoryMap>
 
         <TouchableOpacity style={styles.botonCerrar} onPress={onClose}>
           <Text style={styles.botonCerrarTexto}>✕</Text>
