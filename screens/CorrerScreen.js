@@ -4,26 +4,23 @@ import { RouteLine, TerritoryMap } from '../components/map/MapAdapter';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import { db, auth } from '../firebaseConfig';
-import { serverTimestamp, doc, getDoc, increment, setDoc, updateDoc, writeBatch, arrayUnion } from 'firebase/firestore';
+import { serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { obtenerBarriosSegmentados, buildIndiceEspacial, calcularBarrio, calcularResumenTerritorial, invalidarCacheTerritorios } from '../utils/barrios';
-import { enviarNotificacion, notificarConquista, notificarLogro, notificarSegmento } from '../utils/notificaciones';
-import { comprobarYNotificarLogros } from '../utils/comprobarLogros';
+import { notificarConquista, notificarLogro, notificarSegmento } from '../utils/notificaciones';
 import {
-  calcularAportacionesGrupo,
   calcularPuntos,
   obtenerMisGrupos,
-  registrarAportacionesGrupo,
   validarCarrera,
 } from '../utils/grupos';
-import { crearCarreraConqurun, normalizarCarrera, esCarreraPuntuable } from '../utils/carreras';
-import { calcularRachaIncremental } from '../utils/logros';
-import { refRanking } from '../utils/rankingsCiudad';
+import { normalizarCarrera, esCarreraPuntuable } from '../utils/carreras';
+import { LOGROS } from '../utils/logros';
 import { calcularAvisoProximoSegmento, calcularSegmentos30d, calcularSegmentosDesdePerfilYRitmo } from '../utils/segmentos';
 import { obtenerCiudadCercana, CIUDAD_FALLBACK } from '../utils/ciudades';
 import { colors, radius } from '../utils/theme';
 import { formatTiempo, formatRitmo } from '../utils/formatters';
 import {
+  GPS_ACCURACY_MAX_METROS,
   agregarPuntosTracking,
   calcularDistanciaFiltrada,
   limpiarTrackingCarrera,
@@ -44,6 +41,7 @@ const STRAVA_REDIRECT_URI = 'https://us-central1-conquerrun-8d30e.cloudfunctions
 
 export default function CorrerScreen() {
   const [corriendo, setCorriendo] = useState(false);
+  const [gpsDebil, setGpsDebil] = useState(false);
   const [ruta, setRuta] = useState([]);
   const [ubicacion, setUbicacion] = useState(null);
   const [distancia, setDistancia] = useState(0);
@@ -153,6 +151,7 @@ export default function CorrerScreen() {
 
     if (!ultimoPunto) return { ruta: rutaTracking, distancia: distanciaActual, segundos: segundosActuales };
 
+    setGpsDebil(ultimoPunto.accuracy != null && ultimoPunto.accuracy > GPS_ACCURACY_MAX_METROS);
     setUbicacion({ ...ultimoPunto, latitudeDelta: 0.01, longitudeDelta: 0.01 });
     await cargarCiudadYBarrios(ultimoPunto);
 
@@ -274,8 +273,14 @@ export default function CorrerScreen() {
     const uid = auth.currentUser.uid;
 
     try {
-      const userSnap = await getDoc(doc(db, 'usuarios', uid));
-      perfilRef.current = userSnap.exists() ? userSnap.data() : {};
+      const [userSnap, privadoSnap] = await Promise.all([
+        getDoc(doc(db, 'usuarios', uid)),
+        getDoc(doc(db, 'usuarios', uid, 'privado', 'datos')),
+      ]);
+      perfilRef.current = {
+        ...(userSnap.exists() ? userSnap.data() : {}),
+        ...(privadoSnap.exists() ? privadoSnap.data() : {}),
+      };
       if (!perfilRef.current.segmentoCompetitivo) {
         perfilRef.current = {
           ...perfilRef.current,
@@ -288,7 +293,7 @@ export default function CorrerScreen() {
         const aceptado = await new Promise(resolve => {
           Alert.alert(
             'Uso de ubicación',
-            'ConqueRun usa tu ubicación mientras grabas una carrera para medir distancia, ritmo y conquistar barrios. No se usa para publicidad.',
+            'ConqueRun accede a tu ubicación GPS para grabar carreras. En el siguiente paso pediremos acceso incluso cuando la app esté cerrada o en segundo plano, necesario para no perder la ruta al bloquear el móvil.\n\nSe usa exclusivamente para medir distancia, ritmo y conquistar barrios. No se usa para publicidad ni se comparte con terceros.',
             [
               { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
               { text: 'Continuar', onPress: () => resolve(true) },
@@ -311,11 +316,23 @@ export default function CorrerScreen() {
       }
 
       let permiteSegundoPlano = false;
-      try {
-        const background = await Location.requestBackgroundPermissionsAsync();
-        permiteSegundoPlano = background.status === 'granted';
-      } catch {
-        // El dispositivo no soporta permisos en segundo plano — seguimos en primer plano
+      const aceptaSegundoPlano = await new Promise(resolve => {
+        Alert.alert(
+          'Ubicación en segundo plano',
+          'Para grabar la carrera completa cuando bloqueas el móvil o cambias de aplicación, ConqueRun necesita acceder a tu ubicación incluso cuando la app esté cerrada o no estés usándola.\n\nSin este permiso la ruta puede tener huecos.',
+          [
+            { text: 'Solo mientras uso la app', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Permitir siempre', onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (aceptaSegundoPlano) {
+        try {
+          const background = await Location.requestBackgroundPermissionsAsync();
+          permiteSegundoPlano = background.status === 'granted';
+        } catch {
+          // El dispositivo no soporta permisos en segundo plano — seguimos en primer plano
+        }
       }
 
       setRuta([]);
@@ -451,174 +468,25 @@ export default function CorrerScreen() {
       distanciaFinal
     );
     const territorio = clasificarTerritorio(territorioCarrera, uid);
-    const randomBytes = new Uint8Array(6);
-    crypto.getRandomValues(randomBytes);
-    const randomHex = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-    const carreraId = `${uid}_${Date.now()}_${randomHex}`;
-    const aportacionesGrupo = calcularAportacionesGrupo(gruposCarrera, puntos, carreraId, uid);
     const rutaParaGuardar = simplificarRutaParaGuardar(rutaFinal);
-    const carrera = crearCarreraConqurun({
-        uid,
-        ruta: rutaParaGuardar,
-        distancia: distanciaFinal,
-        duracion: segundosFinales,
-        ritmoMedio,
-        puntos,
-        aportacionesGrupo,
-        grupoActivoId: grupoActivo?.id ?? null,
-        grupoActivoNombre: grupoActivo?.nombre ?? null,
-        territorioCarrera,
-        ciudadId: ciudadRef.current.id,
-        ciudadNombre: ciudadRef.current.nombre,
-        paisCodigo: ciudadRef.current.paisCodigo,
-        segmentos,
-      fecha: serverTimestamp(),
-    });
     try {
-      const conquistados = territorioCarrera.filter(b => b.duenoPuntos < b.puntos);
-      const nuevosTerritorios = conquistados.filter(b => b.dueno !== uid);
-
-      // Leer pushTokens desde subcollección privada (no el doc público del usuario)
-      const duenosAjenos = [...new Set(
-        conquistados.filter(b => b.dueno && b.dueno !== uid).map(b => b.dueno)
-      )];
-      const privadoSnaps = await Promise.all(
-        duenosAjenos.map(duenoUid => getDoc(doc(db, 'usuarios', duenoUid, 'privado', 'notificaciones')))
-      );
-      const perfil = perfilRef.current;
-
-      const privadoPorUid = Object.fromEntries(
-        duenosAjenos.map((duenoUid, i) => [duenoUid, privadoSnaps[i].data()])
-      );
-      const tokensConquistados = conquistados
-        .filter(b => b.dueno && b.dueno !== uid)
-        .map(b => {
-          const token = privadoPorUid[b.dueno]?.pushToken ?? null;
-          return token ? { token, nombre: b.nombre } : null;
-        })
-        .filter(Boolean);
-
-      const ciudadNuevaId = ciudadRef.current.id;
-
-      const carreraResumen = {
-        id: carreraId,
-        fecha: Date.now(),
+      const registrarCarrera = httpsCallable(getFunctions(), 'registrarCarreraConqurun');
+      const { data } = await registrarCarrera({
+        ruta: rutaParaGuardar,
         distancia: Math.round(distanciaFinal),
         duracion: segundosFinales,
-        ritmoMedio: Math.round(ritmoMedio),
-        puntos,
-        puntosPersonales: puntos,
-        source: 'conqurun',
-        verificationStatus: 'self_recorded',
-      };
-      const ultimasCarreras = [carreraResumen, ...(perfilRef.current.ultimasCarreras ?? [])].slice(0, 3);
-      const nuevaRacha = calcularRachaIncremental(
-        perfilRef.current.ultimasCarreras ?? [],
-        perfilRef.current.racha ?? 0,
-      );
+        grupoActivoId: grupoActivo?.id ?? null,
+        ciudadId: ciudadRef.current.id,
+      });
+      const nuevosTerritorios = data.conquistas ?? [];
+      const segmentosGuardados = data.segmentos ?? segmentos;
+      const puntosGuardados = data.puntos ?? puntos;
+      const bonusLogros = data.bonusLogros ?? 0;
+      const nuevosLogros = (data.nuevosLogros ?? [])
+        .map(idLogro => LOGROS.find(logro => logro.id === idLogro))
+        .filter(Boolean);
 
-      // Single atomic batch: carrera + usuario + barrios + ranking
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'carreras', carreraId), carrera);
-
-      // Marcas territoriales en subcolección — una por barrio, sin límite de campos en el doc usuario
-      for (const barrio of territorioCarrera) {
-        batch.set(
-          doc(db, 'usuarios', uid, 'marcasTerritoriales', `${barrio.barrioId}_${segmentos.segmentoCompetitivo}`),
-          {
-            territorioId: barrio.barrioId,
-            puntos: increment(barrio.puntos),
-            coleccion: barrio.coleccion,
-            ciudadId: ciudadNuevaId,
-            segmentoCompetitivo: segmentos.segmentoCompetitivo,
-            actualizadoEn: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
-
-      batch.set(doc(db, 'usuarios', uid), {
-        puntosTotales: increment(puntos),
-        distanciaTotal: increment(Math.round(distanciaFinal)),
-        duracionTotal: increment(segundosFinales),
-        carrerasTotal: increment(1),
-        ...(nuevosTerritorios.length > 0 && { barriosConquistadosTotal: increment(nuevosTerritorios.length) }),
-        racha: nuevaRacha,
-        ciudadActualId: ciudadNuevaId,
-        ciudadActualNombre: ciudadRef.current.nombre,
-        paisCodigo: ciudadRef.current.paisCodigo,
-        ritmo30d: segmentos.ritmo30d,
-        segmentoRitmo: segmentos.segmentoRitmo,
-        segmentoGenero: segmentos.segmentoGenero,
-        segmentoEdad: segmentos.segmentoEdad,
-        segmentoCompetitivo: segmentos.segmentoCompetitivo,
-        segmentoEtiqueta: segmentos.segmentoEtiqueta,
-        ...(debeNotificarSegmento && {
-          notificacionSegmentoClave: claveNotificacionSegmento,
-          notificacionSegmentoEn: serverTimestamp(),
-        }),
-        ultimasCarreras,
-        actualizadoEn: serverTimestamp(),
-      }, { merge: true });
-      for (const barrio of conquistados) {
-        batch.set(doc(db, barrio.coleccion, barrio.barrioId, 'segmentos', segmentos.segmentoCompetitivo), {
-          territorioId: barrio.barrioId,
-          ciudadId: ciudadNuevaId,
-          ciudadNombre: ciudadRef.current.nombre,
-          paisCodigo: ciudadRef.current.paisCodigo,
-          segmentoRitmo: segmentos.segmentoRitmo,
-          segmentoGenero: segmentos.segmentoGenero,
-          segmentoEdad: segmentos.segmentoEdad,
-          segmentoCompetitivo: segmentos.segmentoCompetitivo,
-          segmentoEtiqueta: segmentos.segmentoEtiqueta,
-          dueno: uid,
-          duenoPuntos: barrio.puntos,
-          conquistadoEn: serverTimestamp(),
-        }, { merge: true });
-        if (barrio.dueno && barrio.dueno !== uid) {
-          batch.set(doc(db, 'usuarios', barrio.dueno, 'privado', 'notificaciones'), {
-            notificacionesPendientes: arrayUnion({
-              tipo: 'territorio_perdido',
-              nombre: barrio.nombre,
-              fecha: Date.now(),
-            }),
-          }, { merge: true });
-        }
-      }
-
-      // Actualizar rankingsCiudad (1 escritura por carrera, evita leer todas las carreras en el ranking)
-      if (ciudadRef.current.id) {
-        batch.set(refRanking(ciudadRef.current.id, uid), {
-          ciudadId: ciudadRef.current.id,
-          uid,
-          puntos: increment(puntos),
-          carreras: increment(1),
-          totalMetros: increment(Math.round(distanciaFinal)),
-          stravaVerificadas: increment(0),
-          nickname: perfil.nickname ?? 'Corredor anónimo',
-          fotoPerfil: perfil.fotoPerfil ?? null,
-          fotoPerfilEstado: perfil.fotoPerfilEstado ?? null,
-          pais: perfil.pais ?? null,
-          genero: perfil.genero ?? null,
-          grupoEdad: segmentos.segmentoEdad,
-          ritmo30d: segmentos.ritmo30d,
-          segmentoRitmo: segmentos.segmentoRitmo,
-          segmentoGenero: segmentos.segmentoGenero,
-          segmentoEdad: segmentos.segmentoEdad,
-          segmentoCompetitivo: segmentos.segmentoCompetitivo,
-          segmentoEtiqueta: segmentos.segmentoEtiqueta,
-          topLogros: (perfil.logros ?? []).slice(0, 3),
-          barrios: increment(nuevosTerritorios.length),
-          actualizadoEn: serverTimestamp(),
-        }, { merge: true });
-      }
-
-      await batch.commit();
-
-      // Fire-and-forget notifications after successful commit
-      for (const { token, nombre } of tokensConquistados) {
-        enviarNotificacion(token, '¡Te han conquistado!', `Alguien te ha quitado ${nombre}`).catch(() => {});
-      }
+      // Fire-and-forget local notifications after successful commit
       if (nuevosTerritorios.length > 0) {
         const nombresConquistados = [...new Set(nuevosTerritorios.map(b => b.nombre))];
         notificarConquista(nombresConquistados).catch(() => {});
@@ -627,7 +495,7 @@ export default function CorrerScreen() {
         if (cambioSegmento) {
           notificarSegmento(
             'Nueva liga desbloqueada',
-            `Ahora compites en ${segmentos.segmentoEtiqueta}.`
+            `Ahora compites en ${segmentosGuardados.segmentoEtiqueta}.`
           ).catch(() => {});
         } else if (avisoProximoSegmento) {
           notificarSegmento(
@@ -636,79 +504,6 @@ export default function CorrerScreen() {
           ).catch(() => {});
         }
       }
-
-      // Actualizar top10 individual + marcas de grupo antes de refrescar el mapa
-      await Promise.all(territorioCarrera.map(async (barrio) => {
-        const barrioSegmentoRef = doc(db, barrio.coleccion, barrio.barrioId, 'segmentos', segmentos.segmentoCompetitivo);
-        const [marcaSnap, barrioSnap] = await Promise.all([
-          getDoc(doc(db, 'usuarios', uid, 'marcasTerritoriales', `${barrio.barrioId}_${segmentos.segmentoCompetitivo}`)),
-          getDoc(barrioSegmentoRef),
-        ]);
-
-        const totalPuntosUsuario = marcaSnap.exists() ? (marcaSnap.data().puntos ?? 0) : barrio.puntos;
-        const barrioData = barrioSnap.data() ?? {};
-
-        const currentTop10 = barrioData.top10 ?? [];
-        const newTop10 = [...currentTop10.filter(e => e.uid !== uid), { uid, puntos: totalPuntosUsuario }]
-          .sort((a, b) => b.puntos - a.puntos).slice(0, 10);
-
-        const updates = {
-          top10: newTop10,
-          segmentoCompetitivo: segmentos.segmentoCompetitivo,
-          territorioId: barrio.barrioId,
-          ciudadId: ciudadRef.current?.id,
-          ciudadNombre: ciudadRef.current?.nombre,
-          paisCodigo: ciudadRef.current?.paisCodigo,
-          actualizadoEn: serverTimestamp(),
-        };
-
-        // Marcas de grupo: solo el equipo elegido al terminar la carrera recibe puntos
-        for (const grupo of gruposCarrera) {
-          const marcaGrupoRef = doc(db, 'grupoMarcas', grupo.id, 'marcasTerritoriales', barrio.barrioId);
-          // increment() es atómico — evita race condition si dos miembros del grupo corren a la vez
-          await setDoc(marcaGrupoRef, {
-            puntos: increment(barrio.puntos),
-            ciudadId: ciudadRef.current?.id,
-            actualizadoEn: serverTimestamp(),
-          }, { merge: true });
-
-          // Leer el total real tras el increment para comprobar conquista
-          const marcaGrupoSnapPost = await getDoc(marcaGrupoRef);
-          const nuevoTotalGrupo = marcaGrupoSnapPost.data()?.puntos ?? barrio.puntos;
-
-          if (nuevoTotalGrupo > (barrioData.duenoGrupoPuntos ?? 0)) {
-            const anteriorGrupoId = barrioData.duenoGrupo ?? null;
-            updates.duenoGrupo = grupo.id;
-            updates.duenoGrupoPuntos = nuevoTotalGrupo;
-            updates.actualizadoGrupoEn = serverTimestamp();
-            updateDoc(doc(db, 'grupos', grupo.id), { barriosConquistados: increment(1) }).catch(() => {});
-            if (anteriorGrupoId && anteriorGrupoId !== grupo.id) {
-              updateDoc(doc(db, 'grupos', anteriorGrupoId), { barriosConquistados: increment(-1) }).catch(() => {});
-            }
-          }
-        }
-
-        await setDoc(barrioSegmentoRef, updates, { merge: true });
-      })).catch((e) => {
-        console.warn('[CorrerScreen] No se pudieron actualizar marcas territoriales/top equipos:', e);
-      });
-
-      registrarAportacionesGrupo({
-        carreraId,
-        uid,
-        puntosPersonales: puntos,
-        distancia: distanciaFinal,
-        duracion: segundosFinales,
-        aportaciones: aportacionesGrupo,
-      }).catch(() => {});
-
-      const nuevosLogros = await comprobarYNotificarLogros({
-        territorioCarrera,
-        segmentos,
-        ciudadId: ciudadRef.current?.id,
-        ciudadNombre: ciudadRef.current?.nombre,
-        paisCodigo: ciudadRef.current?.paisCodigo,
-      });
       for (const logro of nuevosLogros) {
         notificarLogro(logro).catch(() => {});
       }
@@ -725,10 +520,10 @@ export default function CorrerScreen() {
         distancia: distanciaFinal,
         duracion: segundosFinales,
         ritmoMedio,
-        puntos,
+        puntos: puntosGuardados + bonusLogros,
         territorio: territorioResumen,
         logros: nuevosLogros,
-        aportacionesGrupo,
+        aportacionesGrupo: data.aportacionesGrupo ?? [],
         grupoActivoId: grupoActivo?.id ?? null,
         grupoActivoNombre: grupoActivo?.nombre ?? null,
       });
@@ -976,6 +771,9 @@ export default function CorrerScreen() {
       <View style={styles.panel}>
         {barrioActual && (
           <EtiquetaBarrio barrio={barrioActual} uid={auth.currentUser?.uid} />
+        )}
+        {corriendo && gpsDebil && (
+          <Text style={styles.gpsDebilTexto}>⚠ GPS débil — ruta pausada hasta recuperar señal</Text>
         )}
         <View style={styles.stats}>
           <View style={styles.stat}>
@@ -1276,10 +1074,10 @@ function ResumenCarreraModal({ resumen, onClose, formatTiempo, formatRitmo }) {
               </View>
             )}
 
-            {resumen.logros.length > 0 && (
+            {(resumen.logros ?? []).length > 0 && (
               <View style={styles.resumenSeccion}>
                 <Text style={styles.resumenSeccionTitulo}>Logros desbloqueados</Text>
-                {resumen.logros.map(logro => (
+                {(resumen.logros ?? []).map(logro => (
                   <View key={logro.id ?? logro.nombre} style={styles.resumenLogroFila}>
                     <Text style={styles.resumenLogroEmoji}>{logro.emoji}</Text>
                     <View style={styles.resumenLogroInfo}>
@@ -1491,6 +1289,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
   },
   barrio: { color: colors.gold, fontSize: 13, textAlign: 'center', marginBottom: 12 },
+  gpsDebilTexto: { color: colors.conquest, fontSize: 12, textAlign: 'center', marginBottom: 8 },
   stats: {
     flexDirection: 'row',
     justifyContent: 'space-around',

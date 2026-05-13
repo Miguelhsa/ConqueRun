@@ -47,6 +47,15 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
+        { "fieldPath": "puntos", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
         { "fieldPath": "uid", "order": "ASCENDING" }
       ]
     },

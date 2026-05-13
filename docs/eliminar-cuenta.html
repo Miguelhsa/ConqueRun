@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Eliminar cuenta – ConqueRun</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #080b14;
+      color: #f8fafc;
+      line-height: 1.7;
+      padding: 40px 20px 80px;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; }
+    .logo { font-size: 26px; font-weight: 900; color: #d6aa4c; margin-bottom: 6px; }
+    .logo span { color: #f8fafc; }
+    h1 { font-size: 22px; font-weight: 800; color: #f8fafc; margin: 32px 0 8px; }
+    h2 { font-size: 15px; font-weight: 700; color: #d6aa4c; margin: 28px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    p, li { font-size: 15px; color: #94a3b8; margin-bottom: 10px; }
+    li { margin-left: 20px; margin-bottom: 6px; }
+    ul { margin-bottom: 12px; }
+    .updated { font-size: 13px; color: #64748b; margin-bottom: 36px; }
+    .card {
+      background: #111827;
+      border: 1px solid #263244;
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin: 24px 0;
+    }
+    .card-warn {
+      background: #1a1005;
+      border-color: #4a3000;
+    }
+    .highlight { color: #f8fafc; font-weight: 600; }
+    a { color: #d6aa4c; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .btn {
+      display: inline-block;
+      background: #d6aa4c;
+      color: #080b14;
+      font-weight: 800;
+      font-size: 15px;
+      padding: 14px 28px;
+      border-radius: 10px;
+      text-decoration: none;
+      margin-top: 8px;
+    }
+    .btn:hover { background: #e8bc5a; text-decoration: none; }
+    .btn-secondary {
+      background: transparent;
+      color: #d6aa4c;
+      border: 1px solid #4a3000;
+      margin-left: 12px;
+    }
+    .btn-secondary:hover { background: #1a1005; }
+    .step {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+    .step-num {
+      background: #d6aa4c;
+      color: #080b14;
+      font-weight: 900;
+      font-size: 13px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .step-text { font-size: 15px; color: #94a3b8; }
+    .step-text strong { color: #f8fafc; }
+    .deleted-tag {
+      display: inline-block;
+      background: #e63946;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .kept-tag {
+      display: inline-block;
+      background: #1e3a5f;
+      color: #93c5fd;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th { background: #1e2d45; color: #f8fafc; font-size: 13px; padding: 10px 12px; text-align: left; border: 1px solid #263244; }
+    td { font-size: 14px; color: #94a3b8; padding: 9px 12px; border: 1px solid #263244; vertical-align: top; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="logo">Conque<span>Run</span></div>
+    <p class="updated">No solo corres, conquistas.</p>
+
+    <h1>Eliminar tu cuenta</h1>
+    <p>Puedes eliminar tu cuenta y todos tus datos desde la propia app ConqueRun. Si no tienes acceso a la app, puedes solicitarlo por email.</p>
+
+    <h2>Opción 1 — Desde la app (inmediato)</h2>
+    <div class="card">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text">Abre ConqueRun e inicia sesión con tu cuenta.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text">Ve a la pestaña <strong>Perfil</strong> → desplázate hasta abajo.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text">Pulsa <strong>"Solicitar eliminación de cuenta"</strong> e introduce tu contraseña para confirmar.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-text">Tu cuenta, datos y territorios se eliminan permanentemente de forma inmediata.</div>
+      </div>
+    </div>
+
+    <h2>Opción 2 — Por email (si no tienes acceso a la app)</h2>
+    <div class="card">
+      <p>Envía un email a <a href="mailto:miguelhsa@gmail.com">miguelhsa@gmail.com</a> con el asunto <span class="highlight">"Eliminar cuenta"</span> desde la dirección de email con la que te registraste.</p>
+      <p style="margin-top: 12px;">Procesamos las solicitudes en un plazo máximo de <strong style="color:#f8fafc">30 días</strong>. Recibirás confirmación al mismo email.</p>
+      <a href="mailto:miguelhsa@gmail.com?subject=Eliminar%20cuenta" class="btn">Enviar solicitud por email</a>
+    </div>
+
+    <h2>Qué se elimina</h2>
+    <div class="card card-warn">
+      <p style="margin-bottom: 16px;">La eliminación es <span class="highlight">permanente e irreversible</span>. Una vez eliminada no se puede recuperar ningún dato.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Dato</th>
+            <th>Estado tras eliminación</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Perfil de usuario (nickname, email, foto)</td>
+            <td><span class="deleted-tag">ELIMINADO</span></td>
+          </tr>
+          <tr>
+            <td>Historial de carreras y rutas GPS</td>
+            <td><span class="deleted-tag">ELIMINADO</span></td>
+          </tr>
+          <tr>
+            <td>Territorios conquistados</td>
+            <td><span class="deleted-tag">ELIMINADO</span> — pasan a libre</td>
+          </tr>
+          <tr>
+            <td>Puntos y posición en rankings</td>
+            <td><span class="deleted-tag">ELIMINADO</span></td>
+          </tr>
+          <tr>
+            <td>Datos privados (fecha de nacimiento, token push)</td>
+            <td><span class="deleted-tag">ELIMINADO</span></td>
+          </tr>
+          <tr>
+            <td>Membresía en grupos</td>
+            <td><span class="deleted-tag">ELIMINADO</span> — el grupo permanece</td>
+          </tr>
+          <tr>
+            <td>Reportes enviados por el usuario</td>
+            <td><span class="deleted-tag">ELIMINADO</span></td>
+          </tr>
+          <tr>
+            <td>Cuenta de autenticación Firebase</td>
+            <td><span class="deleted-tag">ELIMINADO</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Más información</h2>
+    <p>
+      <a href="/privacidad">Política de privacidad</a> &nbsp;·&nbsp;
+      <a href="/terminos">Términos de servicio</a> &nbsp;·&nbsp;
+      <a href="mailto:miguelhsa@gmail.com">Contacto</a>
+    </p>
+
+  </div>
+</body>
+</html>

@@ -1,14 +1,14 @@
-import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, TextInput, Alert, Modal, ImageBackground, Linking } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, TextInput, Alert, Modal, ImageBackground, Linking } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { EstadoVacio, PantallaCargando } from '../components/ui';
 import { auth, db } from '../firebaseConfig';
 import { signOut } from 'firebase/auth';
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
-import { refRanking } from '../utils/rankingsCiudad';
+import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
-import { obtenerBarriosSegmentados } from '../utils/barrios';
+import { invalidarCacheTerritorios, obtenerBarriosSegmentados } from '../utils/barrios';
 import { obtenerCiudades } from '../utils/ciudades';
 import { obtenerMisGrupos } from '../utils/grupos';
 import { LOGROS } from '../utils/logros';
@@ -25,11 +25,13 @@ export default function PerfilScreen() {
   const [pais, setPais] = useState(null);
   const [fotoPerfil, setFotoPerfil] = useState(null);
   const [fotoPerfilEstado, setFotoPerfilEstado] = useState(null);
+  const [fotoMotivoRechazo, setFotoMotivoRechazo] = useState(null);
   const [fotoPendiente, setFotoPendiente] = useState(null);
   const [barrios, setBarrios] = useState([]);
   const [barriosEnDisputa, setBarriosEnDisputa] = useState([]);
   const [grupos, setGrupos] = useState([]);
   const [posicionRanking, setPosicionRanking] = useState(null);
+  const [cargandoRanking, setCargandoRanking] = useState(false);
   const [ciudadNombre, setCiudadNombre] = useState(null);
   const [ciudadActualId, setCiudadActualId] = useState(null);
   const [ciudadSeleccionada, setCiudadSeleccionada] = useState(null);
@@ -44,6 +46,8 @@ export default function PerfilScreen() {
   const [ritmo30d, setRitmo30d] = useState(null);
   const [racha, setRacha] = useState(0);
   const [cargando, setCargando] = useState(true);
+  const ultimoRecalculoSegmentosRef = useRef(0);
+  const reparacionConsistenciaRef = useRef(false);
   const [guardando, setGuardando] = useState(false);
   const [editando, setEditando] = useState(false);
   const [mostrarEditorPerfil, setMostrarEditorPerfil] = useState(false);
@@ -77,9 +81,13 @@ export default function PerfilScreen() {
           segmentoEtiqueta: data.segmentoEtiqueta ?? null,
         };
 
+        const TTL_SEGMENTOS_MS = 60 * 60 * 1000;
+        const segmentosRecientes = Date.now() - ultimoRecalculoSegmentosRef.current < TTL_SEGMENTOS_MS;
         try {
-          const recalculados = await calcularSegmentos30d({ uid, perfil: data });
-          const cambioSegmento = (
+          const recalculados = segmentosRecientes
+            ? segmentosPerfil
+            : await calcularSegmentos30d({ uid, perfil: data });
+          const cambioSegmento = !segmentosRecientes && (
             recalculados.ritmo30d !== (data.ritmo30d ?? null) ||
             recalculados.segmentoRitmo !== data.segmentoRitmo ||
             recalculados.segmentoGenero !== data.segmentoGenero ||
@@ -88,28 +96,11 @@ export default function PerfilScreen() {
             recalculados.segmentoEtiqueta !== data.segmentoEtiqueta
           );
 
+          if (!segmentosRecientes) ultimoRecalculoSegmentosRef.current = Date.now();
           segmentosPerfil = recalculados;
 
           if (cambioSegmento) {
-            const payloadSegmento = {
-              ritmo30d: recalculados.ritmo30d,
-              segmentoRitmo: recalculados.segmentoRitmo,
-              segmentoGenero: recalculados.segmentoGenero,
-              segmentoEdad: recalculados.segmentoEdad,
-              segmentoCompetitivo: recalculados.segmentoCompetitivo,
-              segmentoEtiqueta: recalculados.segmentoEtiqueta,
-              actualizadoEn: serverTimestamp(),
-            };
-            setDoc(doc(db, 'usuarios', uid), payloadSegmento, { merge: true }).catch(() => {});
-            if (data.ciudadActualId) {
-              setDoc(refRanking(data.ciudadActualId, uid), {
-                uid,
-                ciudadId: data.ciudadActualId,
-                genero: data.genero ?? null,
-                grupoEdad: recalculados.segmentoEdad,
-                ...payloadSegmento,
-              }, { merge: true }).catch(() => {});
-            }
+            invalidarCacheTerritorios(data.ciudadActualId).catch(() => {});
           }
         } catch (e) {
           console.warn('[PerfilScreen] No se pudo recalcular segmento 30d:', e);
@@ -119,6 +110,7 @@ export default function PerfilScreen() {
         setPais(data.pais ?? null);
         setFotoPerfil(data.fotoPerfil ?? null);
         setFotoPerfilEstado(data.fotoPerfilEstado ?? null);
+        setFotoMotivoRechazo(data.fotoMotivoRechazo ?? null);
         setFotoPendiente(data.fotoPendiente ?? null);
         setGenero(data.genero ?? null);
         setSegmentoCompetitivo(segmentosPerfil.segmentoCompetitivo ?? null);
@@ -161,20 +153,28 @@ export default function PerfilScreen() {
         : {};
 
       if (ciudadId) {
-        const { cargarPosicionUsuario, cargarTotalCorredoresCiudad } = await import('../utils/rankingsCiudad');
-        const [pos, total] = await Promise.all([
-          cargarPosicionUsuario(ciudadId, userData.puntosTotales ?? 0, segmento),
-          cargarTotalCorredoresCiudad(ciudadId, segmento),
-        ]);
+        setCargandoRanking(true);
+        const { cargarPosicionUsuario } = await import('../utils/rankingsCiudad');
+        const pos = await cargarPosicionUsuario(ciudadId, userData.puntosTotales ?? 0, segmento);
         if (pos !== null) setPosicionRanking(pos);
+        setCargandoRanking(false);
       }
       const todosBarrios = await obtenerBarriosSegmentados(ciudadId, segmento);
-      setBarrios(
-        todosBarrios
-          .filter(b => b.dueno === uid)
-          .map(b => ({ ...b, misMarcas: marcas[b.id] ?? b.duenoPuntos }))
-          .sort((a, b) => b.misMarcas - a.misMarcas)
-      );
+      const barriosPropios = todosBarrios
+        .filter(b => b.dueno === uid)
+        .map(b => ({ ...b, misMarcas: marcas[b.id] ?? b.duenoPuntos }))
+        .sort((a, b) => b.misMarcas - a.misMarcas);
+      setBarrios(barriosPropios);
+      if (
+        ciudadId &&
+        segmento &&
+        !reparacionConsistenciaRef.current &&
+        barriosPropios.length !== (userData.barriosConquistadosTotal ?? 0)
+      ) {
+        reparacionConsistenciaRef.current = true;
+        const reparar = httpsCallable(getFunctions(), 'repararConsistenciaUsuario');
+        reparar().catch(e => console.warn('[PerfilScreen] No se pudo reparar consistencia:', e));
+      }
       setBarriosEnDisputa(
         todosBarrios
           .filter(b => b.dueno !== uid && (marcas[b.id] ?? 0) > 0)
@@ -292,9 +292,11 @@ export default function PerfilScreen() {
           : {}),
       }, { merge: true });
 
-      if (ciudadActualId) {
-        setDoc(refRanking(ciudadActualId, uid), { nickname }, { merge: true }).catch(() => {});
-      }
+      obtenerMisGrupos().then(misGrupos => {
+        for (const grupo of misGrupos) {
+          updateDoc(doc(db, 'grupos', grupo.id), { [`nicknames.${uid}`]: nickname }).catch(() => {});
+        }
+      }).catch(() => {});
 
       if (fotoPendiente && fotoPendiente.startsWith('file://')) {
         setFotoPendiente(fotoUrl);
@@ -373,6 +375,9 @@ export default function PerfilScreen() {
         {fotoPendiente && fotoPerfilEstado === FOTO_ESTADOS.PENDIENTE && (
           <Text style={styles.fotoPendienteTexto}>Foto pendiente de revisión</Text>
         )}
+        {fotoPerfilEstado === FOTO_ESTADOS.RECHAZADA && (
+          <Text style={styles.fotoRechazadaTexto}>Foto rechazada — contenido no permitido. Sube una nueva.</Text>
+        )}
 
         <Text style={styles.nickname}>{pais?.bandera ? `${pais.bandera} ` : ''}{nickname}</Text>
         {segmentoEtiqueta && (
@@ -403,10 +408,13 @@ export default function PerfilScreen() {
           </Text>
         </TouchableOpacity>
 
-        {posicionRanking > 0 && (
+        {(posicionRanking > 0 || cargandoRanking) && (
           <View style={styles.rankingResumen}>
             <Text style={styles.rankingResumenLabel}>Ranking {ciudadNombre ?? 'tu ciudad'}</Text>
-            <Text style={styles.rankingResumenValor}>#{posicionRanking}</Text>
+            {cargandoRanking
+              ? <ActivityIndicator size="small" color={colors.gold} />
+              : <Text style={styles.rankingResumenValor}>#{posicionRanking}</Text>
+            }
           </View>
         )}
 
@@ -911,6 +919,7 @@ const styles = StyleSheet.create({
   },
   avatarEditarTexto: { fontSize: 14 },
   fotoPendienteTexto: { color: colors.gold, fontSize: 12, marginBottom: 8 },
+  fotoRechazadaTexto: { color: colors.conquest, fontSize: 12, marginBottom: 8, textAlign: 'center' },
   nickname: { fontSize: 24, fontWeight: 'bold', color: colors.text, marginBottom: 4 },
   segmentoPerfilTexto: { fontSize: 12, color: colors.gold, fontWeight: '800', marginBottom: 4 },
   segmentoRitmoBoton: {

@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
+import { registrarNotificaciones } from '../utils/notificaciones';
 import { colors, radius } from '../utils/theme';
 
 const { width } = Dimensions.get('window');
@@ -12,44 +13,23 @@ const { width } = Dimensions.get('window');
 const PASOS = [
   {
     emoji: '🗺️',
-    etiqueta: 'LA IDEA',
-    titulo: 'Tu ciudad\nes el campo\nde juego',
-    texto: 'ConqueRun convierte cada kilómetro en territorio. Corre por tus barrios y ponlos bajo tu control.',
+    etiqueta: 'EL JUEGO',
+    titulo: 'Tu ciudad\ntiene dueño.\n¿Eres tú?',
+    texto: 'Cada barrio de tu ciudad pertenece a alguien. Sale a correr y arrebátaselo.',
     color: colors.gold,
   },
   {
-    emoji: '🚩',
-    etiqueta: 'CONQUISTA',
-    titulo: 'Toma barrios.\nDefiéndelos.\nRecupéralos.',
-    texto: 'Cada barrio tiene un dueño. Si superas sus puntos corriendo por ahí, pasa a ser tuyo. Pero ojo: mañana alguien puede quitártelo.',
+    emoji: '🏴',
+    etiqueta: 'LA NORMA',
+    titulo: 'Conquistas.\nDefiendes.\nO pierdes.',
+    texto: 'Si corres más por un barrio que su dueño, pasa a ser tuyo. Pero mientras tú descansas, alguien está saliendo a quitártelo.',
     color: colors.conquest,
-  },
-  {
-    emoji: '⭐',
-    etiqueta: 'PUNTOS',
-    titulo: 'Cada carrera\nsuma puntos\nreales',
-    texto: 'Cuanto más corras y mejor sea tu ritmo, más puntos. Sin trucos. Solo kilómetros y esfuerzo.',
-    color: colors.sport,
-  },
-  {
-    emoji: '🏆',
-    etiqueta: 'RANKING',
-    titulo: 'Escala en el\nranking de\ntu ciudad',
-    texto: 'Compite con todos los corredores de tu ciudad. El ranking es en tiempo real y cambia con cada carrera.',
-    color: colors.route,
-  },
-  {
-    emoji: '👥',
-    etiqueta: 'GRUPOS',
-    titulo: 'Corre en\nequipo y\ndomina más',
-    texto: 'Crea o únete a grupos de corredores. Vuestros puntos se multiplican juntos y podéis arrasar el ranking de ciudad.',
-    color: colors.gold,
   },
   {
     emoji: '⚡',
     etiqueta: 'LISTO',
-    titulo: '¿A qué\nestás\nesperando?',
-    texto: 'Ponte las zapas, sal a correr.',
+    titulo: 'El primer\nbarrio es\nel más fácil.',
+    texto: 'Ponte las zapatillas. El mapa de tu ciudad te está esperando.',
     color: colors.gold,
     esUltimo: true,
   },
@@ -78,6 +58,7 @@ export default function OnboardingScreen({ onCompletado }) {
         onboardingPendiente: false,
         onboardingCompletadoEn: serverTimestamp(),
       }, { merge: true });
+      registrarNotificaciones(auth.currentUser.uid).catch(() => {});
       onCompletado();
     } catch (e) {
       Alert.alert('Error', 'No se pudo guardar. Inténtalo de nuevo.');

@@ -36,6 +36,7 @@ firebase-debug.log
 
 # Firebase Admin credentials (NUNCA subir al repo)
 scripts/serviceAccount.json
+serviceAccountKey.json
 
 # Firebase Functions
 functions/node_modules/

@@ -7,14 +7,18 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "territorios:espana": "node scripts/generarTerritoriosEspana.mjs"
+    "territorios:espana": "node scripts/generarTerritoriosEspana.mjs",
+    "migrar:seguridad": "node scripts/migrarSeguridadPerfilesTop10.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-firebase/app": "24.0.0",
+    "@react-native-firebase/app-check": "24.0.0",
     "@react-navigation/bottom-tabs": "^7.15.9",
     "@react-navigation/native": "^7.2.2",
     "expo": "~54.0.34",
+    "expo-build-properties": "~1.0.10",
     "expo-dev-client": "~6.0.21",
     "expo-device": "~8.0.10",
     "expo-font": "~14.0.11",
@@ -34,6 +38,10 @@
     "react-native-web": "^0.21.0"
   },
   "private": true,
+  "overrides": {
+    "fast-uri": "3.1.2",
+    "postcss": "8.5.14"
+  },
   "devDependencies": {
     "firebase-admin": "^13.8.0"
   }

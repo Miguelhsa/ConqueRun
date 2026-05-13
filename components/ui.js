@@ -1,4 +1,4 @@
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { colors } from '../utils/theme';
 
 export function PantallaCargando() {
@@ -18,11 +18,16 @@ export function EstadoVacio({ titulo, subtitulo }) {
   );
 }
 
-export function EstadoError({ mensaje }) {
+export function EstadoError({ mensaje, onReintentar }) {
   return (
     <View style={styles.vacio}>
       <Text style={styles.vacioTitulo}>Algo fue mal</Text>
       <Text style={styles.vacioSub}>{mensaje ?? 'Revisa tu conexión e inténtalo de nuevo.'}</Text>
+      {onReintentar ? (
+        <TouchableOpacity onPress={onReintentar} style={styles.reintentar}>
+          <Text style={styles.reintentarTexto}>Reintentar</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -51,5 +56,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  reintentar: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: colors.gold,
+  },
+  reintentarTexto: {
+    color: colors.bg,
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });

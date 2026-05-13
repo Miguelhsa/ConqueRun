@@ -3,7 +3,7 @@ import { View, Text, FlatList, StyleSheet, Image, TouchableOpacity, Alert, Image
 import { useFocusEffect } from '@react-navigation/native';
 import { PantallaCargando, EstadoVacio } from '../components/ui';
 import { db, auth } from '../firebaseConfig';
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
 import { LOGROS } from '../utils/logros';
 import { bloquearUsuario, crearReporte, fotoAprobada } from '../utils/moderacion';
 import { CIUDAD_FALLBACK } from '../utils/ciudades';
@@ -22,6 +22,7 @@ export default function RankingScreen() {
   const [totalCorredores, setTotalCorredores] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [tab, setTab] = useState('individual');
+  const [bloqueados, setBloqueados] = useState([]);
 
   useFocusEffect(useCallback(() => {
     cargarInicial();
@@ -33,9 +34,9 @@ export default function RankingScreen() {
 
   const cargarInicial = async () => {
     try {
-      const { ciudad: ciudadUsuario, segmentoCompetitivo } = await cargarCiudadUsuario();
+      const { ciudad: ciudadUsuario, segmentoCompetitivo, bloqueados: listaBloqueados } = await cargarCiudadUsuario();
       await Promise.all([
-        cargarRankingCiudad(ciudadUsuario, segmentoCompetitivo),
+        cargarRankingCiudad(ciudadUsuario, segmentoCompetitivo, listaBloqueados),
         cargarMiResumen(),
         cargarGrupos(ciudadUsuario.id),
       ]);
@@ -57,8 +58,9 @@ export default function RankingScreen() {
     const segmentoCompetitivo = data.segmentoCompetitivo ?? null;
     setMiSegmentoCompetitivo(segmentoCompetitivo);
     setMiSegmentoEtiqueta(data.segmentoEtiqueta ?? null);
+    setBloqueados(data.usuariosBloqueados ?? []);
     setCiudad(c);
-    return { ciudad: c, segmentoCompetitivo };
+    return { ciudad: c, segmentoCompetitivo, bloqueados: data.usuariosBloqueados ?? [] };
   };
 
   const cargarMiResumen = async () => {
@@ -81,7 +83,7 @@ export default function RankingScreen() {
     });
   };
 
-  const cargarRankingCiudad = async (c, segmentoCompetitivo = miSegmentoCompetitivo) => {
+  const cargarRankingCiudad = async (c, segmentoCompetitivo = miSegmentoCompetitivo, listaBloqueados = bloqueados) => {
     const uid = auth.currentUser?.uid;
 
     const [lista, miEntrada, total] = await Promise.all([
@@ -90,7 +92,10 @@ export default function RankingScreen() {
       cargarTotalCorredoresCiudad(c.id, segmentoCompetitivo),
     ]);
 
-    setRankingCiudad(lista);
+    const listaFiltrada = listaBloqueados.length > 0
+      ? lista.filter(item => !listaBloqueados.includes(item.uid))
+      : lista;
+    setRankingCiudad(listaFiltrada);
     setTotalCorredores(total);
 
     const estaEnTop = lista.some(item => item.uid === uid);
@@ -109,8 +114,8 @@ export default function RankingScreen() {
 
   const cargarGrupos = async (ciudadId) => {
     const q = ciudadId
-      ? query(collection(db, 'grupos'), where('ciudadId', '==', ciudadId))
-      : query(collection(db, 'grupos'));
+      ? query(collection(db, 'grupos'), where('ciudadId', '==', ciudadId), where('esPublico', '==', true), limit(200))
+      : query(collection(db, 'grupos'), where('esPublico', '==', true), limit(200));
     const snap = await getDocs(q);
     const lista = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
@@ -148,7 +153,11 @@ export default function RankingScreen() {
         {
           text: 'Bloquear', style: 'destructive',
           onPress: () => bloquearUsuario(item.uid)
-            .then(() => Alert.alert('Usuario bloqueado', 'Ocultaremos sus interacciones en próximas versiones'))
+            .then(() => {
+              setBloqueados(prev => [...prev, item.uid]);
+              setRankingCiudad(prev => prev.filter(u => u.uid !== item.uid));
+              Alert.alert('Usuario bloqueado', 'Ya no verás a este corredor en el ranking.');
+            })
             .catch(() => Alert.alert('Error', 'No se pudo bloquear el usuario')),
         },
       ]);

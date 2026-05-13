@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "743879769903",
+    "project_id": "conquerrun-8d30e",
+    "storage_bucket": "conquerrun-8d30e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:743879769903:android:a78cffe1b7b24b9f9c6bda",
+        "android_client_info": {
+          "package_name": "com.conquerun.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDLx9lkmn7dtcDKAN6E3bvfbD0-WWWoULI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -238,10 +238,25 @@ El ID del documento es `{uid}_{recursoId}`. Si el doc ya existe, la escritura fa
 Las pantallas no deben importar directamente `react-native-maps`. Deben usar `components/map/MapAdapter.js` (`TerritoryMap`, `TerritoryPolygon`, `TerritoryMarker`, `RouteLine`, `TerritoryCircle`). La lógica de territorios, segmentos, puntos y conquistas vive fuera del proveedor de mapa para poder migrar a MapLibre + tiles de bajo coste sin tocar la lógica competitiva.
 
 ### Google Maps en iOS
-El adaptador fuerza Google Maps como proveedor en iOS. Para compilar la app iOS hay que habilitar **Maps SDK for iOS** en Google Cloud, crear una API key restringida al bundle `com.conquerun.app` y sustituir `REPLACE_WITH_GOOGLE_MAPS_IOS_API_KEY` en `ios/ConqueRun/Info.plist`. Despues hay que ejecutar `pod install` dentro de `ios/` o regenerar el build nativo.
+El adaptador fuerza Google Maps como proveedor en iOS. Para compilar la app iOS hay que habilitar **Maps SDK for iOS** en Google Cloud y crear una API key restringida al bundle `com.conquerun.app`. La key vive en `app.json` (`ios.config.googleMapsApiKey`) para que EAS la inyecte al regenerar el build nativo.
 
 ### Google Maps en Android
 Android usa Google Maps mediante `react-native-maps`. La key vive en `app.json` (`android.config.googleMaps.apiKey`) y en el `AndroidManifest.xml` nativo. En Google Cloud debe estar restringida a **Maps SDK for Android**, package `com.conquerun.app` y el SHA-1 del keystore de producción.
+
+### Firebase App Check
+El cliente tiene un puente preparado para usar App Check nativo con `@react-native-firebase/app-check`: Play Integrity en Android y App Attest con fallback a DeviceCheck en iOS. Las Cloud Functions callable tienen el parametro `REQUIRE_APP_CHECK`; con `false` solo registran llamadas sin token, con `true` rechazan peticiones no verificadas.
+
+Configuracion local ya preparada:
+- `ios.googleServicesFile` apunta a `./firebase-native/GoogleService-Info.plist`.
+- `android.googleServicesFile` apunta a `./firebase-native/google-services.json`.
+- `@react-native-firebase/app`, `@react-native-firebase/app-check` y `expo-build-properties` estan en `plugins`.
+- iOS declara `com.apple.developer.devicecheck.appattest-environment=production`.
+
+Para activarlo en produccion faltan pasos de consola/build:
+- Hacer un EAS Build real de iOS/Android.
+- Comprobar en logs que las llamadas callable llegan con `request.app`.
+- Poner `REQUIRE_APP_CHECK=true` y redesplegar Functions.
+- Activar enforcement en Firebase Console para Firestore y Cloud Functions cuando las builds de tienda ya esten verificadas.
 
 ---
 
@@ -302,10 +317,68 @@ npx expo start    # servidor de desarrollo
 
 ---
 
+## Publicación en tiendas
+
+### Estado actual
+La app esta cerca de estar lista para tiendas, pero antes hay que validar un build EAS real con las credenciales nativas de Firebase y App Check activado.
+
+### Bloqueantes antes de subir
+
+**Cuentas (sin ellas no se puede subir nada):**
+- [ ] Crear cuenta Apple Developer — $99/año → [developer.apple.com](https://developer.apple.com) → tarda 24–48h en activarse
+- [ ] Crear cuenta Google Play Console — $25 único → [play.google.com/console](https://play.google.com/console) → inmediato
+
+**Google Play — obligatorio para ubicación en segundo plano:**
+- [ ] Grabar vídeo de 30–60s mostrando el dialog de disclosure antes de pedir el permiso de ubicación en segundo plano
+- [ ] Rellenar formulario de declaración en Play Console: *Policy → App content → Sensitive permissions*
+
+**Verificar:**
+- [ ] Hacer `eas build --platform all --profile production` y confirmar que el `applicationId` del APK es `com.conquerun.app` (el archivo local `android/app/build.gradle` muestra `com.anonymous.conqurun`)
+
+**App Check / Firebase nativo:**
+- [x] Descargar `GoogleService-Info.plist` y `google-services.json` desde Firebase Console para las apps `com.conquerun.app`
+- [x] Añadir esos archivos al flujo de build EAS y configurar `ios.googleServicesFile`, `android.googleServicesFile` y plugins RNFirebase
+- [ ] Probar login, carrera, Strava, ranking, mapa y borrado con `REQUIRE_APP_CHECK=false` revisando que `request.app` llega informado
+- [ ] Activar `REQUIRE_APP_CHECK=true` y enforcement de App Check en Firebase Console antes de abrir produccion
+
+### Assets necesarios para el listing
+
+| Qué | iOS | Android |
+|---|---|---|
+| Screenshots | Mín. 3 × iPhone 6.7" | Mín. 2 × teléfono Android |
+| Feature graphic | — | 1024 × 500 px |
+| Descripción corta | 30 chars | 80 chars |
+| Descripción larga | hasta 4.000 chars | hasta 4.000 chars |
+
+### Formularios en las consolas
+
+- [ ] **App Store Connect** → Privacy Nutrition Label (datos recolectados, vinculación, seguimiento)
+- [ ] **Play Console** → Data Safety section (categorías de datos, cifrado, borrado)
+- [ ] **Ambas tiendas** → Cuestionario IARC de clasificación de contenido
+
+### Lo que YA está listo
+
+| | Qué |
+|---|---|
+| ✅ | `PrivacyInfo.xcprivacy` — declarado en `app.json` con `ios.privacyManifests` para builds limpias |
+| ✅ | Sign in with Apple — NO requerido (la app solo usa email/contraseña) |
+| ✅ | iOS deployment target — iOS 15.1 (cubre >97% de dispositivos) |
+| ✅ | Política de privacidad y términos — publicados en `https://conquerrun-8d30e.web.app` |
+| ✅ | Borrado de cuenta — implementado y limpio (carreras, ranking, territorios, reportes) |
+| ✅ | Background location disclosure — dialog prominente antes de pedir el permiso |
+| ✅ | Age gate — verificación de 13+ años en el registro |
+| ✅ | Content moderation — reporte de contenido funcional |
+| ✅ | expo-doctor — 17/17 checks OK |
+
+### Tiempos de revisión estimados
+- **Apple:** 1–3 días hábiles (primera vez puede tardar más)
+- **Google Play:** 1–7 días (cuentas nuevas pueden tener revisión manual adicional)
+
+---
+
 ## Roadmap
 
 - [ ] CRÍTICO: evaluar migración del adaptador de mapa a MapLibre + tiles de bajo coste para reducir dependencia de Google Maps, controlar costes en Android y mantener intacta la lógica de territorios/conquistas.
-- [ ] Publicación en App Store y Google Play
 - [ ] Historial de carreras con mapa de ruta
 - [ ] Grupos: chat interno y salidas organizadas
 - [ ] Selector de país en ranking (filtro por país)

@@ -4,9 +4,9 @@ import {
   TextInput, Alert, Modal, Image, Share, ImageBackground
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { auth, db } from '../firebaseConfig';
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
 import {
   crearGrupo, generarRefGrupo, unirseACodigo, unirseAGrupo, salirDeGrupo, expulsarMiembro, regenerarCodigo,
   obtenerMisGrupos, obtenerGruposPublicos
@@ -56,7 +56,8 @@ export default function GruposScreen() {
         await Promise.all(ciudadesUnicas.map(async cid => {
           const snap = await getDocs(query(
             collection(db, 'grupos'),
-            where('ciudadId', '==', cid)
+            where('ciudadId', '==', cid),
+            limit(100)
           ));
           rankingsPorCiudad[cid] = snap.docs
             .map(d => ({ id: d.id, pts: d.data().puntosTotales ?? 0 }))
@@ -120,23 +121,24 @@ export default function GruposScreen() {
       return;
     }
     setSubiendoFoto(true);
+    const grupoRef = generarRefGrupo();
+    let fotoPendienteUrl = null;
     try {
-      // Pre-generar el ID para subir la foto y crear el doc en una sola escritura
-      const grupoRef = generarRefGrupo();
-      const fotoPendienteUrl = nuevoGrupo.foto
+      fotoPendienteUrl = nuevoGrupo.foto
         ? await subirFotoGrupo(nuevoGrupo.foto, grupoRef.id)
         : null;
 
       const { id, codigo } = await crearGrupo(nuevoGrupo, { grupoRef, fotoPendienteUrl });
 
-      Alert.alert(
-        '¡Grupo creado!',
-        `Comparte este código con tus compañeros:\n\n${codigo}`,
-        [{ text: 'OK', onPress: cargarDatos }]
-      );
       setTab('mis');
       setNuevoGrupo({ nombre: '', descripcion: '', esPublico: true, foto: null });
+      cargarDatos();
+      Alert.alert('¡Grupo creado!', `Comparte este código con tus compañeros:\n\n${codigo}`);
     } catch (e) {
+      if (fotoPendienteUrl) {
+        const storage = getStorage();
+        deleteObject(ref(storage, `gruposPendientes/${auth.currentUser.uid}/${grupoRef.id}.jpg`)).catch(() => {});
+      }
       Alert.alert('Error', 'No se pudo crear el grupo');
     } finally {
       setSubiendoFoto(false);
@@ -243,7 +245,7 @@ export default function GruposScreen() {
   };
 
   if (cargando) return <PantallaCargando />;
-  if (errorRed) return <EstadoError mensaje="No se pudieron cargar los grupos. Revisa tu conexión." />;
+  if (errorRed) return <EstadoError mensaje="No se pudieron cargar los grupos. Revisa tu conexión." onReintentar={cargarDatos} />;
 
   return (
     <ImageBackground

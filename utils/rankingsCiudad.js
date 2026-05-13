@@ -1,10 +1,14 @@
-import { collection, doc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
+import { collection, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
 export const idRanking = (ciudadId, uid) => `${ciudadId}_${uid}`;
 
 export const refRanking = (ciudadId, uid) =>
   doc(db, 'rankingsCiudad', idRanking(ciudadId, uid));
+
+const esErrorIndiceFirestore = (error) => (
+  error?.code === 'failed-precondition' && String(error?.message ?? '').toLowerCase().includes('index')
+);
 
 const contarBarriosPorUid = async (uids, segmentoCompetitivo = null) => {
   if (!uids.length) return {};
@@ -49,32 +53,28 @@ export const cargarTopRankingCiudad = async (ciudadId, segmentoCompetitivo = nul
 
 export const cargarPosicionUsuario = async (ciudadId, misPuntos, segmentoCompetitivo = null) => {
   if (!misPuntos || misPuntos <= 0) return null;
-  const filtros = [where('ciudadId', '==', ciudadId)];
+  const filtros = [where('ciudadId', '==', ciudadId), where('puntos', '>', misPuntos)];
   if (segmentoCompetitivo) filtros.push(where('segmentoCompetitivo', '==', segmentoCompetitivo));
-  const snap = await getDocs(query(collection(db, 'rankingsCiudad'), ...filtros));
-  const mayorPuntos = snap.docs.filter(d => (d.data().puntos ?? 0) > misPuntos).length;
-  return mayorPuntos + 1;
+  try {
+    const snap = await getCountFromServer(query(collection(db, 'rankingsCiudad'), ...filtros));
+    return snap.data().count + 1;
+  } catch (error) {
+    if (esErrorIndiceFirestore(error)) {
+      console.warn('[rankingsCiudad] Índice de posición todavía no disponible:', error.message);
+      return null;
+    }
+    throw error;
+  }
 };
 
 export const cargarTotalCorredoresCiudad = async (ciudadId, segmentoCompetitivo = null) => {
   const filtros = [where('ciudadId', '==', ciudadId)];
   if (segmentoCompetitivo) filtros.push(where('segmentoCompetitivo', '==', segmentoCompetitivo));
-  const snap = await getDocs(query(collection(db, 'rankingsCiudad'), ...filtros));
-  return snap.size;
+  const snap = await getCountFromServer(query(collection(db, 'rankingsCiudad'), ...filtros));
+  return snap.data().count;
 };
 
-export const cargarMiEntradaRanking = async (ciudadId, uid, segmentoCompetitivo = null) => {
-  const filtros = [
-    where('ciudadId', '==', ciudadId),
-    where('uid', '==', uid),
-  ];
-  if (segmentoCompetitivo) filtros.push(where('segmentoCompetitivo', '==', segmentoCompetitivo));
-  const snap = await getDocs(
-    query(
-      collection(db, 'rankingsCiudad'),
-      ...filtros,
-    )
-  );
-  if (snap.empty) return null;
-  return snap.docs[0].data();
+export const cargarMiEntradaRanking = async (ciudadId, uid) => {
+  const snap = await getDoc(refRanking(ciudadId, uid));
+  return snap.exists() ? snap.data() : null;
 };

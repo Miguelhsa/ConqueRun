@@ -1,5 +1,4 @@
 import { db, auth } from '../firebaseConfig';
-import { enviarNotificacion } from './notificaciones';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   collection, doc, addDoc, getDoc, getDocs, setDoc,
@@ -139,14 +138,6 @@ const comprobarLimiteGrupos = async (uid) => {
   }
 };
 
-const notificarCreador = async (grupoData, nicknameMiembro) => {
-  if (!grupoData.creador) return;
-  const creadorSnap = await getDoc(doc(db, 'usuarios', grupoData.creador, 'privado', 'notificaciones'));
-  const token = creadorSnap.exists() ? creadorSnap.data().pushToken : null;
-  if (token) {
-    enviarNotificacion(token, '¡Nuevo miembro!', `${nicknameMiembro} se ha unido a ${grupoData.nombre}`).catch(() => {});
-  }
-};
 
 // Crear grupo — acepta fotoPendienteUrl y grupoRef opcionales para escritura atómica con foto
 export const crearGrupo = async ({ nombre, descripcion, esPublico }, { grupoRef, fotoPendienteUrl } = {}) => {
@@ -215,7 +206,6 @@ export const unirseAGrupo = async (grupoId) => {
     [`nicknames.${uid}`]: nickname,
   });
 
-  notificarCreador(grupoData, nickname).catch(() => {});
 };
 
 // Salir de un grupo (el creador no puede abandonarlo)
@@ -257,7 +247,7 @@ export const expulsarMiembro = async (grupoId, miembroUid) => {
 // Obtener mis grupos
 export const obtenerMisGrupos = async () => {
   const uid = auth.currentUser.uid;
-  const q = query(collection(db, 'grupos'), where('miembros', 'array-contains', uid));
+  const q = query(collection(db, 'grupos'), where('miembros', 'array-contains', uid), limit(50));
   const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 };
@@ -267,7 +257,7 @@ const PAGE_SIZE = 20;
 // Sin orderBy para evitar índices compuestos: filtra y ordena en cliente, pagina por offset.
 export const obtenerGruposPublicos = async (ciudadId, { offset = 0 } = {}) => {
   const q = ciudadId
-    ? query(collection(db, 'grupos'), where('ciudadId', '==', ciudadId))
+    ? query(collection(db, 'grupos'), where('ciudadId', '==', ciudadId), where('esPublico', '==', true))
     : query(collection(db, 'grupos'), where('esPublico', '==', true));
   const snap = await getDocs(q);
   const todos = snap.docs

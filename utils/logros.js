@@ -32,26 +32,6 @@ export const calcularRachaIncremental = (ultimasCarrerasPrevias, rachaActual, ah
   return 1;  // hueco → racha se rompe
 };
 
-export const calcularRacha = (carreras) => {
-  if (!carreras.length) return 0;
-  const dias = [...new Set(
-    carreras
-      .filter(c => c.fecha?.toDate)
-      .map(c => {
-      const d = c.fecha.toDate();
-      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-    })
-  )].sort((a, b) => new Date(b) - new Date(a));
-
-  let racha = 1;
-  for (let i = 0; i < dias.length - 1; i++) {
-    const diff = (new Date(dias[i]) - new Date(dias[i + 1])) / (1000 * 60 * 60 * 24);
-    if (diff === 1) racha++;
-    else break;
-  }
-  return racha;
-};
-
 export const calcularLogrosDesbloqueados = (totalKm, totalBarrios, racha) => {
   return LOGROS.filter(l => {
     if (l.tipo === 'km') return totalKm >= l.umbral;

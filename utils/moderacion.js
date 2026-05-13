@@ -38,6 +38,10 @@ export const bloquearUsuario = async (uidBloqueado) => {
   const uid = auth.currentUser?.uid;
   if (!uid || !uidBloqueado || uid === uidBloqueado) return;
 
+  const snap = await getDoc(doc(db, 'usuarios', uid));
+  const bloqueados = snap.exists() ? (snap.data().usuariosBloqueados ?? []) : [];
+  if (bloqueados.includes(uidBloqueado)) return;
+
   await setDoc(doc(db, 'usuarios', uid), {
     usuariosBloqueados: arrayUnion(uidBloqueado),
   }, { merge: true });
@@ -61,22 +65,23 @@ const PALABRAS_PROHIBIDAS = [
   'puto',
   'mierda',
   'joder',
-  'cabrón',
   'cabron',
-  'maricón',
   'maricon',
   'nazi',
   'porno',
   'xxx',
 ];
 
-export const contieneTextoProhibido = (texto = '') => {
-  const normalizado = texto
+const normalizarParaFiltro = (texto) =>
+  texto
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+    .replace(/[̀-ͯ]/g, '')
+    // leet speak: dígitos usados como sustitutos de letras
+    .replace(/0/g, 'o').replace(/1/g, 'i').replace(/3/g, 'e')
+    .replace(/4/g, 'a').replace(/5/g, 's').replace(/8/g, 'b')
+    // eliminar separadores no alfanuméricos (pu.ta → puta, pu-ta → puta)
+    .replace(/[^a-z0-9\s]/g, '');
 
-  return PALABRAS_PROHIBIDAS.some(palabra => normalizado.includes(
-    palabra.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  ));
-};
+export const contieneTextoProhibido = (texto = '') =>
+  PALABRAS_PROHIBIDAS.some(palabra => normalizarParaFiltro(texto).includes(normalizarParaFiltro(palabra)));

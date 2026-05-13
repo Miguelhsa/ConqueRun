@@ -111,7 +111,7 @@ export default function DetalleBarrioScreen({ barrio, duenoInfo, onClose }) {
             )}
             {esRival && barrio.duenoPuntos > 0 && (
               <Text style={styles.infoTexto}>
-                El dueño tiene {barrio.duenoPuntos.toLocaleString()} pts aquí. Necesitas superar esa marca en una sola carrera que pase por esta zona.
+                El dueño tiene {barrio.duenoPuntos.toLocaleString()} pts aquí. Necesitas superar esa marca con tus puntos acumulados en esta zona.
               </Text>
             )}
             <Text style={styles.infoRadio}>

@@ -1,8 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
+
+if (!__DEV__) {
+  console.log = () => {};
+  console.warn = () => {};
+  console.error = () => {};
+  console.info = () => {};
+  console.debug = () => {};
+}
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { ActivityIndicator, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { deleteField, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -58,8 +66,10 @@ export default function App() {
             setBiometriaBloqueada(await debeUsarBiometria());
           }
           loginManualRef.current = false;
-          await registrarNotificaciones(user.uid);
-          await comprobarPerfil(user.uid);
+          const perfil = await comprobarPerfil(user.uid);
+          if (perfil?.onboardingCompletado) {
+            registrarNotificaciones(user.uid).catch(() => {});
+          }
         }
       } catch (e) {
         console.error(e);
@@ -115,15 +125,7 @@ export default function App() {
     setOnboardingCompletado(Boolean(data.onboardingCompletado));
     setOnboardingPendiente(Boolean(data.onboardingPendiente));
     setEsAdmin(Boolean(data.esAdmin));
-    // Leer notificaciones pendientes desde subcollección privada
-    const privadoSnap = await getDoc(doc(db, 'usuarios', uid, 'privado', 'notificaciones'));
-    const pendientes = privadoSnap.exists() ? (privadoSnap.data().notificacionesPendientes ?? []) : [];
-    if (pendientes.length > 0) {
-      setNotifPendientes(pendientes);
-      updateDoc(doc(db, 'usuarios', uid, 'privado', 'notificaciones'), {
-        notificacionesPendientes: deleteField(),
-      }).catch(() => {});
-    }
+    return data;
   };
 
   const debeUsarBiometria = async () => {
@@ -205,7 +207,11 @@ export default function App() {
         <Tab.Screen name="Correr" component={CorrerScreen} />
         <Tab.Screen name="Mapa" component={MapaScreen} />
         {esAdmin && (
-          <Tab.Screen name="Moderación" component={ModeracionScreen} />
+          <Tab.Screen
+            name="Admin"
+            component={ModeracionScreen}
+            options={{ title: 'Moderación', tabBarLabel: 'Admin' }}
+          />
         )}
       </Tab.Navigator>
         <ConquistandoBanner carrera={carreraActiva} />
@@ -220,7 +226,7 @@ const iconoTab = (name) => ({
   Ranking: 'trophy',
   Correr: 'run-fast',
   Mapa: 'map-marker-radius',
-  Moderación: 'shield-check',
+  Admin: 'shield-check',
 }[name]);
 
 const TabIcon = (name, alertaActiva = false) => ({ color, size, focused }) => (

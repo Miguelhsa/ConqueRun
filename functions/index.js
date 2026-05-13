@@ -1,21 +1,35 @@
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { HttpsError, onCall, onRequest } = require('firebase-functions/v2/https');
-const { defineString } = require('firebase-functions/params');
+const { defineString, defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
+const { getStorage } = require('firebase-admin/storage');
+const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 
 initializeApp();
 
 const GMAIL_USER = defineString('GMAIL_USER', { default: '' });
-const GMAIL_PASS = defineString('GMAIL_PASS', { default: '' });
+const GMAIL_PASS = defineSecret('GMAIL_PASS');
 const ADMIN_EMAIL = defineString('ADMIN_EMAIL', { default: '' });
 const STRAVA_CLIENT_ID = defineString('STRAVA_CLIENT_ID', { default: '' });
-const STRAVA_CLIENT_SECRET = defineString('STRAVA_CLIENT_SECRET', { default: '' });
+const STRAVA_CLIENT_SECRET = defineSecret('STRAVA_CLIENT_SECRET');
 const STRAVA_REDIRECT_URI = defineString('STRAVA_REDIRECT_URI', {
   default: 'https://us-central1-conquerrun-8d30e.cloudfunctions.net/stravaOAuthCallback',
 });
+const REQUIRE_APP_CHECK = defineString('REQUIRE_APP_CHECK', { default: 'false' });
+
+function verificarAppCheckCallable(request, nombreFuncion) {
+  if (request.app) return;
+
+  const uid = request.auth?.uid ?? 'sin-auth';
+  console.warn(`[AppCheck] ${nombreFuncion} sin token de App Check`, { uid });
+
+  if (REQUIRE_APP_CHECK.value() === 'true') {
+    throw new HttpsError('failed-precondition', 'La app no esta verificada.');
+  }
+}
 
 const TIPO_LABELS = {
   grupo: 'Grupo',
@@ -41,6 +55,31 @@ async function commitEnChunks(ops, chunkSize = 450) {
     });
     await batch.commit();
   }
+}
+
+function top10Uids(top10 = []) {
+  return [...new Set(
+    top10
+      .map(item => item?.uid)
+      .filter(uid => typeof uid === 'string' && uid.length > 0)
+  )];
+}
+
+function perfilPublico(uid, data, FieldValue) {
+  return {
+    uid,
+    nickname: data.nickname ?? 'Corredor anónimo',
+    fotoPerfil: data.fotoPerfil ?? null,
+    fotoPerfilEstado: data.fotoPerfilEstado ?? null,
+    pais: data.pais ?? null,
+    genero: data.genero ?? null,
+    ciudadActualId: data.ciudadActualId ?? null,
+    ciudadActualNombre: data.ciudadActualNombre ?? null,
+    paisCodigo: data.paisCodigo ?? null,
+    segmentoEtiqueta: data.segmentoEtiqueta ?? null,
+    topLogros: (data.logros ?? []).slice(0, 3),
+    actualizadoEn: FieldValue.serverTimestamp(),
+  };
 }
 
 async function descontarTerritorioPerdido(event) {
@@ -80,19 +119,97 @@ exports.descontarBarrioSegmentadoPerdido = onDocumentWritten(
   descontarTerritorioPerdido
 );
 
+exports.sincronizarRankingPerfil = onDocumentWritten('usuarios/{uid}', async (event) => {
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+  const uid = event.params.uid;
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+  const perfilPublicoRef = db.collection('usuariosPublicos').doc(uid);
+
+  if (!after) {
+    await perfilPublicoRef.delete().catch(() => {});
+    return;
+  }
+
+  const ciudadId = after.ciudadActualId ?? null;
+  const ciudadAnteriorId = before?.ciudadActualId ?? null;
+  const ciudadCambiada = ciudadAnteriorId !== ciudadId;
+  const batch = db.batch();
+
+  batch.set(perfilPublicoRef, perfilPublico(uid, after, FieldValue), { merge: true });
+
+  if (!ciudadId) {
+    await batch.commit();
+    return;
+  }
+
+  const rankingRef = db.collection('rankingsCiudad').doc(`${ciudadId}_${uid}`);
+  const payload = {
+    uid,
+    ciudadId,
+    nickname: after.nickname ?? 'Corredor anónimo',
+    fotoPerfil: after.fotoPerfil ?? null,
+    fotoPerfilEstado: after.fotoPerfilEstado ?? null,
+    pais: after.pais ?? null,
+    genero: after.genero ?? null,
+    grupoEdad: after.segmentoEdad ?? null,
+    ritmo30d: after.ritmo30d ?? null,
+    segmentoRitmo: after.segmentoRitmo ?? null,
+    segmentoGenero: after.segmentoGenero ?? null,
+    segmentoEdad: after.segmentoEdad ?? null,
+    segmentoCompetitivo: after.segmentoCompetitivo ?? null,
+    segmentoEtiqueta: after.segmentoEtiqueta ?? null,
+    topLogros: (after.logros ?? []).slice(0, 3),
+    actualizadoEn: FieldValue.serverTimestamp(),
+  };
+
+  if (!before || ciudadCambiada) {
+    Object.assign(payload, {
+      puntos: after.puntosTotales ?? 0,
+      carreras: after.carrerasTotal ?? 0,
+      totalMetros: after.distanciaTotal ?? 0,
+      barrios: after.barriosConquistadosTotal ?? 0,
+    });
+  }
+
+  batch.set(rankingRef, payload, { merge: true });
+  if (ciudadAnteriorId && ciudadCambiada) {
+    batch.delete(db.collection('rankingsCiudad').doc(`${ciudadAnteriorId}_${uid}`));
+  }
+  await batch.commit();
+});
+
 exports.eliminarCuenta = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Debes iniciar sesión para eliminar la cuenta.');
   }
+  verificarAppCheckCallable(request, 'eliminarCuenta');
 
   const db = getFirestore();
   const { FieldValue } = require('firebase-admin/firestore');
   const ops = [];
 
-  const [territoriosSnap, barriosSnap, gruposSnap, carrerasSnap, rankingSnap, aportacionesSnap, marcasSnap, historicoSnap, privadoSnap] = await Promise.all([
+  const [
+    territoriosSnap,
+    barriosSnap,
+    segmentosDuenoSnap,
+    segmentosTop10Snap,
+    gruposSnap,
+    carrerasSnap,
+    rankingSnap,
+    aportacionesSnap,
+    marcasSnap,
+    historicoSnap,
+    privadoSnap,
+    reportesPorSnap,
+    reportesRecursoSnap,
+  ] = await Promise.all([
     db.collection('territorios').where('dueno', '==', uid).get(),
     db.collection('barrios').where('dueno', '==', uid).get(),
+    db.collectionGroup('segmentos').where('dueno', '==', uid).get(),
+    db.collectionGroup('segmentos').where('top10Uids', 'array-contains', uid).get(),
     db.collection('grupos').where('miembros', 'array-contains', uid).get(),
     db.collection('carreras').where('uid', '==', uid).get(),
     db.collection('rankingsCiudad').where('uid', '==', uid).get(),
@@ -100,7 +217,40 @@ exports.eliminarCuenta = onCall(async (request) => {
     db.collection('usuarios').doc(uid).collection('marcasTerritoriales').get(),
     db.collection('usuarios').doc(uid).collection('ciudadesHistorico').get(),
     db.collection('usuarios').doc(uid).collection('privado').get(),
+    db.collection('reportes').where('reportadoPor', '==', uid).get(),
+    db.collection('reportes').where('recursoId', '==', uid).get(),
   ]);
+
+  const gruposABorrar = gruposSnap.docs.filter((docSnap) => {
+    const miembros = docSnap.data().miembros ?? [];
+    return miembros.filter(miembroUid => miembroUid !== uid).length === 0;
+  });
+  const gruposABorrarIds = new Set(gruposABorrar.map(docSnap => docSnap.id));
+
+  const segmentosPorRef = new Map();
+  const addSegmentoSnap = (docSnap) => {
+    if (docSnap?.exists) segmentosPorRef.set(docSnap.ref.path, docSnap);
+  };
+  segmentosDuenoSnap.docs.forEach(addSegmentoSnap);
+  segmentosTop10Snap.docs.forEach(addSegmentoSnap);
+
+  const segmentosDesdeMarcasRefs = marcasSnap.docs
+    .map((docSnap) => {
+      const marca = docSnap.data();
+      if (!marca.coleccion || !marca.territorioId || !marca.segmentoCompetitivo) return null;
+      return db.collection(marca.coleccion).doc(marca.territorioId)
+        .collection('segmentos').doc(marca.segmentoCompetitivo);
+    })
+    .filter(Boolean);
+
+  const [segmentosDesdeMarcasSnaps, grupoMarcasSnaps, segmentosGruposBorradosSnaps] = await Promise.all([
+    Promise.all(segmentosDesdeMarcasRefs.map(ref => ref.get())),
+    Promise.all(gruposABorrar.map(docSnap => db.collection('grupoMarcas').doc(docSnap.id).collection('marcasTerritoriales').get())),
+    Promise.all([...gruposABorrarIds].map(grupoId => db.collectionGroup('segmentos').where('duenoGrupo', '==', grupoId).get())),
+  ]);
+
+  segmentosDesdeMarcasSnaps.forEach(addSegmentoSnap);
+  segmentosGruposBorradosSnaps.forEach(snap => snap.docs.forEach(addSegmentoSnap));
 
   [...territoriosSnap.docs, ...barriosSnap.docs].forEach((docSnap) => {
     ops.push({
@@ -114,26 +264,86 @@ exports.eliminarCuenta = onCall(async (request) => {
     });
   });
 
+  segmentosPorRef.forEach((docSnap) => {
+    const data = docSnap.data();
+    const update = {};
+    if (data.dueno === uid) {
+      Object.assign(update, {
+        dueno: null,
+        duenoPuntos: 0,
+        conquistadoEn: FieldValue.delete(),
+      });
+    }
+    const top10 = Array.isArray(data.top10) ? data.top10 : [];
+    const nuevoTop10 = top10.filter(item => item?.uid !== uid);
+    if (nuevoTop10.length !== top10.length) {
+      update.top10 = nuevoTop10;
+      update.top10Uids = top10Uids(nuevoTop10);
+    }
+    if (data.duenoGrupo && gruposABorrarIds.has(data.duenoGrupo)) {
+      Object.assign(update, {
+        duenoGrupo: null,
+        duenoGrupoPuntos: 0,
+        actualizadoGrupoEn: FieldValue.delete(),
+      });
+    }
+    if (Object.keys(update).length > 0) {
+      update.actualizadoEn = FieldValue.serverTimestamp();
+      ops.push({ type: 'update', ref: docSnap.ref, data: update });
+    }
+  });
+
   gruposSnap.docs.forEach((docSnap) => {
     const data = docSnap.data();
+    const miembrosRestantes = (data.miembros ?? []).filter(miembroUid => miembroUid !== uid);
+    if (miembrosRestantes.length === 0) {
+      ops.push({ type: 'delete', ref: docSnap.ref });
+      ops.push({ type: 'delete', ref: db.collection('grupoMarcas').doc(docSnap.id) });
+      return;
+    }
     ops.push({
       type: 'update',
       ref: docSnap.ref,
       data: {
         miembros: FieldValue.arrayRemove(uid),
         [`nicknames.${uid}`]: FieldValue.delete(),
-        ...(data.creador === uid ? { creador: null } : {}),
+        ...(data.creador === uid ? { creador: miembrosRestantes[0] } : {}),
       },
     });
   });
 
-  [...carrerasSnap.docs, ...rankingSnap.docs, ...aportacionesSnap.docs, ...marcasSnap.docs, ...historicoSnap.docs, ...privadoSnap.docs].forEach((docSnap) => {
+  grupoMarcasSnaps.forEach(snap => snap.docs.forEach((docSnap) => {
     ops.push({ type: 'delete', ref: docSnap.ref });
-  });
+  }));
 
+  const refsAEliminar = new Map();
+  [
+    ...carrerasSnap.docs,
+    ...rankingSnap.docs,
+    ...aportacionesSnap.docs,
+    ...marcasSnap.docs,
+    ...historicoSnap.docs,
+    ...privadoSnap.docs,
+    ...reportesPorSnap.docs,
+    ...reportesRecursoSnap.docs,
+  ].forEach((docSnap) => {
+    refsAEliminar.set(docSnap.ref.path, docSnap.ref);
+  });
+  refsAEliminar.forEach(ref => ops.push({ type: 'delete', ref }));
+
+  ops.push({ type: 'delete', ref: db.collection('usuariosPublicos').doc(uid) });
   ops.push({ type: 'delete', ref: db.collection('usuarios').doc(uid) });
 
   await commitEnChunks(ops);
+
+  const bucket = getStorage().bucket();
+  await Promise.all([
+    bucket.file(`fotos/${uid}.jpg`).delete().catch(() => {}),
+    bucket.getFiles({ prefix: `gruposPendientes/${uid}/` })
+      .then(([files]) => Promise.all(files.map(f => f.delete().catch(() => {}))))
+      .catch(() => {}),
+  ]);
+
   await getAuth().deleteUser(uid);
 
   return { ok: true };
@@ -145,6 +355,7 @@ exports.unirseAGrupoConCodigo = onCall(async (request) => {
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Debes iniciar sesión para unirte a un grupo.');
   }
+  verificarAppCheckCallable(request, 'unirseAGrupoConCodigo');
   if (!/^[A-Z0-9]{6}$/.test(codigo)) {
     throw new HttpsError('invalid-argument', 'Código de grupo no válido.');
   }
@@ -276,6 +487,96 @@ function calcularRitmo30dDesdeCarrerasSv(carreras = []) {
 
   if (totales.distancia < 1000 || totales.duracion <= 0) return null;
   return Math.round(totales.duracion / (totales.distancia / 1000));
+}
+
+const LOGROS_SV = [
+  { id: 'km_10', tipo: 'km', umbral: 10000, bonus: 10 },
+  { id: 'km_50', tipo: 'km', umbral: 50000, bonus: 50 },
+  { id: 'km_100', tipo: 'km', umbral: 100000, bonus: 100 },
+  { id: 'km_500', tipo: 'km', umbral: 500000, bonus: 500 },
+  { id: 'km_1000', tipo: 'km', umbral: 1000000, bonus: 1000 },
+  { id: 'b_1', tipo: 'barrios', umbral: 1, bonus: 5 },
+  { id: 'b_5', tipo: 'barrios', umbral: 5, bonus: 25 },
+  { id: 'b_10', tipo: 'barrios', umbral: 10, bonus: 50 },
+  { id: 'b_20', tipo: 'barrios', umbral: 20, bonus: 100 },
+  { id: 'racha_3', tipo: 'racha', umbral: 3, bonus: 10 },
+  { id: 'racha_7', tipo: 'racha', umbral: 7, bonus: 30 },
+  { id: 'racha_30', tipo: 'racha', umbral: 30, bonus: 150 },
+];
+
+function calcularRachaIncrementalSv(ultimasCarrerasPrevias = [], rachaActual = 0, ahoraMs = Date.now()) {
+  if (!ultimasCarrerasPrevias.length) return 1;
+  const fechaUltimaMs = ultimasCarrerasPrevias[0]?.fecha;
+  if (!fechaUltimaMs) return 1;
+  const hoyMs = new Date(ahoraMs).setHours(0, 0, 0, 0);
+  const ultDiaMs = new Date(fechaUltimaMs).setHours(0, 0, 0, 0);
+  const diffDias = Math.round((hoyMs - ultDiaMs) / 86400000);
+  if (diffDias === 0) return rachaActual;
+  if (diffDias === 1) return rachaActual + 1;
+  return 1;
+}
+
+function calcularLogrosDesbloqueadosSv(totalMetros, totalBarrios, racha) {
+  return LOGROS_SV.filter((logro) => {
+    if (logro.tipo === 'km') return totalMetros >= logro.umbral;
+    if (logro.tipo === 'barrios') return totalBarrios >= logro.umbral;
+    if (logro.tipo === 'racha') return racha >= logro.umbral;
+    return false;
+  });
+}
+
+function normalizarRutaEntradaSv(ruta) {
+  if (!Array.isArray(ruta) || ruta.length < 2 || ruta.length > 20000) {
+    throw new HttpsError('invalid-argument', 'La ruta no tiene suficientes puntos válidos.');
+  }
+
+  return ruta.map((punto) => {
+    const latitude = Number(punto?.latitude);
+    const longitude = Number(punto?.longitude);
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      throw new HttpsError('invalid-argument', 'La ruta contiene coordenadas inválidas.');
+    }
+    return {
+      latitude,
+      longitude,
+      ...(Number.isFinite(Number(punto?.timestamp)) ? { timestamp: Number(punto.timestamp) } : {}),
+      ...(punto?.segmentStart ? { segmentStart: true } : {}),
+      ...(Number.isFinite(Number(punto?.accuracy)) ? { accuracy: Number(punto.accuracy) } : {}),
+      ...(Number.isFinite(Number(punto?.speed)) ? { speed: Number(punto.speed) } : {}),
+    };
+  });
+}
+
+function simplificarRutaSv(ruta = [], maxPuntos = 1000) {
+  if (!Array.isArray(ruta) || ruta.length <= maxPuntos) return ruta;
+  if (maxPuntos <= 2) return [ruta[0], ruta[ruta.length - 1]];
+  const reducida = [];
+  for (let i = 0; i < maxPuntos; i++) {
+    const index = Math.round((i * (ruta.length - 1)) / (maxPuntos - 1));
+    if (reducida[reducida.length - 1] !== ruta[index]) reducida.push(ruta[index]);
+  }
+  return reducida;
+}
+
+async function resolverCiudadSv(db, ciudadIdSolicitada, perfil = {}) {
+  const ciudadId = ciudadIdSolicitada || perfil.ciudadActualId || 'es-madrid';
+  let ciudad = null;
+  if (ciudadId) {
+    const snap = await db.collection('ciudades').doc(ciudadId).get();
+    if (snap.exists) ciudad = { id: snap.id, ...snap.data() };
+  }
+  return {
+    id: ciudad?.id ?? ciudadId,
+    nombre: ciudad?.nombre ?? perfil.ciudadActualNombre ?? 'Madrid',
+    paisCodigo: ciudad?.paisCodigo ?? perfil.paisCodigo ?? 'ES',
+  };
 }
 
 function getDistanciaSv(a, b) {
@@ -500,7 +801,470 @@ function motivoIgnorarActividad(activity) {
   return null;
 }
 
-exports.stravaOAuthCallback = onRequest((req, res) => {
+exports.registrarCarreraConqurun = onCall(
+  async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para guardar una carrera.');
+  }
+  verificarAppCheckCallable(request, 'registrarCarreraConqurun');
+
+  const db = getFirestore();
+  const { FieldValue, Timestamp } = require('firebase-admin/firestore');
+  const ruta = normalizarRutaEntradaSv(request.data?.ruta ?? []);
+  const distancia = Math.round(Number(request.data?.distancia ?? 0));
+  const duracion = Math.round(Number(request.data?.duracion ?? 0));
+
+  if (!Number.isFinite(distancia) || distancia < 200 || distancia > 100000) {
+    throw new HttpsError('invalid-argument', 'Distancia de carrera no válida.');
+  }
+  if (!Number.isFinite(duracion) || duracion < 60 || duracion > 86400) {
+    throw new HttpsError('invalid-argument', 'Duración de carrera no válida.');
+  }
+
+  const ritmoMedio = Math.round(duracion / (distancia / 1000));
+  if (!ritmoMedio || ritmoMedio < 150 || ritmoMedio > 1200) {
+    throw new HttpsError('failed-precondition', 'El ritmo no cumple las condiciones para puntuar.');
+  }
+
+  const distanciaGps = calcularDistanciaRuta(ruta);
+  if (distanciaGps > 0 && Math.abs(distanciaGps - distancia) / Math.max(distancia, 1) > 0.35) {
+    throw new HttpsError('failed-precondition', 'La distancia no coincide con la ruta GPS.');
+  }
+
+  const usuarioRef = db.collection('usuarios').doc(uid);
+  const [usuarioSnap, privadoDatosSnap] = await Promise.all([
+    usuarioRef.get(),
+    db.collection('usuarios').doc(uid).collection('privado').doc('datos').get(),
+  ]);
+  if (!usuarioSnap.exists) {
+    throw new HttpsError('failed-precondition', 'Perfil de usuario no encontrado.');
+  }
+  const perfil = {
+    ...usuarioSnap.data(),
+    ...(privadoDatosSnap.exists ? { fechaNacimiento: privadoDatosSnap.data().fechaNacimiento } : {}),
+  };
+  const ciudad = await resolverCiudadSv(
+    db,
+    String(request.data?.ciudadId ?? '').trim() || null,
+    perfil
+  );
+  const puntos = calcularPuntosSv(distancia, ritmoMedio);
+
+  const desde30d = Timestamp.fromMillis(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const carreras30dSnap = await db.collection('carreras')
+    .where('uid', '==', uid)
+    .where('fecha', '>=', desde30d)
+    .get();
+  const ritmo30d = calcularRitmo30dDesdeCarrerasSv([
+    ...carreras30dSnap.docs.map(d => d.data()),
+    { distancia, duracion },
+  ]);
+  const segmentos = calcularSegmentosDesdePerfilYRitmoSv(perfil, ritmo30d);
+  const territorios = await obtenerTerritoriosSegmentadosSv(ciudad.id, segmentos.segmentoCompetitivo);
+  const territorioCarrera = calcularResumenTerritorialSv(ruta, territorios, puntos, distancia);
+  if (territorioCarrera.length === 0) {
+    throw new HttpsError('failed-precondition', 'La carrera no atraviesa territorios activos.');
+  }
+
+  const marcasPrevias = await Promise.all(territorioCarrera.map(async (barrio) => {
+    const marcaSnap = await usuarioRef.collection('marcasTerritoriales')
+      .doc(`${barrio.barrioId}_${segmentos.segmentoCompetitivo}`)
+      .get();
+    return marcaSnap.exists ? (marcaSnap.data().puntos ?? 0) : 0;
+  }));
+  const territorioCarreraConMarcas = territorioCarrera.map((barrio, index) => {
+    const puntosPreviosUsuario = marcasPrevias[index] ?? 0;
+    const puntosAcumuladosUsuario = puntosPreviosUsuario + barrio.puntos;
+    return {
+      ...barrio,
+      puntosPreviosUsuario,
+      puntosAcumuladosUsuario,
+    };
+  });
+
+  const territorioKey = (barrio) => `${barrio.coleccion}/${barrio.barrioId}`;
+  const segmentPayloads = new Map();
+  const mezclarSegmentPayload = (barrio, payload) => {
+    const key = territorioKey(barrio);
+    segmentPayloads.set(key, {
+      ref: db.collection(barrio.coleccion).doc(barrio.barrioId)
+        .collection('segmentos').doc(segmentos.segmentoCompetitivo),
+      data: {
+        ...(segmentPayloads.get(key)?.data ?? {}),
+        territorioId: barrio.barrioId,
+        ciudadId: ciudad.id,
+        ciudadNombre: ciudad.nombre,
+        paisCodigo: ciudad.paisCodigo,
+        segmentoRitmo: segmentos.segmentoRitmo,
+        segmentoGenero: segmentos.segmentoGenero,
+        segmentoEdad: segmentos.segmentoEdad,
+        segmentoCompetitivo: segmentos.segmentoCompetitivo,
+        segmentoEtiqueta: segmentos.segmentoEtiqueta,
+        ...payload,
+      },
+    });
+  };
+
+  const conquistadosBase = territorioCarreraConMarcas.filter(
+    b => b.dueno !== uid && b.puntosAcumuladosUsuario > (b.duenoPuntos ?? 0)
+  );
+  const nuevosTerritoriosPorKey = new Map(conquistadosBase.map(b => [territorioKey(b), b]));
+  conquistadosBase.forEach(barrio => mezclarSegmentPayload(barrio, {
+    dueno: uid,
+    duenoPuntos: barrio.puntosAcumuladosUsuario,
+    conquistadoEn: FieldValue.serverTimestamp(),
+  }));
+  territorioCarreraConMarcas
+    .filter(b => b.dueno === uid && b.puntosAcumuladosUsuario > (b.duenoPuntos ?? 0))
+    .forEach(barrio => mezclarSegmentPayload(barrio, {
+      dueno: uid,
+      duenoPuntos: barrio.puntosAcumuladosUsuario,
+      conquistadoEn: FieldValue.serverTimestamp(),
+    }));
+
+  const ahoraMs = Date.now();
+  const carreraId = `${uid}_${ahoraMs}_${crypto.randomBytes(6).toString('hex')}`;
+  const nuevaRacha = calcularRachaIncrementalSv(perfil.ultimasCarreras ?? [], perfil.racha ?? 0, ahoraMs);
+  const totalMetrosDespues = (perfil.distanciaTotal ?? 0) + distancia;
+  const totalBarriosBase = (perfil.barriosConquistadosTotal ?? 0) + nuevosTerritoriosPorKey.size;
+  const desbloqueados = calcularLogrosDesbloqueadosSv(totalMetrosDespues, totalBarriosBase, nuevaRacha);
+  const logrosPrevios = new Set(perfil.logros ?? []);
+  const nuevosLogros = desbloqueados.filter(logro => !logrosPrevios.has(logro.id));
+  const bonusLogros = nuevosLogros.reduce((sum, logro) => sum + (logro.bonus ?? 0), 0);
+
+  if (bonusLogros > 0) {
+    let topIndex = 0;
+    for (let i = 1; i < territorioCarreraConMarcas.length; i++) {
+      if ((territorioCarreraConMarcas[i].puntos ?? 0) > (territorioCarreraConMarcas[topIndex].puntos ?? 0)) {
+        topIndex = i;
+      }
+    }
+    const topBarrio = territorioCarreraConMarcas[topIndex];
+    topBarrio.puntosBonusLogros = bonusLogros;
+    topBarrio.puntosAcumuladosUsuario += bonusLogros;
+    const conquistaConBonus = topBarrio.dueno !== uid &&
+      topBarrio.puntosAcumuladosUsuario > (topBarrio.duenoPuntos ?? 0);
+    if (conquistaConBonus) nuevosTerritoriosPorKey.set(territorioKey(topBarrio), topBarrio);
+    if (topBarrio.dueno === uid || conquistaConBonus || segmentPayloads.has(territorioKey(topBarrio))) {
+      mezclarSegmentPayload(topBarrio, {
+        dueno: uid,
+        duenoPuntos: topBarrio.puntosAcumuladosUsuario,
+        conquistadoEn: FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
+  const nuevosTerritorios = [...nuevosTerritoriosPorKey.values()];
+  const puntosTotalesCarrera = puntos + bonusLogros;
+  const carreraResumen = {
+    id: carreraId,
+    fecha: ahoraMs,
+    distancia,
+    duracion,
+    ritmoMedio,
+    puntos,
+    puntosPersonales: puntos,
+    bonusLogros,
+    source: 'conqurun',
+    verificationStatus: 'self_recorded',
+  };
+  const ultimasCarreras = [carreraResumen, ...(perfil.ultimasCarreras ?? [])].slice(0, 3);
+
+  const grupoActivoId = String(request.data?.grupoActivoId ?? '').trim() || null;
+  let grupoActivo = null;
+  let aportacionesGrupo = [];
+  if (grupoActivoId) {
+    const grupoSnap = await db.collection('grupos').doc(grupoActivoId).get();
+    if (grupoSnap.exists) {
+      const grupoData = grupoSnap.data();
+      if (Array.isArray(grupoData.miembros) && grupoData.miembros.includes(uid)) {
+        grupoActivo = { id: grupoSnap.id, ...grupoData };
+        aportacionesGrupo = [{
+          id: `${carreraId}_${grupoSnap.id}`,
+          carreraId,
+          grupoId: grupoSnap.id,
+          grupoNombre: grupoData.nombre ?? 'Equipo',
+          uid,
+          puntosBase: puntos,
+          multiplicadorGrupo: 1,
+          puntosGrupo: puntos,
+          miembrosGrupoEnEseMomento: grupoData.miembros.length,
+        }];
+      }
+    }
+  }
+
+  const batch = db.batch();
+  batch.set(db.collection('carreras').doc(carreraId), {
+    uid,
+    ruta: simplificarRutaSv(ruta),
+    distancia,
+    duracion,
+    ritmoMedio,
+    puntos,
+    puntosPersonales: puntos,
+    bonusLogros,
+    aportacionesGrupo,
+    grupoActivoId: grupoActivo?.id ?? null,
+    grupoActivoNombre: grupoActivo?.nombre ?? null,
+    gruposAportados: aportacionesGrupo.map(a => a.grupoId),
+    territorioCarrera: territorioCarreraConMarcas,
+    ciudadId: ciudad.id,
+    ciudadNombre: ciudad.nombre,
+    paisCodigo: ciudad.paisCodigo,
+    ...segmentos,
+    fecha: FieldValue.serverTimestamp(),
+    source: 'conqurun',
+    externalProvider: null,
+    externalActivityId: null,
+    verificationStatus: 'self_recorded',
+    importedAt: null,
+    stravaActivityUrl: null,
+  });
+
+  for (const barrio of territorioCarreraConMarcas) {
+    const incrementoMarca = barrio.puntos + (barrio.puntosBonusLogros ?? 0);
+    batch.set(
+      usuarioRef.collection('marcasTerritoriales').doc(`${barrio.barrioId}_${segmentos.segmentoCompetitivo}`),
+      {
+        territorioId: barrio.barrioId,
+        puntos: FieldValue.increment(incrementoMarca),
+        coleccion: barrio.coleccion,
+        ciudadId: ciudad.id,
+        segmentoCompetitivo: segmentos.segmentoCompetitivo,
+        actualizadoEn: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
+
+  const topLogros = desbloqueados.map(l => l.id).slice(0, 3);
+  batch.set(usuarioRef, {
+    puntosTotales: FieldValue.increment(puntosTotalesCarrera),
+    distanciaTotal: FieldValue.increment(distancia),
+    duracionTotal: FieldValue.increment(duracion),
+    carrerasTotal: FieldValue.increment(1),
+    ...(nuevosTerritorios.length > 0 && { barriosConquistadosTotal: FieldValue.increment(nuevosTerritorios.length) }),
+    ...(nuevosLogros.length > 0 && { logros: desbloqueados.map(l => l.id) }),
+    racha: nuevaRacha,
+    ciudadActualId: ciudad.id,
+    ciudadActualNombre: ciudad.nombre,
+    paisCodigo: ciudad.paisCodigo,
+    ...segmentos,
+    ultimasCarreras,
+    actualizadoEn: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  batch.set(db.collection('rankingsCiudad').doc(`${ciudad.id}_${uid}`), {
+    ciudadId: ciudad.id,
+    uid,
+    puntos: FieldValue.increment(puntosTotalesCarrera),
+    carreras: FieldValue.increment(1),
+    totalMetros: FieldValue.increment(distancia),
+    stravaVerificadas: FieldValue.increment(0),
+    nickname: perfil.nickname ?? 'Corredor anónimo',
+    fotoPerfil: perfil.fotoPerfil ?? null,
+    fotoPerfilEstado: perfil.fotoPerfilEstado ?? null,
+    pais: perfil.pais ?? null,
+    genero: perfil.genero ?? null,
+    grupoEdad: segmentos.segmentoEdad,
+    ritmo30d: segmentos.ritmo30d,
+    segmentoRitmo: segmentos.segmentoRitmo,
+    segmentoGenero: segmentos.segmentoGenero,
+    segmentoEdad: segmentos.segmentoEdad,
+    segmentoCompetitivo: segmentos.segmentoCompetitivo,
+    segmentoEtiqueta: segmentos.segmentoEtiqueta,
+    topLogros,
+    barrios: FieldValue.increment(nuevosTerritorios.length),
+    actualizadoEn: FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  for (const barrio of nuevosTerritorios) {
+    if (barrio.dueno && barrio.dueno !== uid) {
+      batch.set(db.collection('usuarios').doc(barrio.dueno).collection('privado').doc('notificaciones'), {
+        notificacionesPendientes: FieldValue.arrayUnion({
+          tipo: 'territorio_perdido',
+          nombre: barrio.nombre,
+          fecha: ahoraMs,
+        }),
+      }, { merge: true });
+    }
+  }
+
+  for (const aportacion of aportacionesGrupo) {
+    batch.set(db.collection('aportacionesGrupo').doc(aportacion.id), {
+      ...aportacion,
+      distancia,
+      fecha: FieldValue.serverTimestamp(),
+    });
+    const grupoUpdate = {
+      puntosTotales: FieldValue.increment(aportacion.puntosGrupo),
+      carrerasTotales: FieldValue.increment(1),
+      distanciaTotal: FieldValue.increment(distancia),
+      duracionTotal: FieldValue.increment(duracion),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    };
+    let barriosGanadosGrupo = 0;
+    const barriosPerdidosPorGrupo = new Map();
+
+    for (const barrio of territorioCarreraConMarcas) {
+      const marcaGrupoRef = db.collection('grupoMarcas').doc(aportacion.grupoId)
+        .collection('marcasTerritoriales').doc(barrio.barrioId);
+      const marcaGrupoSnap = await marcaGrupoRef.get();
+      const nuevoTotalGrupo = (marcaGrupoSnap.data()?.puntos ?? 0) + barrio.puntos;
+      batch.set(marcaGrupoRef, {
+        puntos: FieldValue.increment(barrio.puntos),
+        ciudadId: ciudad.id,
+        actualizadoEn: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      if (nuevoTotalGrupo > (barrio.duenoGrupoPuntos ?? 0)) {
+        const anteriorGrupoId = barrio.duenoGrupo ?? null;
+        mezclarSegmentPayload(barrio, {
+          duenoGrupo: aportacion.grupoId,
+          duenoGrupoPuntos: nuevoTotalGrupo,
+          actualizadoGrupoEn: FieldValue.serverTimestamp(),
+        });
+        barriosGanadosGrupo += 1;
+        if (anteriorGrupoId && anteriorGrupoId !== aportacion.grupoId) {
+          barriosPerdidosPorGrupo.set(
+            anteriorGrupoId,
+            (barriosPerdidosPorGrupo.get(anteriorGrupoId) ?? 0) + 1
+          );
+        }
+      }
+    }
+    if (barriosGanadosGrupo > 0) {
+      grupoUpdate.barriosConquistados = FieldValue.increment(barriosGanadosGrupo);
+    }
+    batch.set(db.collection('grupos').doc(aportacion.grupoId), grupoUpdate, { merge: true });
+    for (const [grupoId, perdidos] of barriosPerdidosPorGrupo.entries()) {
+      batch.set(db.collection('grupos').doc(grupoId), {
+        barriosConquistados: FieldValue.increment(-perdidos),
+        actualizadoEn: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+  }
+
+  for (const { ref, data } of segmentPayloads.values()) {
+    batch.set(ref, data, { merge: true });
+  }
+
+  await batch.commit();
+
+  for (const barrio of territorioCarreraConMarcas) {
+    const barrioSegmentoRef = db.collection(barrio.coleccion).doc(barrio.barrioId)
+      .collection('segmentos').doc(segmentos.segmentoCompetitivo);
+    const marcaRef = usuarioRef.collection('marcasTerritoriales').doc(`${barrio.barrioId}_${segmentos.segmentoCompetitivo}`);
+    await db.runTransaction(async (tx) => {
+      const [marcaSnap, segmentoSnap] = await Promise.all([tx.get(marcaRef), tx.get(barrioSegmentoRef)]);
+      const totalPuntosUsuario = marcaSnap.exists ? (marcaSnap.data().puntos ?? 0) : barrio.puntosAcumuladosUsuario;
+      const currentTop10 = segmentoSnap.data()?.top10 ?? [];
+      const newTop10 = [...currentTop10.filter(e => e.uid !== uid), { uid, puntos: totalPuntosUsuario }]
+        .sort((a, b) => b.puntos - a.puntos)
+        .slice(0, 10);
+      tx.set(barrioSegmentoRef, {
+        top10: newTop10,
+        top10Uids: top10Uids(newTop10),
+        actualizadoEn: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
+  }
+
+  return {
+    ok: true,
+    carreraId,
+    carreraResumen,
+    puntos,
+    bonusLogros,
+    distancia,
+    duracion,
+    ritmoMedio,
+    segmentos,
+    ciudad,
+    territorioCarrera: territorioCarreraConMarcas,
+    aportacionesGrupo,
+    conquistas: nuevosTerritorios.map(b => ({
+      id: b.barrioId,
+      nombre: b.nombre,
+      distanciaMetros: b.distanciaMetros,
+      puntosAcumuladosUsuario: b.puntosAcumuladosUsuario,
+    })),
+    nuevosLogros: nuevosLogros.map(l => l.id),
+  };
+});
+
+exports.repararConsistenciaUsuario = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para reparar consistencia.');
+  }
+  verificarAppCheckCallable(request, 'repararConsistenciaUsuario');
+
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+  const userRef = db.collection('usuarios').doc(uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) {
+    throw new HttpsError('failed-precondition', 'Perfil de usuario no encontrado.');
+  }
+  const userData = userSnap.data();
+  const ciudadId = userData.ciudadActualId ?? null;
+  const segmentoCompetitivo = userData.segmentoCompetitivo ?? null;
+  if (!ciudadId || !segmentoCompetitivo) {
+    return { ok: true, reparado: false, motivo: 'sin_ciudad_o_segmento' };
+  }
+
+  const cargarTerritorios = async (coleccion) => {
+    const snap = await db.collection(coleccion).where('ciudadId', '==', ciudadId).get();
+    return snap.docs.map(docSnap => ({ id: docSnap.id, coleccion }));
+  };
+  const territorios = [
+    ...(await cargarTerritorios('territorios')),
+    ...(await cargarTerritorios('barrios')),
+  ];
+  const segmentos = await Promise.all(territorios.map(async (territorio) => {
+    const snap = await db.collection(territorio.coleccion).doc(territorio.id)
+      .collection('segmentos').doc(segmentoCompetitivo).get();
+    return snap.exists ? snap.data() : null;
+  }));
+  const barrios = segmentos.filter(segmento => segmento?.dueno === uid).length;
+
+  const payloadRanking = {
+    uid,
+    ciudadId,
+    puntos: userData.puntosTotales ?? 0,
+    carreras: userData.carrerasTotal ?? 0,
+    totalMetros: userData.distanciaTotal ?? 0,
+    barrios,
+    nickname: userData.nickname ?? 'Corredor anónimo',
+    fotoPerfil: userData.fotoPerfil ?? null,
+    fotoPerfilEstado: userData.fotoPerfilEstado ?? null,
+    pais: userData.pais ?? null,
+    genero: userData.genero ?? null,
+    grupoEdad: userData.segmentoEdad ?? null,
+    ritmo30d: userData.ritmo30d ?? null,
+    segmentoRitmo: userData.segmentoRitmo ?? null,
+    segmentoGenero: userData.segmentoGenero ?? null,
+    segmentoEdad: userData.segmentoEdad ?? null,
+    segmentoCompetitivo,
+    segmentoEtiqueta: userData.segmentoEtiqueta ?? null,
+    topLogros: (userData.logros ?? []).slice(0, 3),
+    actualizadoEn: FieldValue.serverTimestamp(),
+  };
+
+  const batch = db.batch();
+  batch.set(userRef, {
+    barriosConquistadosTotal: barrios,
+    actualizadoEn: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  batch.set(db.collection('rankingsCiudad').doc(`${ciudadId}_${uid}`), payloadRanking, { merge: true });
+  await batch.commit();
+
+  return { ok: true, reparado: true, barrios };
+});
+
+exports.stravaOAuthCallback = onRequest({ secrets: [STRAVA_CLIENT_SECRET] }, (req, res) => {
   const code = String(req.query.code ?? '').trim();
   const error = String(req.query.error ?? '').trim();
   const scope = String(req.query.scope ?? '').trim();
@@ -557,22 +1321,29 @@ exports.stravaOAuthCallback = onRequest((req, res) => {
 </html>`);
 });
 
-exports.importarConquistasStrava = onCall(async (request) => {
+exports.importarConquistasStrava = onCall({ secrets: [STRAVA_CLIENT_SECRET] }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Debes iniciar sesión para importar desde Strava.');
   }
+  verificarAppCheckCallable(request, 'importarConquistasStrava');
 
   const db = getFirestore();
   const { FieldValue, Timestamp } = require('firebase-admin/firestore');
   const code = String(request.data?.code ?? '').trim() || null;
   const { accessToken, ref: stravaRef, primeraConexion } = await obtenerTokenStrava(uid, code);
 
-  const usuarioSnap = await db.collection('usuarios').doc(uid).get();
+  const [usuarioSnap, privadoDatosSnap] = await Promise.all([
+    db.collection('usuarios').doc(uid).get(),
+    db.collection('usuarios').doc(uid).collection('privado').doc('datos').get(),
+  ]);
   if (!usuarioSnap.exists) {
     throw new HttpsError('failed-precondition', 'Perfil de usuario no encontrado.');
   }
-  const perfil = usuarioSnap.data();
+  const perfil = {
+    ...usuarioSnap.data(),
+    ...(privadoDatosSnap.exists ? { fechaNacimiento: privadoDatosSnap.data().fechaNacimiento } : {}),
+  };
   const ciudadId = perfil.ciudadActualId ?? 'es-madrid';
   const ciudadNombre = perfil.ciudadActualNombre ?? 'Madrid';
   const paisCodigo = perfil.paisCodigo ?? 'ES';
@@ -649,7 +1420,28 @@ exports.importarConquistasStrava = onCall(async (request) => {
       continue;
     }
 
-    const conquistados = territorioCarrera.filter(b => b.duenoPuntos < b.puntos);
+    const marcasPrevias = await Promise.all(territorioCarrera.map(async (barrio) => {
+      const marcaSnap = await db.collection('usuarios').doc(uid).collection('marcasTerritoriales')
+        .doc(`${barrio.barrioId}_${segmentos.segmentoCompetitivo}`)
+        .get();
+      return marcaSnap.exists ? (marcaSnap.data().puntos ?? 0) : 0;
+    }));
+    const territorioCarreraConMarcas = territorioCarrera.map((barrio, index) => {
+      const puntosPreviosUsuario = marcasPrevias[index] ?? 0;
+      const puntosAcumuladosUsuario = puntosPreviosUsuario + barrio.puntos;
+      return {
+        ...barrio,
+        puntosPreviosUsuario,
+        puntosAcumuladosUsuario,
+      };
+    });
+    const conquistados = territorioCarreraConMarcas.filter(
+      b => b.dueno !== uid && b.puntosAcumuladosUsuario > (b.duenoPuntos ?? 0)
+    );
+    const propiosActualizados = territorioCarreraConMarcas.filter(
+      b => b.dueno === uid && b.puntosAcumuladosUsuario > (b.duenoPuntos ?? 0)
+    );
+    const segmentosTerritorialesActualizados = [...conquistados, ...propiosActualizados];
     const nuevosTerritorios = conquistados.filter(b => b.dueno !== uid);
     const fechaCarrera = Timestamp.fromDate(new Date(activity.start_date));
     const carreraResumen = {
@@ -673,7 +1465,7 @@ exports.importarConquistasStrava = onCall(async (request) => {
     const batch = db.batch();
     batch.set(carreraRef, {
       uid,
-      ruta,
+      ruta: simplificarRutaSv(ruta),
       distancia,
       duracion,
       ritmoMedio,
@@ -683,7 +1475,7 @@ exports.importarConquistasStrava = onCall(async (request) => {
       grupoActivoId: null,
       grupoActivoNombre: null,
       gruposAportados: [],
-      territorioCarrera,
+      territorioCarrera: territorioCarreraConMarcas,
       ciudadId,
       ciudadNombre,
       paisCodigo,
@@ -699,7 +1491,7 @@ exports.importarConquistasStrava = onCall(async (request) => {
       stravaRawVisibility: activity.visibility ?? null,
     });
 
-    for (const barrio of territorioCarrera) {
+    for (const barrio of territorioCarreraConMarcas) {
       batch.set(
         db.collection('usuarios').doc(uid).collection('marcasTerritoriales').doc(`${barrio.barrioId}_${segmentos.segmentoCompetitivo}`),
         {
@@ -728,7 +1520,7 @@ exports.importarConquistasStrava = onCall(async (request) => {
       actualizadoEn: FieldValue.serverTimestamp(),
     }, { merge: true });
 
-    for (const barrio of conquistados) {
+    for (const barrio of segmentosTerritorialesActualizados) {
       batch.set(
         db.collection(barrio.coleccion).doc(barrio.barrioId).collection('segmentos').doc(segmentos.segmentoCompetitivo),
         {
@@ -742,7 +1534,7 @@ exports.importarConquistasStrava = onCall(async (request) => {
           segmentoCompetitivo: segmentos.segmentoCompetitivo,
           segmentoEtiqueta: segmentos.segmentoEtiqueta,
           dueno: uid,
-          duenoPuntos: barrio.puntos,
+          duenoPuntos: barrio.puntosAcumuladosUsuario,
           conquistadoEn: FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -790,6 +1582,7 @@ exports.importarConquistasStrava = onCall(async (request) => {
         .slice(0, 10);
       await barrioSegmentoRef.set({
         top10: newTop10,
+        top10Uids: top10Uids(newTop10),
         segmentoCompetitivo: segmentos.segmentoCompetitivo,
         territorioId: barrio.barrioId,
         ciudadId,
@@ -832,38 +1625,55 @@ exports.importarConquistasStrava = onCall(async (request) => {
 exports.validarCarrera = onDocumentCreated('carreras/{carreraId}', async (event) => {
   const data = event.data.data();
   const carreraId = event.params.carreraId;
-  const { uid, ruta = [], distancia, duracion, puntos, ritmoMedio } = data;
+  const {
+    uid, ruta = [], distancia, duracion, puntos, ritmoMedio, source,
+    territorioCarrera = [], ciudadId, segmentoCompetitivo,
+  } = data;
+
+  // Importaciones de Strava ya se validan en importarConquistasStrava
+  if (source !== 'conqurun') return;
 
   const db = getFirestore();
   const { FieldValue } = require('firebase-admin/firestore');
-
   const motivos = [];
 
-  // 1. Validar que el ritmo declarado es consistente con distancia y duración
+  // 1. Ritmo declarado consistente con distancia y duración
   if (distancia > 0) {
     const ritmoCalculado = duracion / (distancia / 1000);
-    if (Math.abs(ritmoCalculado - ritmoMedio) > 15) {
-      motivos.push('ritmo_inconsistente');
-    }
+    if (Math.abs(ritmoCalculado - ritmoMedio) > 15) motivos.push('ritmo_inconsistente');
   }
 
-  // 2. Validar que los puntos declarados coinciden con la fórmula server-side
+  // 2. Puntos coinciden con fórmula server-side
   const puntosEsperados = calcularPuntosSv(distancia, ritmoMedio);
-  if (Math.abs(puntosEsperados - puntos) > 1) {
-    motivos.push('puntos_incorrectos');
-  }
+  if (Math.abs(puntosEsperados - puntos) > 1) motivos.push('puntos_incorrectos');
 
-  // 3. Validar que la distancia GPS declarada es consistente con la ruta
+  // 3. Distancia GPS consistente con la ruta (tolerancia 20%)
   if (ruta.length >= 2) {
     const distanciaGps = calcularDistanciaRuta(ruta);
-    const desviacion = Math.abs(distanciaGps - distancia) / Math.max(distancia, 1);
-    if (desviacion > 0.20) { // tolerancia 20% por filtrado GPS del cliente
+    if (Math.abs(distanciaGps - distancia) / Math.max(distancia, 1) > 0.20) {
       motivos.push('distancia_gps_inconsistente');
     }
   }
 
+  // 4. C5: Verificar que los territorios declarados coinciden con la ruta GPS
+  let territoriosFraudulentos = [];
+  if (ciudadId && ruta.length >= 2 && territorioCarrera.length > 0) {
+    try {
+      const territoriosSv = await obtenerTerritoriosSegmentadosSv(ciudadId, null);
+      const territorioCalculado = calcularResumenTerritorialSv(ruta, territoriosSv, puntos, distancia);
+      const idsCalculados = new Set(territorioCalculado.map(t => t.barrioId));
+      territoriosFraudulentos = territorioCarrera.filter(t => !idsCalculados.has(t.barrioId));
+      if (territoriosFraudulentos.length > 0) motivos.push('territorios_no_alcanzados');
+    } catch (e) {
+      console.warn('[validarCarrera] No se pudieron verificar territorios:', e);
+    }
+  }
+
   if (motivos.length > 0) {
-    // Marcar carrera como fraudulenta y revertir puntos del usuario
+    // Leer doc de usuario para filtrar ultimasCarreras (M5)
+    const userSnap = await db.collection('usuarios').doc(uid).get();
+    const ultimasCarrerasSinFraude = (userSnap.data()?.ultimasCarreras ?? []).filter(c => c.id !== carreraId);
+
     const batch = db.batch();
     batch.update(event.data.ref, {
       fraudulenta: true,
@@ -875,20 +1685,66 @@ exports.validarCarrera = onDocumentCreated('carreras/{carreraId}', async (event)
       carrerasTotal: FieldValue.increment(-1),
       distanciaTotal: FieldValue.increment(-Math.round(distancia)),
       duracionTotal: FieldValue.increment(-duracion),
+      ultimasCarreras: ultimasCarrerasSinFraude,
     });
+
+    // Revertir también el ranking de ciudad (M4) para que no quede con puntos inflados
+    if (ciudadId) {
+      batch.set(db.collection('rankingsCiudad').doc(`${ciudadId}_${uid}`), {
+        puntos: FieldValue.increment(-puntos),
+        carreras: FieldValue.increment(-1),
+        totalMetros: FieldValue.increment(-Math.round(distancia)),
+      }, { merge: true });
+    }
+
+    // Revertir conquistas fraudulentas; el trigger descontarTerritorioSegmentadoPerdido
+    // decrementa barriosConquistadosTotal automáticamente cuando dueno cambia a null
+    for (const territorio of territoriosFraudulentos) {
+      if (!segmentoCompetitivo || !territorio.coleccion || !territorio.barrioId) continue;
+      const ref = db.collection(territorio.coleccion).doc(territorio.barrioId)
+        .collection('segmentos').doc(segmentoCompetitivo);
+      const snap = await ref.get();
+      if (snap.exists && snap.data().dueno === uid) {
+        batch.update(ref, { dueno: null, duenoPuntos: 0 });
+      }
+    }
+
     await batch.commit();
-    console.warn(`Carrera fraudulenta detectada: ${carreraId} | uid: ${uid} | motivos: ${motivos.join(', ')}`);
-  } else {
-    await event.data.ref.update({
-      verificado: true,
-      verificadoEn: FieldValue.serverTimestamp(),
+    console.warn(`[validarCarrera] Fraude: ${carreraId} uid:${uid} motivos:${motivos.join(',')}`);
+    return;
+  }
+
+  // C3: Top10 por territorio con transacción atómica (evita race condition entre carreras simultáneas)
+  for (const barrio of territorioCarrera) {
+    if (!segmentoCompetitivo || !barrio.coleccion || !barrio.barrioId) continue;
+    const barrioSegmentoRef = db.collection(barrio.coleccion).doc(barrio.barrioId)
+      .collection('segmentos').doc(segmentoCompetitivo);
+    const marcaRef = db.collection('usuarios').doc(uid)
+      .collection('marcasTerritoriales').doc(`${barrio.barrioId}_${segmentoCompetitivo}`);
+
+    await db.runTransaction(async (tx) => {
+      const [marcaSnap, segmentoSnap] = await Promise.all([tx.get(marcaRef), tx.get(barrioSegmentoRef)]);
+      const totalPuntosUsuario = marcaSnap.exists ? (marcaSnap.data().puntos ?? 0) : barrio.puntos;
+      const currentTop10 = segmentoSnap.data()?.top10 ?? [];
+      const newTop10 = [...currentTop10.filter(e => e.uid !== uid), { uid, puntos: totalPuntosUsuario }]
+        .sort((a, b) => b.puntos - a.puntos).slice(0, 10);
+      tx.set(barrioSegmentoRef, {
+        top10: newTop10,
+        top10Uids: top10Uids(newTop10),
+        actualizadoEn: FieldValue.serverTimestamp(),
+      }, { merge: true });
     });
   }
+
+  await event.data.ref.update({
+    verificado: true,
+    verificadoEn: FieldValue.serverTimestamp(),
+  });
 });
 
 // ─── Notificaciones de reportes ──────────────────────────────────────────────
 
-exports.notificarReporte = onDocumentCreated('reportes/{reportId}', async (event) => {
+exports.notificarReporte = onDocumentCreated({ document: 'reportes/{reportId}', secrets: [GMAIL_PASS] }, async (event) => {
   const reporte = event.data.data();
   const { tipo, recursoId, motivo, reportadoPor } = reporte;
 

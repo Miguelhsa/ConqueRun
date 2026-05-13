@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import { esCarreraPuntuable, esCarreraStravaVerificada, normalizarCarrera } from '../utils/carreras';
 import { formatRitmo } from '../utils/formatters';
@@ -20,7 +20,12 @@ export default function HistorialScreen() {
   const cargarCarreras = async () => {
     try {
       const uid = auth.currentUser.uid;
-      const snap = await getDocs(query(collection(db, 'carreras'), where('uid', '==', uid)));
+      const snap = await getDocs(query(
+        collection(db, 'carreras'),
+        where('uid', '==', uid),
+        orderBy('fecha', 'desc'),
+        limit(200)
+      ));
       const data = snap.docs
         .map(d => ({ id: d.id, ...normalizarCarrera(d.data()) }))
         .sort((a, b) => getFechaMs(b.fecha) - getFechaMs(a.fecha));

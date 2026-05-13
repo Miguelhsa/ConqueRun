@@ -20,8 +20,12 @@ const normalizarPunto = (location) => ({
 });
 
 const leerJson = async (key, fallback) => {
-  const value = await AsyncStorage.getItem(key);
-  return value ? JSON.parse(value) : fallback;
+  try {
+    const value = await AsyncStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
 };
 
 export const puntoTienePrecisionAceptable = (punto) => (
@@ -137,8 +141,10 @@ export const agregarPuntosTracking = async (locations = []) => {
   if (!locations.length) return [];
 
   const [[, rutaStr], [, metaStr]] = await AsyncStorage.multiGet([RUTA_KEY, META_KEY]);
-  const rutaActual = rutaStr ? JSON.parse(rutaStr) : [];
-  const meta = metaStr ? JSON.parse(metaStr) : null;
+  let rutaActual = [];
+  let meta = null;
+  try { if (rutaStr) rutaActual = JSON.parse(rutaStr); } catch {}
+  try { if (metaStr) meta = JSON.parse(metaStr); } catch {}
   const puntos = locations.map(normalizarPunto);
   const rutaNueva = [...rutaActual];
   let distanciaAcumulada = meta?.distanciaAcumulada ?? 0;

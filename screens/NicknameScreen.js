@@ -92,16 +92,20 @@ export default function NicknameScreen({ onGuardado }) {
     }
     setGuardando(true);
     try {
-      await setDoc(doc(db, 'usuarios', usuario.uid), {
-        nickname: nicknameLimpio,
-        pais: nacionalidad,
-        genero,
-        fechaNacimiento,
-        fechaNacimientoGuardadaEn: serverTimestamp(),
-        onboardingPendiente: true,
-        onboardingCompletado: false,
-        actualizadoEn: serverTimestamp(),
-      }, { merge: true });
+      await Promise.all([
+        setDoc(doc(db, 'usuarios', usuario.uid), {
+          nickname: nicknameLimpio,
+          pais: nacionalidad,
+          genero,
+          onboardingPendiente: true,
+          onboardingCompletado: false,
+          actualizadoEn: serverTimestamp(),
+        }, { merge: true }),
+        setDoc(doc(db, 'usuarios', usuario.uid, 'privado', 'datos'), {
+          fechaNacimiento,
+          fechaNacimientoGuardadaEn: serverTimestamp(),
+        }, { merge: true }),
+      ]);
       onGuardado();
     } catch (e) {
       console.error('[NicknameScreen] guardar perfil inicial:', e);

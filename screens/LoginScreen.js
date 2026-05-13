@@ -1,8 +1,11 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ImageBackground, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ImageBackground, Platform, ActivityIndicator, Linking, ScrollView } from 'react-native';
 import { auth } from '../firebaseConfig';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
 import { colors, radius } from '../utils/theme';
+
+const URL_TERMINOS = 'https://conquerrun-8d30e.web.app/terminos';
+const URL_PRIVACIDAD = 'https://conquerrun-8d30e.web.app/privacidad';
 
 const MENSAJES_ERROR = {
   'auth/user-not-found': 'No existe una cuenta con ese email.',
@@ -11,7 +14,7 @@ const MENSAJES_ERROR = {
   'auth/too-many-requests': 'Demasiados intentos. Espera unos minutos.',
   'auth/network-request-failed': 'Sin conexión. Revisa tu internet.',
   'auth/email-already-in-use': 'Ya existe una cuenta con ese email.',
-  'auth/weak-password': 'La contraseña debe tener al menos 6 caracteres.',
+  'auth/weak-password': 'La contraseña debe tener al menos 8 caracteres.',
   'auth/invalid-email': 'El formato del email no es válido.',
 };
 
@@ -20,9 +23,43 @@ export default function LoginScreen({ onLogin }) {
   const [password, setPassword] = useState('');
   const [esRegistro, setEsRegistro] = useState(false);
   const [cargando, setCargando] = useState(false);
+  const [anioNacimiento, setAnioNacimiento] = useState('');
+  const [aceptaTerminos, setAceptaTerminos] = useState(false);
+
+  const cambiarModo = (nuevoModo) => {
+    setEsRegistro(nuevoModo);
+    setAnioNacimiento('');
+    setAceptaTerminos(false);
+  };
 
   const handleAuth = async () => {
     if (cargando) return;
+
+    if (esRegistro) {
+      const anio = parseInt(anioNacimiento, 10);
+      const anioActual = new Date().getFullYear();
+
+      if (!anio || anio < 1900 || anio > anioActual) {
+        Alert.alert('Año no válido', 'Introduce tu año de nacimiento con 4 dígitos (por ejemplo: 1995).');
+        return;
+      }
+      if (anioActual - anio < 13) {
+        Alert.alert(
+          'Edad mínima requerida',
+          'ConqueRun es una aplicación para mayores de 13 años. No podemos crear tu cuenta.'
+        );
+        return;
+      }
+      if (password.length < 8) {
+        Alert.alert('Contraseña débil', 'La contraseña debe tener al menos 8 caracteres.');
+        return;
+      }
+      if (!aceptaTerminos) {
+        Alert.alert('Términos requeridos', 'Debes aceptar los Términos de Uso y la Política de Privacidad para crear tu cuenta.');
+        return;
+      }
+    }
+
     setCargando(true);
     try {
       if (esRegistro) {
@@ -67,7 +104,12 @@ export default function LoginScreen({ onLogin }) {
         <Text style={styles.subtitulo}>Conquista tu barrio</Text>
       </View>
 
-      <View style={styles.formulario}>
+      <ScrollView
+        style={styles.formularioScroll}
+        contentContainerStyle={styles.formulario}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <TextInput
           style={styles.input}
           placeholder="Email"
@@ -88,6 +130,48 @@ export default function LoginScreen({ onLogin }) {
           editable={!cargando}
         />
 
+        {esRegistro && (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder="Año de nacimiento (ej: 1995)"
+              placeholderTextColor="#7f8796"
+              value={anioNacimiento}
+              onChangeText={v => setAnioNacimiento(v.replace(/\D/g, '').slice(0, 4))}
+              keyboardType="number-pad"
+              maxLength={4}
+              editable={!cargando}
+            />
+
+            <TouchableOpacity
+              style={styles.checkboxFila}
+              onPress={() => setAceptaTerminos(v => !v)}
+              activeOpacity={0.7}
+              disabled={cargando}
+            >
+              <View style={[styles.checkbox, aceptaTerminos && styles.checkboxMarcado]}>
+                {aceptaTerminos && <Text style={styles.checkboxTick}>✓</Text>}
+              </View>
+              <Text style={styles.checkboxTexto}>
+                He leído y acepto los{' '}
+                <Text
+                  style={styles.enlace}
+                  onPress={() => Linking.openURL(URL_TERMINOS)}
+                >
+                  Términos de Uso
+                </Text>
+                {' '}y la{' '}
+                <Text
+                  style={styles.enlace}
+                  onPress={() => Linking.openURL(URL_PRIVACIDAD)}
+                >
+                  Política de Privacidad
+                </Text>
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
+
         <TouchableOpacity
           style={[styles.boton, cargando && styles.botonDesactivado]}
           onPress={handleAuth}
@@ -99,7 +183,7 @@ export default function LoginScreen({ onLogin }) {
           }
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setEsRegistro(!esRegistro)} disabled={cargando}>
+        <TouchableOpacity onPress={() => cambiarModo(!esRegistro)} disabled={cargando}>
           <Text style={styles.cambiar}>
             {esRegistro ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
           </Text>
@@ -110,7 +194,20 @@ export default function LoginScreen({ onLogin }) {
             <Text style={styles.olvido}>¿Olvidaste tu contraseña?</Text>
           </TouchableOpacity>
         )}
-      </View>
+
+        {!esRegistro && (
+          <Text style={styles.legalTexto}>
+            Al continuar aceptas los{' '}
+            <Text style={styles.enlace} onPress={() => Linking.openURL(URL_TERMINOS)}>
+              Términos de Uso
+            </Text>
+            {' '}y la{' '}
+            <Text style={styles.enlace} onPress={() => Linking.openURL(URL_PRIVACIDAD)}>
+              Política de Privacidad
+            </Text>
+          </Text>
+        )}
+      </ScrollView>
     </ImageBackground>
   );
 }
@@ -133,8 +230,11 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(3, 7, 18, 0.48)',
   },
-  formulario: {
+  formularioScroll: {
     width: '100%',
+  },
+  formulario: {
+    paddingBottom: 8,
   },
   marca: {
     width: '100%',
@@ -178,6 +278,45 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 12,
   },
+  checkboxFila: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    gap: 10,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: 'rgba(248,250,252,0.4)',
+    backgroundColor: 'rgba(3,7,18,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  checkboxMarcado: {
+    backgroundColor: colors.gold,
+    borderColor: colors.gold,
+  },
+  checkboxTick: {
+    color: '#05070c',
+    fontSize: 13,
+    fontWeight: '900',
+    lineHeight: 15,
+  },
+  checkboxTexto: {
+    flex: 1,
+    color: '#d8dee9',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  enlace: {
+    color: colors.gold,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
   boton: {
     width: '100%',
     backgroundColor: '#f8fafc',
@@ -214,5 +353,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginTop: 16,
     textAlign: 'center',
+  },
+  legalTexto: {
+    color: 'rgba(248,250,252,0.45)',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 20,
+    lineHeight: 16,
   },
 });

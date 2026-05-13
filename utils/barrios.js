@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../firebaseConfig';
-import { collection, doc, getDoc, getDocs, updateDoc, query, where } from 'firebase/firestore';
+import { collection, collectionGroup, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
 import { obtenerTerritoriosSeed } from './territoriosSeed';
 
 const COLECCION_TERRITORIOS = 'territorios';
@@ -165,15 +165,10 @@ export const calcularResumenTerritorial = (ruta, barrios, puntosPersonales, dist
     .sort((a, b) => b.distanciaMetros - a.distanciaMetros);
 };
 
-export const actualizarDueno = async (barrioId, uid, puntos, coleccion = COLECCION_BARRIOS) => {
-  const ref = doc(db, coleccion, barrioId);
-  await updateDoc(ref, { dueno: uid, duenoPuntos: puntos });
-};
-
 const obtenerPorColeccion = async (nombreColeccion, ciudadId = null) => {
   const ref = ciudadId
-    ? query(collection(db, nombreColeccion), where('ciudadId', '==', ciudadId))
-    : collection(db, nombreColeccion);
+    ? query(collection(db, nombreColeccion), where('ciudadId', '==', ciudadId), limit(2000))
+    : query(collection(db, nombreColeccion), limit(2000));
   const snap = await getDocs(ref);
   return snap.docs
     .map(d => normalizarTerritorio(d.id, d.data(), nombreColeccion))
@@ -207,6 +202,54 @@ export const obtenerBarrios = obtenerTerritorios;
 export const aplicarSegmentoCompetitivo = async (territorios, segmentoCompetitivo) => {
   if (!segmentoCompetitivo || !Array.isArray(territorios) || territorios.length === 0) {
     return territorios;
+  }
+
+  try {
+    const porTerritorioId = new Map();
+    const chunks = [];
+    for (let i = 0; i < territorios.length; i += 30) chunks.push(territorios.slice(i, i + 30));
+
+    for (const chunk of chunks) {
+      const ids = chunk.map(t => t.territorioId ?? t.id).filter(Boolean);
+      if (ids.length === 0) continue;
+      const snap = await getDocs(query(
+        collectionGroup(db, 'segmentos'),
+        where('segmentoCompetitivo', '==', segmentoCompetitivo),
+        where('territorioId', 'in', ids)
+      ));
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (data.territorioId) porTerritorioId.set(data.territorioId, data);
+      });
+    }
+
+    return territorios.map(territorio => {
+      const data = porTerritorioId.get(territorio.territorioId ?? territorio.id);
+      if (!data) {
+        return {
+          ...territorio,
+          segmentoCompetitivo,
+          dueno: null,
+          duenoPuntos: 0,
+          top10: [],
+        };
+      }
+      return {
+        ...territorio,
+        ...data,
+        id: territorio.id,
+        barrioId: territorio.barrioId,
+        territorioId: territorio.territorioId,
+        coleccion: territorio.coleccion,
+        segmentoCompetitivo,
+      };
+    });
+  } catch (e) {
+    console.warn('[barrios] Lectura agrupada de segmentos no disponible; usando fallback por documento.', {
+      segmentoCompetitivo,
+      code: e?.code,
+      message: e?.message,
+    });
   }
 
   const resultados = await Promise.all(territorios.map(territorio =>
