@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, TextInput, Alert, Modal, ImageBackground, Linking } from 'react-native';
+import GruposScreen from './GruposScreen';
 import { useFocusEffect } from '@react-navigation/native';
 import { EstadoVacio, PantallaCargando } from '../components/ui';
 import { auth, db } from '../firebaseConfig';
@@ -57,6 +58,7 @@ export default function PerfilScreen() {
   const [passwordEliminar, setPasswordEliminar] = useState('');
   const [eliminando, setEliminando] = useState(false);
   const [estadoNotif, setEstadoNotif] = useState(null);
+  const [tabPrincipal, setTabPrincipal] = useState('perfil');
 
   useFocusEffect(useCallback(() => {
     cargarPerfil();
@@ -345,6 +347,25 @@ export default function PerfilScreen() {
   if (cargando) return <PantallaCargando />;
 
   return (
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <View style={styles.selectorPrincipal}>
+        <TouchableOpacity
+          style={[styles.selectorTab, tabPrincipal === 'perfil' && styles.selectorTabActivo]}
+          onPress={() => setTabPrincipal('perfil')}
+        >
+          <Text style={[styles.selectorTabTexto, tabPrincipal === 'perfil' && styles.selectorTabTextoActivo]}>Perfil</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.selectorTab, tabPrincipal === 'grupos' && styles.selectorTabActivo]}
+          onPress={() => setTabPrincipal('grupos')}
+        >
+          <Text style={[styles.selectorTabTexto, tabPrincipal === 'grupos' && styles.selectorTabTextoActivo]}>Grupos</Text>
+        </TouchableOpacity>
+      </View>
+
+      {tabPrincipal === 'grupos' ? (
+        <GruposScreen />
+      ) : (
     <>
     <ImageBackground
       source={require('../assets/login-map-flag-centered.jpg')}
@@ -864,10 +885,35 @@ export default function PerfilScreen() {
       </View>
     </Modal>
     </>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  selectorPrincipal: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  selectorTab: {
+    flex: 1,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  selectorTabActivo: {
+    borderBottomWidth: 2,
+    borderBottomColor: colors.gold,
+  },
+  selectorTabTexto: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.subdued,
+  },
+  selectorTabTextoActivo: {
+    color: colors.gold,
+  },
   imageFondo: { flex: 1 },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,7,18,0.78)' },
   container: { flex: 1 },

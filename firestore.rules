@@ -373,6 +373,11 @@ service cloud.firestore {
       }
     }
 
+    // Permite collectionGroup queries sobre segmentos (barrios y territorios)
+    match /{path=**}/segmentos/{segmentoId} {
+      allow read: if signedIn();
+    }
+
     match /reportes/{id} {
       allow create: if signedIn() &&
         noReporteRepetido() &&

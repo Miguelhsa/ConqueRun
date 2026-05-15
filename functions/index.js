@@ -1106,7 +1106,8 @@ exports.registrarCarreraConqurun = onCall(
       actualizadoEn: FieldValue.serverTimestamp(),
     };
     let barriosGanadosGrupo = 0;
-    const barriosPerdidosPorGrupo = new Map();
+    const nombresGanadosGrupo = [];
+    const barriosPerdidosPorGrupo = new Map(); // grupoId -> { count, nombres[] }
 
     for (const barrio of territorioCarreraConMarcas) {
       const marcaGrupoRef = db.collection('grupoMarcas').doc(aportacion.grupoId)
@@ -1126,11 +1127,12 @@ exports.registrarCarreraConqurun = onCall(
           actualizadoGrupoEn: FieldValue.serverTimestamp(),
         });
         barriosGanadosGrupo += 1;
+        nombresGanadosGrupo.push(barrio.nombre ?? barrio.barrioId);
         if (anteriorGrupoId && anteriorGrupoId !== aportacion.grupoId) {
-          barriosPerdidosPorGrupo.set(
-            anteriorGrupoId,
-            (barriosPerdidosPorGrupo.get(anteriorGrupoId) ?? 0) + 1
-          );
+          const prev = barriosPerdidosPorGrupo.get(anteriorGrupoId) ?? { count: 0, nombres: [] };
+          prev.count += 1;
+          prev.nombres.push(barrio.nombre ?? barrio.barrioId);
+          barriosPerdidosPorGrupo.set(anteriorGrupoId, prev);
         }
       }
     }
@@ -1138,11 +1140,44 @@ exports.registrarCarreraConqurun = onCall(
       grupoUpdate.barriosConquistados = FieldValue.increment(barriosGanadosGrupo);
     }
     batch.set(db.collection('grupos').doc(aportacion.grupoId), grupoUpdate, { merge: true });
-    for (const [grupoId, perdidos] of barriosPerdidosPorGrupo.entries()) {
+
+    // Leer datos del grupo ganador (necesario para notificar ganadores y perdedores)
+    const grupoGanadorSnap = await db.collection('grupos').doc(aportacion.grupoId).get();
+    const miembrosGanadores = grupoGanadorSnap.data()?.miembros ?? [];
+    const grupoGanadorNombre = grupoGanadorSnap.data()?.nombre ?? 'tu equipo';
+
+    // Notificar a miembros del grupo ganador (excepto el corredor, que ya tiene notificación local)
+    for (const miembroUid of miembrosGanadores) {
+      if (miembroUid === uid) continue;
+      for (const nombre of nombresGanadosGrupo) {
+        batch.set(
+          db.collection('usuarios').doc(miembroUid).collection('privado').doc('notificaciones'),
+          { notificacionesPendientes: FieldValue.arrayUnion({ tipo: 'territorio_ganado_grupo', nombre, grupoNombre: grupoGanadorNombre, fecha: ahoraMs }) },
+          { merge: true }
+        );
+      }
+    }
+
+    for (const [grupoId, { count, nombres }] of barriosPerdidosPorGrupo.entries()) {
       batch.set(db.collection('grupos').doc(grupoId), {
-        barriosConquistados: FieldValue.increment(-perdidos),
+        barriosConquistados: FieldValue.increment(-count),
         actualizadoEn: FieldValue.serverTimestamp(),
       }, { merge: true });
+
+      // Notificar a los miembros del grupo perdedor (con nombre del grupo ganador para saber quién los conquistó)
+      const grupoPerdedorSnap = await db.collection('grupos').doc(grupoId).get();
+      const miembrosPerdedores = grupoPerdedorSnap.data()?.miembros ?? [];
+      const grupoPerdedorNombre = grupoPerdedorSnap.data()?.nombre ?? 'tu equipo';
+      for (const miembroUid of miembrosPerdedores) {
+        if (miembroUid === uid) continue;
+        for (const nombre of nombres) {
+          batch.set(
+            db.collection('usuarios').doc(miembroUid).collection('privado').doc('notificaciones'),
+            { notificacionesPendientes: FieldValue.arrayUnion({ tipo: 'territorio_perdido_grupo', nombre, grupoNombre: grupoPerdedorNombre, grupoGanadorNombre, fecha: ahoraMs }) },
+            { merge: true }
+          );
+        }
+      }
     }
   }
 
@@ -1840,3 +1875,61 @@ exports.notificarReporte = onDocumentCreated({ document: 'reportes/{reportId}', 
     `,
   });
 });
+
+// ─── Push: territorio perdido (individual y grupo) ───────────────────────────
+
+exports.enviarNotificacionTerritorios = onDocumentWritten(
+  { document: 'usuarios/{uid}/privado/notificaciones' },
+  async (event) => {
+    const after = event.data?.after;
+    if (!after?.exists) return;
+
+    const data = after.data();
+    const pendientes = data.notificacionesPendientes ?? [];
+    const pushToken = data.pushToken;
+
+    if (pendientes.length === 0 || !pushToken || !pushToken.startsWith('ExponentPushToken')) return;
+
+    const individuales = pendientes.filter(n => n.tipo === 'territorio_perdido');
+    const grupoPerdidos = pendientes.filter(n => n.tipo === 'territorio_perdido_grupo');
+    const grupoGanados = pendientes.filter(n => n.tipo === 'territorio_ganado_grupo');
+    const mensajes = [];
+
+    if (individuales.length === 1) {
+      mensajes.push({ to: pushToken, title: '🏴 Territorio perdido', body: `${individuales[0].nombre} ya no es tuyo`, sound: 'default' });
+    } else if (individuales.length > 1) {
+      mensajes.push({ to: pushToken, title: '🏴 Territorios perdidos', body: `${individuales.length} de tus barrios han caído`, sound: 'default' });
+    }
+
+    if (grupoPerdidos.length === 1) {
+      const n = grupoPerdidos[0];
+      const porQuien = n.grupoGanadorNombre ? ` por ${n.grupoGanadorNombre}` : '';
+      mensajes.push({ to: pushToken, title: `🏴 ${n.grupoNombre ?? 'Tu equipo'} perdió territorio`, body: `${n.nombre} fue conquistado${porQuien}`, sound: 'default' });
+    } else if (grupoPerdidos.length > 1) {
+      const grupoNombre = grupoPerdidos[0].grupoNombre ?? 'Tu equipo';
+      mensajes.push({ to: pushToken, title: `🏴 ${grupoNombre} perdió territorios`, body: `${grupoPerdidos.length} barrios han caído`, sound: 'default' });
+    }
+
+    if (grupoGanados.length === 1) {
+      const n = grupoGanados[0];
+      mensajes.push({ to: pushToken, title: `🏁 ${n.grupoNombre ?? 'Tu equipo'} conquistó territorio`, body: `${n.nombre} es vuestro`, sound: 'default' });
+    } else if (grupoGanados.length > 1) {
+      const grupoNombre = grupoGanados[0].grupoNombre ?? 'Tu equipo';
+      mensajes.push({ to: pushToken, title: `🏁 ${grupoNombre} conquistó territorios`, body: `${grupoGanados.length} barrios nuevos`, sound: 'default' });
+    }
+
+    if (mensajes.length === 0) return;
+
+    try {
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(mensajes.length === 1 ? mensajes[0] : mensajes),
+      });
+    } catch (e) {
+      console.error('[push] Error enviando notificación de territorio:', e.message);
+    }
+
+    await after.ref.update({ notificacionesPendientes: [] });
+  }
+);

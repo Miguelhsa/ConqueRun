@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "carreras",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "rankingsCiudad",
       "queryScope": "COLLECTION",
       "fields": [
@@ -98,6 +106,14 @@
         { "fieldPath": "ciudadId", "order": "ASCENDING" },
         { "fieldPath": "esPublico", "order": "ASCENDING" },
         { "fieldPath": "puntosTotales", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "segmentos",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
+        { "fieldPath": "territorioId", "order": "ASCENDING" }
       ]
     }
   ],

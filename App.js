@@ -10,7 +10,7 @@ if (!__DEV__) {
 }
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { ActivityIndicator, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -23,7 +23,6 @@ import { calcularDistanciaFiltrada, obtenerMetaTracking, obtenerRutaTracking } f
 import { formatTiempo } from './utils/formatters';
 import BiometricUnlockScreen from './screens/BiometricUnlockScreen';
 import CiudadScreen from './screens/CiudadScreen';
-import GruposScreen from './screens/GruposScreen';
 import LoginScreen from './screens/LoginScreen';
 import NicknameScreen from './screens/NicknameScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
@@ -69,6 +68,7 @@ export default function App() {
           const perfil = await comprobarPerfil(user.uid);
           if (perfil?.onboardingCompletado) {
             registrarNotificaciones(user.uid).catch(() => {});
+            cargarNotifPendientes(user.uid).catch(() => {});
           }
         }
       } catch (e) {
@@ -128,6 +128,20 @@ export default function App() {
     return data;
   };
 
+  const cargarNotifPendientes = async (uid) => {
+    const snap = await getDoc(doc(db, 'usuarios', uid, 'privado', 'notificaciones'));
+    if (!snap.exists()) return;
+    const pendientes = snap.data().notificacionesPendientes ?? [];
+    if (pendientes.length === 0) return;
+    const perdidas = pendientes.filter(n =>
+      n.tipo === 'territorio_perdido' || n.tipo === 'territorio_perdido_grupo'
+    );
+    if (perdidas.length > 0) setNotifPendientes(perdidas);
+    await updateDoc(doc(db, 'usuarios', uid, 'privado', 'notificaciones'), {
+      notificacionesPendientes: [],
+    });
+  };
+
   const debeUsarBiometria = async () => {
     const compatible = await LocalAuthentication.hasHardwareAsync();
     if (!compatible) return false;
@@ -176,12 +190,19 @@ export default function App() {
           <View style={styles.notifCard}>
             <Text style={styles.notifTitulo}>⚔️ Territorios perdidos</Text>
             <Text style={styles.notifSubtitulo}>
-              Mientras estabas fuera alguien te conquistó {notifPendientes.length === 1 ? 'este barrio' : 'estos barrios'}:
+              Mientras estabas fuera perdiste {notifPendientes.length === 1 ? 'este barrio' : 'estos barrios'}:
             </Text>
             {notifPendientes.map((n, i) => (
               <View key={i} style={styles.notifFila}>
                 <Text style={styles.notifBullet}>🏴</Text>
-                <Text style={styles.notifNombre}>{n.nombre}</Text>
+                <View>
+                  <Text style={styles.notifNombre}>{n.nombre}</Text>
+                  {n.tipo === 'territorio_perdido_grupo' && (
+                    <Text style={styles.notifGrupo}>
+                      {n.grupoNombre}{n.grupoGanadorNombre ? ` · conquistado por ${n.grupoGanadorNombre}` : ''}
+                    </Text>
+                  )}
+                </View>
               </View>
             ))}
             <TouchableOpacity style={styles.notifBoton} onPress={() => setNotifPendientes([])}>
@@ -201,11 +222,10 @@ export default function App() {
           tabBarIcon: TabIcon(iconoTab(route.name), route.name === 'Correr' && Boolean(carreraActiva)),
         })}
       >
-        <Tab.Screen name="Perfil" component={PerfilScreen} />
-        <Tab.Screen name="Grupos" component={GruposScreen} />
+        <Tab.Screen name="Mapa" component={MapaScreen} />
         <Tab.Screen name="Ranking" component={RankingScreen} />
         <Tab.Screen name="Correr" component={CorrerScreen} />
-        <Tab.Screen name="Mapa" component={MapaScreen} />
+        <Tab.Screen name="Perfil" component={PerfilScreen} />
         {esAdmin && (
           <Tab.Screen
             name="Admin"
@@ -222,7 +242,6 @@ export default function App() {
 
 const iconoTab = (name) => ({
   Perfil: 'account-circle',
-  Grupos: 'account-group',
   Ranking: 'trophy',
   Correr: 'run-fast',
   Mapa: 'map-marker-radius',
@@ -339,6 +358,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   notifBullet: { fontSize: 16 },
+  notifGrupo: { fontSize: 12, color: '#64748b', marginTop: 1 },
   notifNombre: {
     fontSize: 15,
     fontWeight: '600',

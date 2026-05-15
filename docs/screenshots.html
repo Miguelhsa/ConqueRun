@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>ConqueRun – Screenshots</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1629;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+      padding: 48px 32px;
+    }
+    h1 { color: #d6aa4c; text-align: center; font-size: 22px; margin-bottom: 8px; letter-spacing: 1px; }
+    .meta { color: #475569; text-align: center; font-size: 13px; margin-bottom: 48px; }
+    .instrucciones {
+      background: #111827; border: 1px solid #263244; border-radius: 12px;
+      padding: 16px 20px; max-width: 900px; margin: 0 auto 48px;
+      color: #94a3b8; font-size: 13px; line-height: 1.7;
+    }
+    .instrucciones strong { color: #f8fafc; }
+    .grid {
+      display: flex; flex-wrap: wrap; gap: 48px;
+      justify-content: center; max-width: 2200px; margin: 0 auto;
+    }
+    .col { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+    .col-label { color: #64748b; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+
+    /* ── Phone shell ─────────────────────────────── */
+    .phone {
+      width: 393px; height: 852px;
+      background: #111; border-radius: 54px; padding: 14px;
+      box-shadow: 0 0 0 1.5px #2a2a2a, 0 0 0 3px #111, 0 40px 100px rgba(0,0,0,.7);
+      position: relative; flex-shrink: 0;
+    }
+    .screen {
+      width: 100%; height: 100%;
+      background: #080b14; border-radius: 44px;
+      overflow: hidden; position: relative;
+    }
+    .di { /* dynamic island */
+      position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+      width: 120px; height: 36px; background: #000; border-radius: 20px; z-index: 200;
+    }
+    .sb { /* status bar */
+      height: 59px; display: flex; align-items: flex-end;
+      padding: 0 28px 10px; justify-content: space-between; position: relative; z-index: 10;
+    }
+    .sb-time { font-size: 15px; font-weight: 600; color: #f8fafc; }
+    .sb-icons { display: flex; gap: 5px; align-items: center; }
+    .sb-icons span { color: #f8fafc; font-size: 12px; }
+    .tabbar {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 84px;
+      background: #111827; border-top: 1px solid #263244;
+      display: flex; align-items: flex-start; padding-top: 10px; z-index: 50;
+    }
+    .tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .tab svg { width: 24px; height: 24px; }
+    .tab span { font-size: 10px; }
+    .tab.on span { color: #d6aa4c; }
+    .tab.off span { color: #475569; }
+    .tab.on path, .tab.on rect, .tab.on circle, .tab.on polygon { fill: #d6aa4c; }
+    .tab.off path, .tab.off rect, .tab.off circle, .tab.off polygon { fill: #475569; }
+    .content { position: absolute; top: 59px; left: 0; right: 0; bottom: 84px; overflow: hidden; }
+
+    /* ── Marketing overlay ───────────────────────── */
+    .overlay {
+      position: absolute; bottom: 84px; left: 0; right: 0;
+      padding: 28px 24px 20px;
+      background: linear-gradient(to top, rgba(8,11,20,.98) 60%, transparent);
+      z-index: 40;
+    }
+    .ov-tag { font-size: 10px; font-weight: 800; color: #d6aa4c; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 6px; }
+    .ov-title { font-size: 26px; font-weight: 900; color: #f8fafc; line-height: 1.15; margin-bottom: 6px; }
+    .ov-sub { font-size: 13px; color: #94a3b8; line-height: 1.5; }
+
+    /* ─────────────────────────────────────────────
+       SCREEN 1: MAP
+    ───────────────────────────────────────────── */
+    .s1-map { position: absolute; inset: 0; }
+    .s1-topbar {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 30;
+      padding: 10px 14px; display: flex; justify-content: space-between; align-items: flex-start;
+    }
+    .s1-city-btn {
+      background: #111827cc; border: 1px solid #263244; border-radius: 20px;
+      padding: 8px 16px; display: flex; align-items: center; gap: 6px;
+    }
+    .s1-city-btn span { color: #f8fafc; font-size: 13px; font-weight: 700; }
+    .s1-legend {
+      background: rgba(0,0,0,.72); border-radius: 14px;
+      padding: 10px 12px; width: 150px;
+    }
+    .s1-legend-tabs {
+      display: flex; background: #1e293b; border-radius: 8px; padding: 2px; margin-bottom: 8px;
+    }
+    .s1-ltab {
+      flex: 1; text-align: center; padding: 4px 0; font-size: 11px; font-weight: 600; border-radius: 6px;
+    }
+    .s1-ltab.on { background: #d6aa4c; color: #080b14; }
+    .s1-ltab.off { color: #475569; }
+    .s1-city { color: #d6aa4c; font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .s1-seg { color: #475569; font-size: 10px; font-weight: 700; margin-bottom: 8px; }
+    .s1-li { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .s1-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .s1-li span { color: #f8fafc; font-size: 11px; }
+
+    /* ─────────────────────────────────────────────
+       SCREEN 2: RUNNING
+    ───────────────────────────────────────────── */
+    .s2-map { position: absolute; top: 0; left: 0; right: 0; bottom: 200px; }
+    .s2-panel {
+      position: absolute; bottom: 84px; left: 0; right: 0;
+      background: #111827; border-top-left-radius: 24px; border-top-right-radius: 24px;
+      padding: 18px 24px 12px; z-index: 30;
+    }
+    .s2-barrio { color: #d6aa4c; font-size: 13px; text-align: center; margin-bottom: 14px; font-weight: 600; }
+    .s2-stats { display: flex; justify-content: space-around; align-items: center; margin-bottom: 16px; }
+    .s2-stat { text-align: center; flex: 1; }
+    .s2-val { font-size: 30px; font-weight: 800; color: #f8fafc; }
+    .s2-lbl { font-size: 11px; color: #475569; margin-top: 2px; }
+    .s2-sep { width: 1px; height: 40px; background: #263244; }
+    .s2-tracking {
+      text-align: center; font-size: 12px; color: #475569; margin-bottom: 14px;
+    }
+    .s2-btns { display: flex; gap: 10px; }
+    .s2-pause {
+      flex: 1; background: #1e293b; border: 1px solid #263244;
+      border-radius: 14px; padding: 16px; text-align: center;
+      font-size: 16px; font-weight: 700; color: #f8fafc;
+    }
+    .s2-stop {
+      flex: 1; background: #e63946; border-radius: 14px;
+      padding: 16px; text-align: center; font-size: 16px; font-weight: 700; color: #f8fafc;
+    }
+
+    /* ─────────────────────────────────────────────
+       SCREEN 3: POST-RUN SUMMARY
+    ───────────────────────────────────────────── */
+    .s3-bg { position: absolute; inset: 0; background: rgba(0,0,0,.72); }
+    .s3-panel {
+      position: absolute; bottom: 84px; left: 0; right: 0;
+      background: #080b14; border-top-left-radius: 24px; border-top-right-radius: 24px;
+      border-top: 1px solid #263244; padding: 22px 20px; z-index: 30;
+    }
+    .s3-eyebrow { font-size: 11px; font-weight: 800; color: #d6aa4c; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .s3-title { font-size: 24px; font-weight: 900; color: #f8fafc; margin-bottom: 3px; }
+    .s3-sub { font-size: 13px; color: #94a3b8; margin-bottom: 14px; }
+    .s3-pts {
+      background: #111827; border: 1px solid #d6aa4c; border-radius: 14px;
+      padding: 14px; text-align: center; margin-bottom: 12px;
+    }
+    .s3-pts-num { font-size: 42px; font-weight: 900; color: #d6aa4c; }
+    .s3-pts-lbl { font-size: 12px; color: #475569; margin-top: 2px; }
+    .s3-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .s3-metric {
+      width: calc(50% - 4px); background: #111827;
+      border-radius: 10px; padding: 12px;
+    }
+    .s3-mv { font-size: 16px; font-weight: 800; color: #f8fafc; }
+    .s3-ml { font-size: 11px; color: #475569; margin-top: 2px; }
+    .s3-section { margin-bottom: 10px; }
+    .s3-sec-title { font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; margin-bottom: 6px; }
+    .s3-chip {
+      border-radius: 8px; padding: 8px 12px; margin-bottom: 6px;
+      border-width: 1px; border-style: solid;
+    }
+    .s3-chip.con { background: #e6394618; border-color: #e63946; }
+    .s3-chip.def { background: #d6aa4c18; border-color: #d6aa4c; }
+    .s3-chip span { font-size: 13px; font-weight: 600; color: #f8fafc; }
+
+    /* ─────────────────────────────────────────────
+       SCREEN 4: RANKING
+    ───────────────────────────────────────────── */
+    .s4 { position: absolute; inset: 0; display: flex; flex-direction: column; }
+    .s4-header {
+      padding: 14px 20px 10px; border-bottom: 1px solid #263244;
+    }
+    .s4-title { font-size: 20px; font-weight: 900; color: #f8fafc; margin-bottom: 4px; }
+    .s4-city { font-size: 13px; color: #d6aa4c; font-weight: 700; }
+    .s4-seg { font-size: 12px; color: #475569; margin-top: 2px; }
+    .s4-tabs { display: flex; padding: 12px 20px 8px; gap: 8px; }
+    .s4-tab {
+      padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700;
+    }
+    .s4-tab.on { background: #d6aa4c22; color: #d6aa4c; border: 1px solid #d6aa4c55; }
+    .s4-tab.off { color: #475569; border: 1px solid #263244; }
+    .s4-list { flex: 1; padding: 0 20px; overflow: hidden; }
+    .s4-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 11px 0; border-bottom: 1px solid #263244;
+    }
+    .s4-row.me { background: #d6aa4c0a; border-radius: 10px; padding: 11px 10px; margin: 0 -10px; border-bottom: 1px solid #d6aa4c22; }
+    .s4-pos { width: 24px; text-align: center; font-size: 14px; font-weight: 900; }
+    .s4-pos.gold { color: #f59e0b; }
+    .s4-pos.silver { color: #94a3b8; }
+    .s4-pos.bronze { color: #b45309; }
+    .s4-pos.num { color: #475569; }
+    .s4-pos.me-pos { color: #d6aa4c; }
+    .s4-avatar {
+      width: 36px; height: 36px; border-radius: 18px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 900; color: #080b14; flex-shrink: 0;
+    }
+    .s4-info { flex: 1; }
+    .s4-nick { font-size: 14px; font-weight: 700; color: #f8fafc; }
+    .s4-nick.me { color: #d6aa4c; }
+    .s4-meta { font-size: 11px; color: #475569; margin-top: 1px; }
+    .s4-pts { font-size: 14px; font-weight: 800; color: #d6aa4c; }
+    .s4-pts.dim { color: #475569; }
+
+    /* ─────────────────────────────────────────────
+       SCREEN 5: PROFILE
+    ───────────────────────────────────────────── */
+    .s5 { position: absolute; inset: 0; overflow: hidden; }
+    .s5-bg { position: absolute; inset: 0; background: linear-gradient(to bottom, #0d1525 0%, #080b14 100%); }
+    .s5-scroll { position: absolute; inset: 0; padding: 0 18px; overflow: hidden; }
+    .s5-header { text-align: center; padding: 14px 0 20px; }
+    .s5-av {
+      width: 80px; height: 80px; border-radius: 40px; background: #d6aa4c;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 34px; font-weight: 900; color: #080b14;
+      margin: 0 auto 10px; border: 3px solid #d6aa4c33;
+    }
+    .s5-nick { font-size: 22px; font-weight: 900; color: #f8fafc; }
+    .s5-city { font-size: 13px; color: #d6aa4c; margin-top: 3px; font-weight: 600; }
+    .s5-seg-badge {
+      display: inline-block; background: #d6aa4c18; border: 1px solid #d6aa4c44;
+      border-radius: 20px; padding: 4px 12px; font-size: 11px; color: #d6aa4c;
+      font-weight: 700; margin-top: 6px;
+    }
+    .s5-stats { display: flex; gap: 8px; margin-bottom: 14px; }
+    .s5-stat {
+      flex: 1; background: #111827; border: 1px solid #263244;
+      border-radius: 12px; padding: 12px 8px; text-align: center;
+    }
+    .s5-sv { font-size: 20px; font-weight: 900; color: #f8fafc; }
+    .s5-sl { font-size: 10px; color: #475569; margin-top: 2px; }
+    .s5-card {
+      background: #111827; border: 1px solid #263244; border-radius: 14px;
+      padding: 14px 16px; margin-bottom: 10px;
+    }
+    .s5-card-title { font-size: 13px; font-weight: 800; color: #d6aa4c; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+    .s5-logro { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .s5-logro-emoji { font-size: 22px; }
+    .s5-logro-name { font-size: 13px; font-weight: 700; color: #f8fafc; }
+    .s5-logro-desc { font-size: 11px; color: #475569; margin-top: 1px; }
+    .s5-barrio { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid #1e293b; }
+    .s5-barrio-name { font-size: 13px; font-weight: 700; color: #f8fafc; }
+    .s5-barrio-pts { font-size: 12px; color: #d6aa4c; font-weight: 700; }
+  </style>
+</head>
+<body>
+
+<h1>ConqueRun · Marketing Screenshots</h1>
+<p class="meta">393 × 852 px por pantalla · Usa zoom 200–300% y captura cada teléfono individualmente</p>
+
+<div class="instrucciones">
+  <strong>Cómo exportar:</strong> Abre este archivo en Chrome → Zoom al 200% → Captura cada teléfono por separado con la herramienta de recorte del sistema, o usa Chrome DevTools → Captura de nodo.<br>
+  <strong>Tamaños requeridos:</strong> App Store: 1290×2796 px (iPhone 6.7") · Google Play: 1080×1920 px mínimo · Escala a 3× para App Store.
+</div>
+
+<div class="grid">
+
+  <!-- ══════════════════════════════════════
+       SCREENSHOT 1 – MAPA
+  ══════════════════════════════════════ -->
+  <div class="col">
+    <div class="col-label">01 · Mapa de territorio</div>
+    <div class="phone">
+      <div class="screen">
+        <div class="di"></div>
+        <div class="sb"><span class="sb-time">9:41</span><div class="sb-icons"><span>●●●</span><span>WiFi</span><span>🔋</span></div></div>
+
+        <!-- SVG Map -->
+        <svg class="s1-map" viewBox="0 0 393 620" preserveAspectRatio="xMidYMid slice">
+          <rect width="393" height="620" fill="#1a2235"/>
+          <!-- Road grid -->
+          <line x1="0" y1="155" x2="393" y2="140" stroke="#0f1829" stroke-width="6"/>
+          <line x1="0" y1="270" x2="393" y2="258" stroke="#0f1829" stroke-width="6"/>
+          <line x1="0" y1="390" x2="393" y2="375" stroke="#0f1829" stroke-width="6"/>
+          <line x1="0" y1="500" x2="393" y2="490" stroke="#0f1829" stroke-width="6"/>
+          <line x1="80"  y1="0" x2="70"  y2="620" stroke="#0f1829" stroke-width="5"/>
+          <line x1="180" y1="0" x2="175" y2="620" stroke="#0f1829" stroke-width="5"/>
+          <line x1="280" y1="0" x2="275" y2="620" stroke="#0f1829" stroke-width="5"/>
+          <line x1="340" y1="0" x2="338" y2="620" stroke="#0f1829" stroke-width="4"/>
+
+          <!-- Territories – yours (gold) -->
+          <polygon points="82,60 178,52 182,150 85,158" fill="#d6aa4c" opacity="0.55" stroke="#d6aa4c" stroke-width="1.5"/>
+          <polygon points="178,52 275,45 278,138 182,150" fill="#d6aa4c" opacity="0.4" stroke="#d6aa4c" stroke-width="1.5"/>
+          <polygon points="82,160 182,152 186,262 88,270" fill="#d6aa4c" opacity="0.65" stroke="#d6aa4c" stroke-width="2"/>
+          <polygon points="275,148 340,142 342,262 278,268" fill="#d6aa4c" opacity="0.45" stroke="#d6aa4c" stroke-width="1.5"/>
+
+          <!-- Territories – rivals (red) -->
+          <polygon points="275,45 393,38 393,140 278,138" fill="#e63946" opacity="0.5" stroke="#e63946" stroke-width="1.5"/>
+          <polygon points="182,152 275,148 278,268 186,262" fill="#e63946" opacity="0.4" stroke="#e63946" stroke-width="1.5"/>
+          <polygon points="0,160 82,160 88,270 0,276" fill="#e63946" opacity="0.45" stroke="#e63946" stroke-width="1.5"/>
+          <polygon points="88,272 186,264 188,378 92,385" fill="#e63946" opacity="0.35" stroke="#e63946" stroke-width="1.5"/>
+          <polygon points="342,264 393,260 393,378 344,382" fill="#e63946" opacity="0.5" stroke="#e63946" stroke-width="1.5"/>
+
+          <!-- Territories – free (gray) -->
+          <polygon points="0,38 82,60 85,158 0,160" fill="#475569" opacity="0.35" stroke="#475569" stroke-width="1"/>
+          <polygon points="278,140 340,142 342,264 278,268" fill="#475569" opacity="0.25" stroke="#475569" stroke-width="1"/>
+          <polygon points="186,264 278,268 280,382 188,378" fill="#475569" opacity="0.3" stroke="#475569" stroke-width="1"/>
+          <polygon points="0,278 88,272 92,385 0,390" fill="#475569" opacity="0.3" stroke="#475569" stroke-width="1"/>
+          <polygon points="92,387 188,380 190,488 94,494" fill="#475569" opacity="0.25" stroke="#475569" stroke-width="1"/>
+          <polygon points="188,380 280,384 282,490 190,488" fill="#475569" opacity="0.28" stroke="#475569" stroke-width="1"/>
+          <polygon points="280,384 344,382 345,490 282,490" fill="#475569" opacity="0.22" stroke="#475569" stroke-width="1"/>
+          <polygon points="0,392 94,387 94,494 0,498" fill="#475569" opacity="0.2" stroke="#475569" stroke-width="1"/>
+          <polygon points="345,384 393,380 393,490 345,490" fill="#475569" opacity="0.25" stroke="#475569" stroke-width="1"/>
+          <polygon points="0,38 82,60" fill="none"/>
+
+          <!-- Labels -->
+          <text x="128" y="108" font-family="sans-serif" font-size="10" fill="#d6aa4c" font-weight="800" text-anchor="middle">Gràcia</text>
+          <text x="226" y="100" font-family="sans-serif" font-size="10" fill="#d6aa4c" font-weight="800" text-anchor="middle">Eixample</text>
+          <text x="340" y="92" font-family="sans-serif" font-size="10" fill="#e63946" font-weight="800" text-anchor="middle">Sarrià</text>
+          <text x="134" y="212" font-family="sans-serif" font-size="10" fill="#d6aa4c" font-weight="800" text-anchor="middle">Sant Pere</text>
+          <text x="229" y="208" font-family="sans-serif" font-size="10" fill="#e63946" font-weight="800" text-anchor="middle">Poblenou</text>
+          <text x="38"  y="215" font-family="sans-serif" font-size="9"  fill="#e63946" font-weight="700" text-anchor="middle">Les Corts</text>
+          <text x="308" y="210" font-family="sans-serif" font-size="10" fill="#d6aa4c" font-weight="800" text-anchor="middle">Horta</text>
+
+          <!-- User location dot -->
+          <circle cx="134" cy="212" r="8" fill="#d6aa4c" opacity="0.25"/>
+          <circle cx="134" cy="212" r="5" fill="#d6aa4c"/>
+          <circle cx="134" cy="212" r="2.5" fill="#fff"/>
+        </svg>
+
+        <!-- Top bar -->
+        <div class="s1-topbar">
+          <div class="s1-city-btn">
+            <span>🚩</span><span>Terreno a conquistar</span>
+          </div>
+          <div class="s1-legend">
+            <div class="s1-legend-tabs">
+              <div class="s1-ltab on">Individual</div>
+              <div class="s1-ltab off">Equipos</div>
+            </div>
+            <div class="s1-city">Barcelona · 24</div>
+            <div class="s1-seg">Conquistador · H · 30-45</div>
+            <div class="s1-li"><div class="s1-dot" style="background:#d6aa4c"></div><span>Tuyo</span></div>
+            <div class="s1-li"><div class="s1-dot" style="background:#e63946"></div><span>Rival</span></div>
+            <div class="s1-li"><div class="s1-dot" style="background:#475569"></div><span>Libre</span></div>
+          </div>
+        </div>
+
+        <!-- Overlay -->
+        <div class="overlay">
+          <div class="ov-tag">ConqueRun</div>
+          <div class="ov-title">Conquista tu ciudad<br>barrio a barrio</div>
+          <div class="ov-sub">Corre. Marca territorio. Defiéndelo.</div>
+        </div>
+
+        <div class="tabbar">
+          <div class="tab on">
+            <svg viewBox="0 0 24 24"><polygon points="12,2 22,20 2,20" fill="#d6aa4c"/></svg>
+            <span class="tab on">Mapa</span>
+          </div>
+          <div class="tab off">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="#475569"/></svg>
+            <span class="tab off">Ranking</span>
+          </div>
+          <div class="tab off">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#475569"/></svg>
+            <span class="tab off">Correr</span>
+          </div>
+          <div class="tab off">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="5" fill="#475569"/><path d="M3 20c0-5 18-5 18 0" fill="#475569"/></svg>
+            <span class="tab off">Perfil</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       SCREENSHOT 2 – CORRIENDO
+  ══════════════════════════════════════ -->
+  <div class="col">
+    <div class="col-label">02 · Carrera en directo</div>
+    <div class="phone">
+      <div class="screen">
+        <div class="di"></div>
+        <div class="sb"><span class="sb-time">9:41</span><div class="sb-icons"><span>●●●</span><span>🔋</span></div></div>
+
+        <!-- GPS Map background -->
+        <svg style="position:absolute;top:0;left:0;right:0;bottom:200px;width:100%;height:calc(100% - 284px)" viewBox="0 0 393 500" preserveAspectRatio="xMidYMid slice">
+          <rect width="393" height="500" fill="#1a2235"/>
+          <!-- Streets -->
+          <line x1="0" y1="200" x2="393" y2="190" stroke="#0f1829" stroke-width="8"/>
+          <line x1="0" y1="320" x2="393" y2="310" stroke="#0f1829" stroke-width="6"/>
+          <line x1="100" y1="0" x2="90" y2="500" stroke="#0f1829" stroke-width="6"/>
+          <line x1="220" y1="0" x2="210" y2="500" stroke="#0f1829" stroke-width="6"/>
+          <line x1="320" y1="0" x2="315" y2="500" stroke="#0f1829" stroke-width="5"/>
+          <!-- Territory fills -->
+          <polygon points="0,0 100,0 90,200 0,200" fill="#d6aa4c" opacity="0.4" stroke="#d6aa4c" stroke-width="1"/>
+          <polygon points="100,0 220,0 210,200 90,200" fill="#e63946" opacity="0.35" stroke="#e63946" stroke-width="1"/>
+          <polygon points="220,0 393,0 393,190 210,200" fill="#d6aa4c" opacity="0.3" stroke="#d6aa4c" stroke-width="1"/>
+          <polygon points="0,202 90,200 90,320 0,322" fill="#475569" opacity="0.3" stroke="#475569" stroke-width="1"/>
+          <polygon points="90,200 210,200 212,318 90,320" fill="#e63946" opacity="0.3" stroke="#e63946" stroke-width="1"/>
+          <polygon points="210,190 393,192 393,310 212,318" fill="#d6aa4c" opacity="0.35" stroke="#d6aa4c" stroke-width="1"/>
+          <polygon points="0,322 90,320 88,500 0,500" fill="#475569" opacity="0.2" stroke="#475569" stroke-width="1"/>
+          <polygon points="90,320 212,318 210,500 88,500" fill="#475569" opacity="0.22" stroke="#475569" stroke-width="1"/>
+          <polygon points="212,310 393,312 393,500 210,500" fill="#e63946" opacity="0.28" stroke="#e63946" stroke-width="1"/>
+          <!-- Route line (gold) -->
+          <polyline points="60,460 75,400 95,340 120,290 150,240 170,195 185,160 200,120 215,85 230,60 240,40" fill="none" stroke="#d6aa4c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+          <!-- User location -->
+          <circle cx="240" cy="40" r="10" fill="#d6aa4c" opacity="0.3"/>
+          <circle cx="240" cy="40" r="7" fill="#d6aa4c"/>
+          <circle cx="240" cy="40" r="3" fill="#fff"/>
+        </svg>
+
+        <!-- Barrio badge -->
+        <div style="position:absolute;top:70px;left:50%;transform:translateX(-50%);z-index:30;background:rgba(8,11,20,.85);border:1px solid #d6aa4c44;border-radius:20px;padding:6px 16px">
+          <span style="color:#d6aa4c;font-size:13px;font-weight:700">📍 Conquistando Gràcia</span>
+        </div>
+
+        <!-- Stats panel -->
+        <div class="s2-panel">
+          <div class="s2-stats">
+            <div class="s2-stat">
+              <div class="s2-val">3.24</div>
+              <div class="s2-lbl">km</div>
+            </div>
+            <div class="s2-sep"></div>
+            <div class="s2-stat">
+              <div class="s2-val">18:42</div>
+              <div class="s2-lbl">tiempo</div>
+            </div>
+            <div class="s2-sep"></div>
+            <div class="s2-stat">
+              <div class="s2-val">5:46</div>
+              <div class="s2-lbl">ritmo medio</div>
+            </div>
+          </div>
+          <div class="s2-tracking">Grabando con pantalla apagada ●</div>
+          <div class="s2-btns">
+            <div class="s2-pause">Pausar</div>
+            <div class="s2-stop">Terminar</div>
+          </div>
+        </div>
+
+        <!-- Overlay -->
+        <div class="overlay" style="bottom:84px;padding-bottom:250px">
+          <div class="ov-tag">En carrera</div>
+          <div class="ov-title">Cada km es<br>territorio ganado</div>
+          <div class="ov-sub">GPS en tiempo real · Tracking en segundo plano</div>
+        </div>
+
+        <div class="tabbar">
+          <div class="tab off"><svg viewBox="0 0 24 24"><polygon points="12,2 22,20 2,20" fill="#475569"/></svg><span class="tab off">Mapa</span></div>
+          <div class="tab off"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="#475569"/></svg><span class="tab off">Ranking</span></div>
+          <div class="tab on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#d6aa4c"/></svg><span class="tab on">Correr</span></div>
+          <div class="tab off"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="5" fill="#475569"/><path d="M3 20c0-5 18-5 18 0" fill="#475569"/></svg><span class="tab off">Perfil</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       SCREENSHOT 3 – RESUMEN POST-CARRERA
+  ══════════════════════════════════════ -->
+  <div class="col">
+    <div class="col-label">03 · Resumen de carrera</div>
+    <div class="phone">
+      <div class="screen">
+        <div class="di"></div>
+        <div class="sb" style="position:relative;z-index:60"><span class="sb-time">9:41</span><div class="sb-icons"><span>🔋</span></div></div>
+
+        <!-- Map background blurred -->
+        <svg style="position:absolute;inset:0;width:100%;height:100%;opacity:0.3" viewBox="0 0 393 852" preserveAspectRatio="xMidYMid slice">
+          <rect width="393" height="852" fill="#1a2235"/>
+          <polygon points="0,0 180,0 175,280 0,285" fill="#d6aa4c"/>
+          <polygon points="180,0 393,0 393,260 175,280" fill="#e63946"/>
+          <polygon points="0,287 175,282 178,560 0,565" fill="#e63946"/>
+          <polygon points="175,282 393,262 393,540 178,560" fill="#475569"/>
+        </svg>
+
+        <div class="s3-bg"></div>
+
+        <div class="s3-panel">
+          <div class="s3-eyebrow">Carrera completada</div>
+          <div class="s3-title">¡Has conquistado 3 zonas!</div>
+          <div class="s3-sub">Tu bandera gana terreno.</div>
+
+          <div class="s3-pts">
+            <div class="s3-pts-num">248</div>
+            <div class="s3-pts-lbl">puntos</div>
+          </div>
+
+          <div class="s3-grid">
+            <div class="s3-metric"><div class="s3-mv">8.42 km</div><div class="s3-ml">Distancia</div></div>
+            <div class="s3-metric"><div class="s3-mv">48:16</div><div class="s3-ml">Tiempo</div></div>
+            <div class="s3-metric"><div class="s3-mv">5:44 min/km</div><div class="s3-ml">Ritmo medio</div></div>
+            <div class="s3-metric"><div class="s3-mv">Dragones BCN</div><div class="s3-ml">Equipo</div></div>
+          </div>
+
+          <div class="s3-section">
+            <div class="s3-sec-title">Zonas conquistadas</div>
+            <div class="s3-chip con"><span>Gràcia · 2.14 km</span></div>
+            <div class="s3-chip con"><span>Eixample · 3.88 km</span></div>
+            <div class="s3-chip con"><span>Sant Pere · 1.70 km</span></div>
+          </div>
+
+          <div class="s3-section">
+            <div class="s3-sec-title">Zonas defendidas</div>
+            <div class="s3-chip def"><span>Sarrià · 0.70 km</span></div>
+          </div>
+        </div>
+
+        <div class="tabbar">
+          <div class="tab off"><svg viewBox="0 0 24 24"><polygon points="12,2 22,20 2,20" fill="#475569"/></svg><span class="tab off">Mapa</span></div>
+          <div class="tab off"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="#475569"/></svg><span class="tab off">Ranking</span></div>
+          <div class="tab on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#d6aa4c"/></svg><span class="tab on">Correr</span></div>
+          <div class="tab off"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="5" fill="#475569"/><path d="M3 20c0-5 18-5 18 0" fill="#475569"/></svg><span class="tab off">Perfil</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       SCREENSHOT 4 – RANKING
+  ══════════════════════════════════════ -->
+  <div class="col">
+    <div class="col-label">04 · Ranking de ciudad</div>
+    <div class="phone">
+      <div class="screen">
+        <div class="di"></div>
+        <div class="sb"><span class="sb-time">9:41</span><div class="sb-icons"><span>🔋</span></div></div>
+
+        <div class="s4">
+          <div style="height:59px"></div>
+          <div class="s4-header">
+            <div class="s4-title">Ranking</div>
+            <div class="s4-city">📍 Barcelona</div>
+            <div class="s4-seg">Conquistador · Hombre · 30-45</div>
+          </div>
+          <div class="s4-tabs">
+            <div class="s4-tab on">Individual</div>
+            <div class="s4-tab off">Equipos</div>
+            <div class="s4-tab off">Mi posición</div>
+          </div>
+          <div class="s4-list">
+            <div class="s4-row">
+              <div class="s4-pos gold">🥇</div>
+              <div class="s4-avatar" style="background:#f59e0b">M</div>
+              <div class="s4-info"><div class="s4-nick">MarcRunner</div><div class="s4-meta">14 barrios · 342 km</div></div>
+              <div class="s4-pts">4.820 pts</div>
+            </div>
+            <div class="s4-row">
+              <div class="s4-pos silver">🥈</div>
+              <div class="s4-avatar" style="background:#e63946">A</div>
+              <div class="s4-info"><div class="s4-nick">AnaConquista</div><div class="s4-meta">11 barrios · 298 km</div></div>
+              <div class="s4-pts">3.915 pts</div>
+            </div>
+            <div class="s4-row">
+              <div class="s4-pos bronze">🥉</div>
+              <div class="s4-avatar" style="background:#7c3aed">J</div>
+              <div class="s4-info"><div class="s4-nick">JotaVelocity</div><div class="s4-meta">9 barrios · 251 km</div></div>
+              <div class="s4-pts">3.140 pts</div>
+            </div>
+            <div class="s4-row">
+              <div class="s4-pos num">4</div>
+              <div class="s4-avatar" style="background:#0891b2">C</div>
+              <div class="s4-info"><div class="s4-nick">CarlaSpeed</div><div class="s4-meta">8 barrios · 219 km</div></div>
+              <div class="s4-pts">2.780 pts</div>
+            </div>
+            <div class="s4-row">
+              <div class="s4-pos num">5</div>
+              <div class="s4-avatar" style="background:#16a34a">R</div>
+              <div class="s4-info"><div class="s4-nick">RubiRunner</div><div class="s4-meta">7 barrios · 198 km</div></div>
+              <div class="s4-pts">2.340 pts</div>
+            </div>
+            <div style="padding:6px 0;border-bottom:1px solid #263244;border-top:1px solid #263244;margin:6px 0;text-align:center"><span style="color:#475569;font-size:12px">···</span></div>
+            <div class="s4-row me">
+              <div class="s4-pos me-pos">12</div>
+              <div class="s4-avatar" style="background:#d6aa4c">T</div>
+              <div class="s4-info"><div class="s4-nick me">TuNickname</div><div class="s4-meta">5 barrios · 142 km</div></div>
+              <div class="s4-pts">1.580 pts</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Overlay -->
+        <div class="overlay">
+          <div class="ov-tag">Competición real</div>
+          <div class="ov-title">¿Quién domina<br>tu ciudad?</div>
+          <div class="ov-sub">Rankings por liga, edad y género. Compite en igualdad.</div>
+        </div>
+
+        <div class="tabbar">
+          <div class="tab off"><svg viewBox="0 0 24 24"><polygon points="12,2 22,20 2,20" fill="#475569"/></svg><span class="tab off">Mapa</span></div>
+          <div class="tab on"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="#d6aa4c"/></svg><span class="tab on">Ranking</span></div>
+          <div class="tab off"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#475569"/></svg><span class="tab off">Correr</span></div>
+          <div class="tab off"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="5" fill="#475569"/><path d="M3 20c0-5 18-5 18 0" fill="#475569"/></svg><span class="tab off">Perfil</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       SCREENSHOT 5 – PERFIL
+  ══════════════════════════════════════ -->
+  <div class="col">
+    <div class="col-label">05 · Perfil y logros</div>
+    <div class="phone">
+      <div class="screen">
+        <div class="di"></div>
+        <div class="sb"><span class="sb-time">9:41</span><div class="sb-icons"><span>🔋</span></div></div>
+
+        <!-- Selector Perfil | Grupos -->
+        <div style="display:flex;background:#111827;border-bottom:1px solid #263244;position:absolute;top:59px;left:0;right:0;z-index:20">
+          <div style="flex:1;padding:13px;text-align:center;border-bottom:2px solid #d6aa4c">
+            <span style="color:#d6aa4c;font-size:14px;font-weight:700">Perfil</span>
+          </div>
+          <div style="flex:1;padding:13px;text-align:center">
+            <span style="color:#475569;font-size:14px;font-weight:600">Grupos</span>
+          </div>
+        </div>
+
+        <div class="s5">
+          <div class="s5-bg"></div>
+          <div class="s5-scroll" style="top:105px;bottom:84px">
+            <div class="s5-header">
+              <div class="s5-av">T</div>
+              <div class="s5-nick">TuNickname</div>
+              <div class="s5-city">📍 Barcelona</div>
+              <div class="s5-seg-badge">⚔️ Conquistador · Hombre · 30-45</div>
+            </div>
+
+            <div class="s5-stats">
+              <div class="s5-stat"><div class="s5-sv">142</div><div class="s5-sl">km totales</div></div>
+              <div class="s5-stat"><div class="s5-sv">5</div><div class="s5-sl">barrios</div></div>
+              <div class="s5-stat"><div class="s5-sv">1.580</div><div class="s5-sl">puntos</div></div>
+              <div class="s5-stat"><div class="s5-sv">7</div><div class="s5-sl">días racha</div></div>
+            </div>
+
+            <div class="s5-card">
+              <div class="s5-card-title">Logros</div>
+              <div class="s5-logro">
+                <span class="s5-logro-emoji">🏴</span>
+                <div><div class="s5-logro-name">Primer territorio</div><div class="s5-logro-desc">Conquistaste tu primer barrio</div></div>
+              </div>
+              <div class="s5-logro">
+                <span class="s5-logro-emoji">💪</span>
+                <div><div class="s5-logro-name">Centenario</div><div class="s5-logro-desc">100 km en total</div></div>
+              </div>
+              <div class="s5-logro">
+                <span class="s5-logro-emoji">🗓️</span>
+                <div><div class="s5-logro-name">Semana perfecta</div><div class="s5-logro-desc">7 días seguidos corriendo</div></div>
+              </div>
+            </div>
+
+            <div class="s5-card">
+              <div class="s5-card-title">Mis territorios</div>
+              <div class="s5-barrio"><span class="s5-barrio-name">Gràcia</span><span class="s5-barrio-pts">420 pts</span></div>
+              <div class="s5-barrio"><span class="s5-barrio-name">Eixample</span><span class="s5-barrio-pts">380 pts</span></div>
+              <div class="s5-barrio"><span class="s5-barrio-name">Sant Pere</span><span class="s5-barrio-pts">310 pts</span></div>
+              <div class="s5-barrio"><span class="s5-barrio-name">Sarrià</span><span class="s5-barrio-pts">270 pts</span></div>
+              <div class="s5-barrio"><span class="s5-barrio-name">Horta</span><span class="s5-barrio-pts">200 pts</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Overlay -->
+        <div class="overlay">
+          <div class="ov-tag">Tu legado</div>
+          <div class="ov-title">Tu huella en<br>cada barrio</div>
+          <div class="ov-sub">Logros, rachas y territorios que son tuyos.</div>
+        </div>
+
+        <div class="tabbar">
+          <div class="tab off"><svg viewBox="0 0 24 24"><polygon points="12,2 22,20 2,20" fill="#475569"/></svg><span class="tab off">Mapa</span></div>
+          <div class="tab off"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="#475569"/></svg><span class="tab off">Ranking</span></div>
+          <div class="tab off"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#475569"/></svg><span class="tab off">Correr</span></div>
+          <div class="tab on"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="5" fill="#d6aa4c"/><path d="M3 20c0-5 18-5 18 0" fill="#d6aa4c"/></svg><span class="tab on">Perfil</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div style="max-width:900px;margin:60px auto 0;padding:24px;background:#111827;border:1px solid #263244;border-radius:14px;color:#475569;font-size:12px;line-height:1.8">
+  <p style="color:#d6aa4c;font-weight:700;margin-bottom:8px">Notas para la subida a stores</p>
+  <p><strong style="color:#f8fafc">App Store (iOS):</strong> Tamaño requerido 1290×2796 px (6.7") o 1320×2868 px (6.9"). Máximo 10 por dispositivo. El texto de los overlays cumple las guías de Apple.</p>
+  <p><strong style="color:#f8fafc">Google Play:</strong> Mínimo 320×320 px, máximo 3840×3840 px. Máximo 8. Aspecto 9:16 recomendado.</p>
+  <p><strong style="color:#f8fafc">Exportar a alta resolución:</strong> Chrome DevTools → seleccionar nodo <code>.phone</code> → botón derecho → "Capture node screenshot". Repite para cada teléfono. Escala a 3× para App Store.</p>
+</div>
+
+</body>
+</html>
