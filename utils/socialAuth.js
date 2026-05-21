@@ -53,7 +53,9 @@ export async function iniciarSesionGoogle() {
 export async function iniciarSesionApple() {
   const AppleAuth = await import('expo-apple-authentication');
 
-  const nonce = Math.random().toString(36).substring(2, 20);
+  const randomBytes = new Uint8Array(16);
+  crypto.getRandomValues(randomBytes);
+  const nonce = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
   const hashedNonce = await sha256(nonce);
 
   const appleCredential = await AppleAuth.signInAsync({
