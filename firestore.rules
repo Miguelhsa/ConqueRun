@@ -41,7 +41,7 @@ service cloud.firestore {
 
     function fechaNacimientoValida(fecha) {
       return fecha is string &&
-        fecha.matches('^[0-9]{2}/[0-9]{2}/[0-9]{4}$');
+        fecha.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
     }
 
     function validUserCreate(uid) {

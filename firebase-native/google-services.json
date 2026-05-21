@@ -12,7 +12,20 @@
           "package_name": "com.conquerun.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "743879769903-525ohqv5e4k77vnfd351918tkubgq573.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.conquerun.app",
+            "certificate_hash": "f06c243f61cfd913739d50c82e85f3e117c75af5"
+          }
+        },
+        {
+          "client_id": "743879769903-emv2olgja4o0nhu1b389ocdml6em79da.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDLx9lkmn7dtcDKAN6E3bvfbD0-WWWoULI"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "743879769903-emv2olgja4o0nhu1b389ocdml6em79da.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "743879769903-aajbv22jpkgdd576mu4a18cle77qagal.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.conquerun.app"
+              }
+            }
+          ]
         }
       }
     }

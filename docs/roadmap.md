@@ -1,6 +1,6 @@
 # Hoja de Ruta de ConqueRun
 
-Revision: 2026-05-06
+Revision: 2026-05-17
 
 Esta hoja de ruta refleja el estado real del repositorio tras revision exhaustiva de codigo: `App.js`, todas las `screens/`, todos los `utils/`, reglas de Firestore y documentos auxiliares. Las tareas ya implementadas se han retirado para que este documento sirva como guia operativa.
 
@@ -69,11 +69,13 @@ Problemas encontrados en la revision de codigo que deben resolverse independient
 - ~~**Bug de timezone en calcularRacha**: resuelto con normalizacion UTC.~~
 - **Post-lanzamiento critico: validar Strava OAuth en entorno real**. Probar el flujo completo fuera de Expo Go con builds instaladas de iOS y Android: boton "Importar conquistas de Strava" → login/autorizacion Strava → retorno automatico a ConqueRun → importacion de actividades → conquistas reflejadas en mapa, ranking, historial y perfil. Confirmar que el puente HTTPS de Firebase abre `conquerun://strava` en produccion y que no queda al usuario en Safari/Chrome.
 - **Post-lanzamiento critico: monitorizar errores y abandono en Strava**. Revisar logs de `stravaOAuthCallback` e `importarConquistasStrava`, errores de `redirect_uri`, usuarios que conectan pero no importan, tokens caducados, limites de API y casos sin actividades recientes. Medir coste/lecturas/escrituras de cada importacion real.
+- **Post-lanzamiento critico: validar reseñas nativas en entorno real**. Probar `expo-store-review` en builds reales de App Store/TestFlight y Google Play Internal Testing, configurar `ios.appStoreUrl` cuando exista App Store ID y confirmar que el boton manual abre la ficha correcta.
+- **Post-lanzamiento critico: monitorizar primera semana real**. Revisar logs de Functions, errores de App Check, uso de mapas, coste Firestore/Maps/Strava, carreras fallidas, deep links rotos, usuarios que abandonan onboarding y frecuencia del recordatorio de reseña a 7 dias.
 - **AsyncStorage leido cada segundo en dos sitios a la vez** (`App.js:98` y `CorrerScreen.js:150`): el banner de carrera activa y la pantalla de correr leen AsyncStorage en paralelo cada 1 segundo durante toda la carrera. Impacto en bateria y rendimiento.
 - **Busqueda lineal O(n) de barrios** (`barrios.js:30`): `calcularBarrio` itera todos los territorios para cada punto de la ruta. Con 300 territorios y 1.000 puntos GPS son 300.000 comparaciones por carrera.
 - ~~**`formatTiempo` duplicada**: resuelto en `utils/formatters.js`.~~
 - **Codigo de grupo no criptografico** (`grupos.js:9`): `Math.random()` para generar codigos de invitacion de grupos privados. No es criptograficamente seguro.
-- **Migrar Firebase Functions fuera de Node.js 20**: Google marca Node.js 20 como deprecado desde el 30 de abril de 2026 y lo descontinua el 30 de octubre de 2026. Actualizar runtime y `firebase-functions` antes de esa fecha para evitar bloqueo de despliegues.
+- ~~**Migrar Firebase Functions fuera de Node.js 20**: resuelto. Runtime actualizado a Node.js 22 y desplegado en produccion.~~
 - **Configurar credenciales reales de email admin en Functions**: `GMAIL_USER`, `GMAIL_PASS` y `ADMIN_EMAIL` estan en modo `disabled` para poder desplegar sin secretos locales. Hasta configurarlas con valores reales, `notificarReporte` registra el reporte pero no envia email al admin.
 
 ### Medios — afectan UX
@@ -82,7 +84,69 @@ Problemas encontrados en la revision de codigo que deben resolverse independient
 - ~~**Errores de Firebase Auth en crudo**: resuelto con mapa de errores en espanol.~~
 - ~~**Sin spinner en Login**: resuelto.~~
 - ~~**Posicion propia no visible en Ranking**: resuelto.~~
-- **Factor ritmo penaliza corredores lentos**: el `ritmoBase = 300` (5:00 min/km) penaliza a corredores de 7:00 min/km con un factor de 0.77. La mayoria de usuarios casuales corren entre 6:00 y 8:00 min/km.
+- ~~**RankingScreen muestra puntos historicos tras cambio de segmento**: resuelto. Se detecta `sinEntradaEnSegmento` (usuario tiene segmentoCompetitivo pero no hay entrada en rankingsCiudad) y se muestran 0 barrios/puntos en lugar del historico acumulado.~~
+- ~~**DetalleCarreraScreen clasificacion de conquistas incorrecta**: resuelto. Usa `puntosAcumuladosUsuario` (puntos acumulados totales del usuario en el barrio) y `carrera.uid` como referencia, en lugar de puntos de la carrera individual.~~
+- ~~**CorrerScreen historial limitado a 3 carreras**: resuelto. Muestra carreras de los ultimos 30 dias ordenadas por fecha. Cada tarjeta navega a `DetalleCarreraScreen`.~~
+- ~~**No hay notificacion cuando una carrera es invalidada por fraude**: resuelto. `validarCarrera` lee el pushToken de `privado/notificaciones` y notifica via Expo Push API tras revertir el batch.~~
+- **Factor ritmo penaliza corredores lentos**: el ritmoBase de 5:00 min/km hace que corredores de 7:00-8:00 min/km obtengan factores de 0.67-0.77. Ver propuesta en Fase 2 para curva mas justa.
+
+---
+
+## Plan de Reparacion de Consistencia Antes de Tiendas
+
+Objetivo: que perfil, mapa, ranking, carrera, historial y grupos muestren siempre la misma realidad. No avanzar a tiendas hasta que estas fases esten cerradas y verificadas con datos reales y datos ficticios.
+
+### Fase R1 — Bloqueantes de guardado y permisos
+
+- [x] Alinear formato de `fechaNacimiento` entre `NicknameScreen` y `firestore.rules`. Regex cambiado a `YYYY-MM-DD` en reglas y desplegado.
+- [ ] Permitir una limpieza segura de `notificacionesPendientes` o mover el acuse de lectura a una callable. El cliente no debe intentar una escritura que las reglas bloquean.
+- [ ] Crear prueba manual de alta completa: registro -> nickname -> genero -> fecha nacimiento -> nacionalidad -> ciudad -> onboarding -> perfil cargado.
+
+### Fase R2 — Fuente unica de conquistas individuales
+
+- [x] Definir fuente oficial: las conquistas actuales son los docs `territorios/barrios/{id}/segmentos/{segmentoCompetitivo}` donde `dueno == uid`.
+- [x] Cambiar ranking individual para ordenar por `barrios desc` desde Firestore y usar puntos solo como desempate. Implementado en `utils/rankingsCiudad.js` con `orderBy('barrios', 'desc'), orderBy('puntos', 'desc')` + `limit(10)`.
+- [ ] Revisar `rankingsCiudad.barrios`, `usuarios.barriosConquistadosTotal` y perfil para que todos se reparen desde la fuente oficial, no desde contadores historicos.
+- [ ] Evitar que cambiar `ciudadActualId` mueva barrios antiguos a la nueva ciudad. Cambiar ciudad debe afectar a lo que se mira/compite a partir de ese momento, no trasladar conquistas de otra ciudad.
+- [ ] Mejorar `repararConsistenciaUsuario` para que devuelva el conteo reparado y el cliente refresque perfil/ranking/mapa despues de ejecutarla.
+- [ ] Crear script admin de reconciliacion: recalcular barrios por usuario/ciudad/segmento desde segmentos territoriales y reescribir `usuarios` + `rankingsCiudad`.
+
+### Fase R3 — Carrera, historial y Strava coherentes
+
+- [ ] Guardar en cada carrera un resultado territorial ya resuelto por backend: `conquistadas`, `defendidas`, `rivalesPendientes`, usando `puntosAcumuladosUsuario`.
+- [ ] Cambiar `CorrerScreen` y `DetalleCarreraScreen` para pintar el resultado devuelto por Functions, no una reclasificacion local con puntos de una sola carrera.
+- [x] En `importarConquistasStrava`, guardar `barriosConquistados` en el doc `carreras/{id}` igual que en carreras ConqueRun. Tambien actualiza `maxBarriosSimultaneos`.
+- [ ] Decidir si Strava tambien actualiza logros, racha y `maxBarriosSimultaneos`; si no, mostrarlo explicitamente como "importacion verificada sin racha".
+- [ ] Mover el listener de deep link Strava a nivel global en `App.js`/`NavigationContainer` para que funcione aunque la app vuelva fria o en otro tab.
+
+### Fase R4 — Segmentos y cambio de ciudad
+
+- [x] No recalcular segmento de edad en cliente sin `usuarios/{uid}/privado/datos.fechaNacimiento`. `PerfilScreen` ahora lee en paralelo el doc usuario y `privado/datos` con `Promise.all` y combina `fechaNacimiento` antes de calcular el segmento.
+- [ ] Documentar y aplicar la diferencia entre nacionalidad inmutable y `paisCodigo/ciudadActualId` como pais/ciudad a conquistar.
+- [ ] Verificar que mapa, perfil y ranking usan siempre el mismo `segmentoCompetitivo` activo.
+- [x] En cambio de segmento de ritmo, notificar al usuario distinguiendo subida vs bajada. `CorrerScreen` compara el indice en `SEGMENTOS_RITMO` antes y despues del cambio.
+
+### Fase R5 — Grupos y mapa de equipos
+
+- [ ] Mantener una sola regla de producto: una carrera solo aporta al equipo elegido al terminar.
+- [ ] En mapa modo equipos, mostrar claramente zonas agrupadas por cada equipo del usuario y no mezclar detalle individual con detalle de equipo.
+- [ ] Cambiar `DetalleBarrioScreen` o crear detalle especifico de equipo para que "Ver detalle" desde modo equipos no muestre dueño individual incorrecto.
+- [ ] Validar que `grupos.barriosConquistados`, `grupoMarcas` y mapa de equipos se reparan desde la misma fuente.
+
+### Fase R6 — Seguridad y aceptacion en tiendas
+
+- [ ] Subir fotos de perfil pendientes a una ruta privada tipo `fotosPendientes/{uid}.jpg`; solo publicar/copiar a `fotos/{uid}.jpg` cuando admin apruebe.
+- [ ] Mantener `REQUIRE_APP_CHECK=false` solo durante validacion; pasar a `true` cuando iOS/Android reales envien `request.app`.
+- [ ] Revisar Data Safety / Privacy Nutrition Labels tras cerrar Strava, ubicacion, fotos, reseñas y notificaciones.
+
+### Criterio de cierre
+
+- [ ] Usuario A conquista 4 zonas: perfil muestra 4, ranking muestra 4, mapa pinta 4, detalle de carrera lista las mismas zonas.
+- [ ] Usuario A cambia de ciudad: la nueva ciudad no hereda barrios de la anterior; ranking y mapa quedan a cero o con las conquistas reales de esa ciudad.
+- [ ] Usuario A importa Strava: carrera aparece en historial, suma puntos, suma conquistas y se refleja igual en perfil/ranking/mapa.
+- [ ] Usuario A pertenece a varios equipos: al terminar carrera elige uno y solo ese equipo recibe puntos/conquistas.
+- [ ] Usuario no admin nunca ve tab Admin; usuario admin si lo ve.
+- [ ] Alta nueva completa no genera errores de reglas Firestore.
 
 ---
 

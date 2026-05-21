@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
   },
-  generoActivo: { borderColor: colors.gold, backgroundColor: '#d6aa4c18' },
+  generoActivo: { borderColor: colors.gold, backgroundColor: '#C6F43218' },
   generoTexto: { fontSize: 16, color: colors.subdued, fontWeight: '600' },
   generoTextoActivo: { color: colors.gold },
   selectorBoton: {
@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  opcionActiva: { backgroundColor: '#d6aa4c18' },
+  opcionActiva: { backgroundColor: '#C6F43218' },
   opcionTexto: { fontSize: 16, color: colors.text },
   check: { color: colors.gold, fontSize: 16, fontWeight: 'bold' },
   boton: {

@@ -38,10 +38,21 @@ export default function DetalleCarreraScreen({ carrera, onClose }) {
   const estado = etiquetaEstado(carrera);
   const puntos = carrera.puntosPersonales ?? carrera.puntos ?? 0;
   const territorio = carrera.territorioCarrera ?? [];
+  const conquistasCarrera = carrera.conquistasCarrera ?? [];
 
-  const conquistadas = territorio.filter(b => b.duenoPuntos < b.puntos);
-  const defendidas = territorio.filter(b => b.dueno && b.duenoPuntos >= b.puntos);
-  const rivales = territorio.filter(b => !b.dueno || (b.duenoPuntos >= b.puntos && b.dueno));
+  const uid = carrera.uid ?? null;
+  const puntosEfectivos = (b) => b.puntosAcumuladosUsuario ?? b.puntos;
+  const keyTerritorio = (b) => b.territorioId ?? b.barrioId ?? b.id ?? b.nombre;
+  const conquistadasInferidas = territorio.filter(b => b.dueno !== uid && puntosEfectivos(b) > (b.duenoPuntos ?? 0));
+  const conquistadas = conquistasCarrera.length > 0 ? conquistasCarrera : conquistadasInferidas;
+  const idsConquistadas = new Set(conquistadas.map(keyTerritorio));
+  const defendidas = territorio.filter(b => b.dueno === uid && !idsConquistadas.has(keyTerritorio(b)));
+  const rivales = territorio.filter(b =>
+    b.dueno !== uid &&
+    !idsConquistadas.has(keyTerritorio(b)) &&
+    puntosEfectivos(b) <= (b.duenoPuntos ?? 0)
+  );
+  const totalConquistas = carrera.barriosConquistados ?? conquistadas.length;
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
@@ -73,6 +84,7 @@ export default function DetalleCarreraScreen({ carrera, onClose }) {
             <Metrica label="Tiempo" valor={formatTiempo(carrera.duracion)} />
             <Metrica label="Ritmo medio" valor={`${formatRitmo(carrera.ritmoMedio)} /km`} />
             <Metrica label="Puntos" valor={puntos.toLocaleString()} destacado />
+            <Metrica label="Conquistas" valor={totalConquistas.toLocaleString()} destacado={totalConquistas > 0} />
           </View>
 
           {territorio.length > 0 && (
@@ -203,7 +215,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   chip_conquista: { backgroundColor: '#e6394620', borderColor: colors.conquest },
-  chip_defensa: { backgroundColor: '#d6aa4c20', borderColor: colors.gold },
+  chip_defensa: { backgroundColor: '#C6F43220', borderColor: colors.gold },
   chip_rival: { backgroundColor: '#64748b20', borderColor: colors.subdued },
   chipTexto: { color: colors.text, fontSize: 13, fontWeight: '600' },
   grupoFila: {

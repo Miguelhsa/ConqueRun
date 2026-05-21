@@ -1,7 +1,9 @@
 // Cronómetro: "49:00" o "1:02:15" — para tiempos de carrera en curso
 export const formatTiempo = (s) => {
-  const m = Math.floor(s / 60);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
   const seg = s % 60;
+  if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${seg.toString().padStart(2, '0')}`;
   return `${m}:${seg.toString().padStart(2, '0')}`;
 };
 

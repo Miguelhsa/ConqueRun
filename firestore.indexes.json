@@ -68,6 +68,78 @@
       ]
     },
     {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "barrios", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "barrios", "order": "DESCENDING" },
+        { "fieldPath": "puntos", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "barrios", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "barrios", "order": "ASCENDING" },
+        { "fieldPath": "puntos", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
+        { "fieldPath": "barrios", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
+        { "fieldPath": "barrios", "order": "DESCENDING" },
+        { "fieldPath": "puntos", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
+        { "fieldPath": "barrios", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "rankingsCiudad",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
+        { "fieldPath": "barrios", "order": "ASCENDING" },
+        { "fieldPath": "puntos", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "territorios",
       "queryScope": "COLLECTION",
       "fields": [
@@ -114,6 +186,15 @@
       "fields": [
         { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
         { "fieldPath": "territorioId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "segmentos",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "ciudadId", "order": "ASCENDING" },
+        { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
+        { "fieldPath": "dueno", "order": "ASCENDING" }
       ]
     }
   ],

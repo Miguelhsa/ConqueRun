@@ -6,16 +6,19 @@ import { EstadoVacio, PantallaCargando } from '../components/ui';
 import { auth, db } from '../firebaseConfig';
 import { signOut } from 'firebase/auth';
 import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { invalidarCacheTerritorios, obtenerBarriosSegmentados } from '../utils/barrios';
+import { repararConsistenciaUsuario } from '../utils/consistencia';
 import { obtenerCiudades } from '../utils/ciudades';
 import { obtenerMisGrupos } from '../utils/grupos';
 import { LOGROS } from '../utils/logros';
 import { formatDuracion, formatRitmo } from '../utils/formatters';
 import { FOTO_ESTADOS, fotoAprobada, eliminarCuentaCompleta } from '../utils/moderacion';
 import { obtenerEstadoPermiso, registrarNotificaciones } from '../utils/notificaciones';
+import { cargarMiEntradaRanking, cargarPosicionUsuario } from '../utils/rankingsCiudad';
+import { abrirResenaManual, prepararSolicitudResena } from '../utils/reviews';
 import { calcularSegmentoRitmo, calcularSegmentos30d, etiquetaSegmentoRitmo, SEGMENTOS_RITMO } from '../utils/segmentos';
 import { colors, radius } from '../utils/theme';
 
@@ -36,6 +39,9 @@ export default function PerfilScreen() {
   const [ciudadNombre, setCiudadNombre] = useState(null);
   const [ciudadActualId, setCiudadActualId] = useState(null);
   const [ciudadSeleccionada, setCiudadSeleccionada] = useState(null);
+  const [busquedaCiudad, setBusquedaCiudad] = useState('');
+  const [busquedaPais, setBusquedaPais] = useState('');
+  const [mostrarPaises, setMostrarPaises] = useState(false);
   const [paisConquistaCodigo, setPaisConquistaCodigo] = useState(null);
   const [ciudadesPerfil, setCiudadesPerfil] = useState([]);
   const [mostrarCiudades, setMostrarCiudades] = useState(false);
@@ -48,7 +54,7 @@ export default function PerfilScreen() {
   const [racha, setRacha] = useState(0);
   const [cargando, setCargando] = useState(true);
   const ultimoRecalculoSegmentosRef = useRef(0);
-  const reparacionConsistenciaRef = useRef(false);
+  const reparacionConsistenciaRef = useRef(null);
   const [guardando, setGuardando] = useState(false);
   const [editando, setEditando] = useState(false);
   const [mostrarEditorPerfil, setMostrarEditorPerfil] = useState(false);
@@ -59,6 +65,8 @@ export default function PerfilScreen() {
   const [eliminando, setEliminando] = useState(false);
   const [estadoNotif, setEstadoNotif] = useState(null);
   const [tabPrincipal, setTabPrincipal] = useState('perfil');
+  const [totalConquistas, setTotalConquistas] = useState(0);
+  const [maxBarriosSimultaneos, setMaxBarriosSimultaneos] = useState(0);
 
   useFocusEffect(useCallback(() => {
     cargarPerfil();
@@ -67,12 +75,19 @@ export default function PerfilScreen() {
 
   const cargarPerfil = async () => {
     try {
-      const uid = auth.currentUser.uid;
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
 
-      const userSnap = await getDoc(doc(db, 'usuarios', uid));
+      const [userSnap, privadoSnap] = await Promise.all([
+        getDoc(doc(db, 'usuarios', uid)),
+        getDoc(doc(db, 'usuarios', uid, 'privado', 'datos')),
+      ]);
       let userData = userSnap.exists() ? userSnap.data() : {};
       if (userSnap.exists()) {
-        const data = userData;
+        const data = {
+          ...userData,
+          ...(privadoSnap.exists() ? { fechaNacimiento: privadoSnap.data().fechaNacimiento } : {}),
+        };
         const ritmoMedioTotal = data.distanciaTotal > 0
           ? ((data.duracionTotal ?? 0) / ((data.distanciaTotal ?? 1) / 1000))
           : 0;
@@ -121,6 +136,7 @@ export default function PerfilScreen() {
         setRitmo30d(segmentosPerfil.ritmo30d ?? null);
         setLogros(data.logros ?? []);
         setRacha(data.racha ?? 0);
+        setMaxBarriosSimultaneos(Math.max(data.maxBarriosSimultaneos ?? 0, data.barriosConquistadosTotal ?? 0));
         setCiudadNombre(data.ciudadActualNombre ?? null);
         setCiudadActualId(data.ciudadActualId ?? null);
         setPaisConquistaCodigo(data.paisCodigo ?? null);
@@ -138,45 +154,84 @@ export default function PerfilScreen() {
         userData = { ...data, ...segmentosPerfil };
       }
 
-      // Posición en ranking usando rankingsCiudad en vez de leer todos los usuarios
       const ciudadId = userData.ciudadActualId ?? null;
-
-      // Marcas territoriales desde subcolección (sin límite de campos en el doc usuario)
       const segmento = userData.segmentoCompetitivo ?? null;
+      const claveConsistencia = `${uid}_${ciudadId ?? 'sin-ciudad'}_${segmento ?? 'sin-segmento'}`;
+
+      // Marcas territoriales — filtramos solo por ciudadId para evitar índice compuesto,
+      // el filtro de segmento se aplica en cliente (pocos docs por usuario/ciudad)
       const marcasSnap = ciudadId
         ? await getDocs(query(
             collection(db, 'usuarios', uid, 'marcasTerritoriales'),
             where('ciudadId', '==', ciudadId),
-            ...(segmento ? [where('segmentoCompetitivo', '==', segmento)] : [])
           ))
         : null;
       const marcas = marcasSnap
-        ? Object.fromEntries(marcasSnap.docs.map(d => [d.data().territorioId ?? d.id, d.data().puntos ?? 0]))
+        ? Object.fromEntries(
+            marcasSnap.docs
+              .filter(d => !segmento || d.data().segmentoCompetitivo === segmento)
+              .map(d => [d.data().territorioId ?? d.id, d.data().puntos ?? 0])
+          )
         : {};
 
-      if (ciudadId) {
-        setCargandoRanking(true);
-        const { cargarPosicionUsuario } = await import('../utils/rankingsCiudad');
-        const pos = await cargarPosicionUsuario(ciudadId, userData.puntosTotales ?? 0, segmento);
-        if (pos !== null) setPosicionRanking(pos);
-        setCargandoRanking(false);
-      }
       const todosBarrios = await obtenerBarriosSegmentados(ciudadId, segmento);
       const barriosPropios = todosBarrios
         .filter(b => b.dueno === uid)
         .map(b => ({ ...b, misMarcas: marcas[b.id] ?? b.duenoPuntos }))
         .sort((a, b) => b.misMarcas - a.misMarcas);
+      const barriosActuales = barriosPropios.length;
       setBarrios(barriosPropios);
+      setMaxBarriosSimultaneos(prev => Math.max(prev ?? 0, userData.maxBarriosSimultaneos ?? 0, barriosActuales));
+
+      let rankingEntrada = null;
       if (
         ciudadId &&
         segmento &&
-        !reparacionConsistenciaRef.current &&
-        barriosPropios.length !== (userData.barriosConquistadosTotal ?? 0)
+        reparacionConsistenciaRef.current !== claveConsistencia &&
+        barriosActuales !== (userData.barriosConquistadosTotal ?? 0)
       ) {
-        reparacionConsistenciaRef.current = true;
-        const reparar = httpsCallable(getFunctions(), 'repararConsistenciaUsuario');
-        reparar().catch(e => console.warn('[PerfilScreen] No se pudo reparar consistencia:', e));
+        reparacionConsistenciaRef.current = claveConsistencia;
+        try {
+          const reparacion = await repararConsistenciaUsuario({ clave: claveConsistencia, force: true });
+          if (typeof reparacion?.barrios === 'number') {
+            userData = {
+              ...userData,
+              barriosConquistadosTotal: reparacion.barrios,
+              barriosConquistadosHistorico: reparacion.barriosConquistadosHistorico ?? userData.barriosConquistadosHistorico,
+              maxBarriosSimultaneos: reparacion.maxBarriosSimultaneos ?? userData.maxBarriosSimultaneos,
+            };
+            setMaxBarriosSimultaneos(reparacion.maxBarriosSimultaneos ?? Math.max(userData.maxBarriosSimultaneos ?? 0, barriosActuales));
+          }
+          rankingEntrada = reparacion?.ranking ?? null;
+        } catch (e) {
+          reparacionConsistenciaRef.current = null;
+          console.warn('[PerfilScreen] No se pudo reparar consistencia:', e);
+        }
       }
+
+      if (ciudadId) {
+        setCargandoRanking(true);
+        try {
+          rankingEntrada = rankingEntrada ?? await cargarMiEntradaRanking(ciudadId, uid, segmento);
+          if (!rankingEntrada && segmento) {
+            const reparacion = await repararConsistenciaUsuario({ clave: claveConsistencia });
+            rankingEntrada = reparacion?.ranking ?? await cargarMiEntradaRanking(ciudadId, uid, segmento);
+          }
+          const pos = await cargarPosicionUsuario(
+            ciudadId,
+            barriosActuales,
+            rankingEntrada?.puntos ?? userData.puntosTotales ?? 0,
+            segmento
+          );
+          setPosicionRanking(pos);
+        } finally {
+          setCargandoRanking(false);
+        }
+      } else {
+        setPosicionRanking(null);
+        setCargandoRanking(false);
+      }
+
       setBarriosEnDisputa(
         todosBarrios
           .filter(b => b.dueno !== uid && (marcas[b.id] ?? 0) > 0)
@@ -186,6 +241,12 @@ export default function PerfilScreen() {
 
       const misGrupos = await obtenerMisGrupos();
       setGrupos(misGrupos);
+
+      setTotalConquistas(Math.max(
+        userData.barriosConquistadosHistorico ?? 0,
+        userData.barriosConquistadosTotal ?? 0,
+        barriosActuales
+      ));
 
     } catch (e) {
       console.error(e);
@@ -258,7 +319,8 @@ export default function PerfilScreen() {
   const guardarPerfil = async () => {
     setGuardando(true);
     try {
-      const uid = auth.currentUser.uid;
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
       let fotoUrl = fotoPendiente;
 
       if (paisConquistaCodigo && !ciudadSeleccionada?.id) {
@@ -401,9 +463,6 @@ export default function PerfilScreen() {
         )}
 
         <Text style={styles.nickname}>{pais?.bandera ? `${pais.bandera} ` : ''}{nickname}</Text>
-        {segmentoEtiqueta && (
-          <Text style={styles.segmentoPerfilTexto}>Liga: {segmentoEtiqueta}</Text>
-        )}
         <TouchableOpacity
           style={styles.segmentoRitmoBoton}
           onPress={() => setMostrarSegmentosRitmo(true)}
@@ -461,46 +520,85 @@ export default function PerfilScreen() {
           />
 
           <Text style={styles.inputLabel}>País a conquistar</Text>
-          <View style={styles.paisConquistaGrid}>
-            {ciudadesPerfil.length === 0 ? (
-              <Text style={styles.ciudadVacia}>Cargando países...</Text>
-            ) : (
-              paisesConquista.map(paisItem => (
-                <TouchableOpacity
-                  key={paisItem.codigo}
-                  style={[
-                    styles.paisConquistaBoton,
-                    paisConquistaCodigo === paisItem.codigo && styles.paisConquistaBotonActivo,
-                  ]}
-                  onPress={() => {
-                    setPaisConquistaCodigo(paisItem.codigo);
-                    if (ciudadSeleccionada?.paisCodigo !== paisItem.codigo) {
-                      setCiudadSeleccionada(null);
-                    }
-                    setMostrarCiudades(true);
-                    setEditando(true);
-                  }}
-                >
-                  <Text style={[
-                    styles.paisConquistaTexto,
-                    paisConquistaCodigo === paisItem.codigo && styles.paisConquistaTextoActivo,
-                  ]}>
-                    {paisItem.nombre}
-                  </Text>
-                </TouchableOpacity>
-              ))
-            )}
-          </View>
+          <TouchableOpacity
+            style={styles.ciudadSelector}
+            onPress={() => {
+              cargarCiudadesPerfil();
+              setMostrarPaises(v => !v);
+              setBusquedaPais('');
+            }}
+          >
+            <Text style={styles.ciudadSelectorNombre}>
+              {paisConquistaCodigo
+                ? (paisesConquista.find(p => p.codigo === paisConquistaCodigo)?.nombre ?? paisConquistaCodigo)
+                : 'Selecciona un país'}
+            </Text>
+            <Text style={styles.ciudadChevron}>{mostrarPaises ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+
+          {mostrarPaises && (
+            <View style={styles.ciudadLista}>
+              {ciudadesPerfil.length === 0 ? (
+                <Text style={styles.ciudadVacia}>Cargando países...</Text>
+              ) : (
+                <>
+                  <TextInput
+                    style={styles.ciudadBusqueda}
+                    placeholder="Buscar país..."
+                    placeholderTextColor={colors.subdued}
+                    value={busquedaPais}
+                    onChangeText={setBusquedaPais}
+                    autoCorrect={false}
+                  />
+                  <ScrollView style={styles.ciudadListaScroll} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                    {[
+                      ...paisesConquista.filter(p => p.nombre.toLowerCase().includes(busquedaPais.toLowerCase())),
+                    ].map(paisItem => (
+                      <TouchableOpacity
+                        key={paisItem.codigo}
+                        style={[
+                          styles.ciudadOpcion,
+                          paisConquistaCodigo === paisItem.codigo && styles.ciudadOpcionActiva,
+                        ]}
+                        onPress={() => {
+                          setPaisConquistaCodigo(paisItem.codigo);
+                          if (ciudadSeleccionada?.paisCodigo !== paisItem.codigo) {
+                            setCiudadSeleccionada(null);
+                            setBusquedaCiudad('');
+                          }
+                          setMostrarPaises(false);
+                          setBusquedaPais('');
+                          setMostrarCiudades(true);
+                          setEditando(true);
+                        }}
+                      >
+                        <Text style={styles.ciudadOpcionNombre}>{paisItem.nombre}</Text>
+                        {paisConquistaCodigo === paisItem.codigo && (
+                          <Text style={styles.ciudadCheck}>✓</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                    {paisesConquista.filter(p => p.nombre.toLowerCase().includes(busquedaPais.toLowerCase())).length === 0 && (
+                      <Text style={styles.ciudadVacia}>Sin resultados para "{busquedaPais}"</Text>
+                    )}
+                    <View style={styles.paisProximamente}>
+                      <Text style={styles.paisProximamenteTexto}>Más países próximamente</Text>
+                    </View>
+                  </ScrollView>
+                </>
+              )}
+            </View>
+          )}
 
           <Text style={styles.inputLabel}>Ciudad a conquistar</Text>
           <TouchableOpacity
-            style={[
-              styles.ciudadSelector,
-              !paisConquistaCodigo && styles.ciudadSelectorDesactivado,
-            ]}
+            style={[styles.ciudadSelector, !paisConquistaCodigo && styles.ciudadSelectorDesactivado]}
             onPress={() => {
               cargarCiudadesPerfil();
-              if (paisConquistaCodigo) setMostrarCiudades(v => !v);
+              if (paisConquistaCodigo) {
+                setMostrarCiudades(v => !v);
+                setBusquedaCiudad('');
+              }
             }}
           >
             <View style={styles.ciudadSelectorInfo}>
@@ -523,29 +621,48 @@ export default function PerfilScreen() {
               ) : ciudadesConquista.length === 0 ? (
                 <Text style={styles.ciudadVacia}>No hay ciudades activas en este país.</Text>
               ) : (
-                ciudadesConquista.map(ciudad => (
-                  <TouchableOpacity
-                    key={ciudad.id}
-                    style={[
-                      styles.ciudadOpcion,
-                      ciudadSeleccionada?.id === ciudad.id && styles.ciudadOpcionActiva,
-                    ]}
-                    onPress={() => {
-                      setCiudadSeleccionada(ciudad);
-                      setPaisConquistaCodigo(ciudad.paisCodigo ?? null);
-                      setMostrarCiudades(false);
-                      setEditando(true);
-                    }}
-                  >
-                    <View>
-                      <Text style={styles.ciudadOpcionNombre}>{ciudad.nombre}</Text>
-                      <Text style={styles.ciudadOpcionPais}>{ciudad.paisNombre ?? ciudad.paisCodigo}</Text>
-                    </View>
-                    {ciudadSeleccionada?.id === ciudad.id && (
-                      <Text style={styles.ciudadCheck}>✓</Text>
-                    )}
-                  </TouchableOpacity>
-                ))
+                <>
+                  <TextInput
+                    style={styles.ciudadBusqueda}
+                    placeholder="Buscar ciudad..."
+                    placeholderTextColor={colors.subdued}
+                    value={busquedaCiudad}
+                    onChangeText={setBusquedaCiudad}
+                    autoCorrect={false}
+                  />
+                  <ScrollView style={styles.ciudadListaScroll} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                  {ciudadesConquista
+                    .filter(c => c.nombre.toLowerCase().includes(busquedaCiudad.toLowerCase()))
+                    .map(ciudad => (
+                      <TouchableOpacity
+                        key={ciudad.id}
+                        style={[
+                          styles.ciudadOpcion,
+                          ciudadSeleccionada?.id === ciudad.id && styles.ciudadOpcionActiva,
+                        ]}
+                        onPress={() => {
+                          setCiudadSeleccionada(ciudad);
+                          setPaisConquistaCodigo(ciudad.paisCodigo ?? null);
+                          setMostrarCiudades(false);
+                          setBusquedaCiudad('');
+                          setEditando(true);
+                        }}
+                      >
+                        <View>
+                          <Text style={styles.ciudadOpcionNombre}>{ciudad.nombre}</Text>
+                          <Text style={styles.ciudadOpcionPais}>{ciudad.paisNombre ?? ciudad.paisCodigo}</Text>
+                        </View>
+                        {ciudadSeleccionada?.id === ciudad.id && (
+                          <Text style={styles.ciudadCheck}>✓</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))
+                  }
+                  {ciudadesConquista.filter(c => c.nombre.toLowerCase().includes(busquedaCiudad.toLowerCase())).length === 0 && (
+                    <Text style={styles.ciudadVacia}>Sin resultados para "{busquedaCiudad}"</Text>
+                  )}
+                  </ScrollView>
+                </>
               )}
             </View>
           )}
@@ -565,7 +682,7 @@ export default function PerfilScreen() {
       )}
 
       {/* Stats */}
-      <Text style={styles.seccionTitulo}>📊 Mis estadísticas</Text>
+      <SeccionTitulo icon="chart-bar">Mis estadísticas</SeccionTitulo>
       <View style={styles.statsGrid}>
         <View style={styles.statBox}>
           <Text style={styles.statValor}>{stats?.carreras ?? 0}</Text>
@@ -583,10 +700,18 @@ export default function PerfilScreen() {
           <Text style={styles.statValor}>{formatRitmo(stats?.ritmoMedio)}</Text>
           <Text style={styles.statLabel}>ritmo medio total</Text>
         </View>
+        <View style={styles.statBox}>
+          <Text style={styles.statValor}>{totalConquistas}</Text>
+          <Text style={styles.statLabel}>histórico barrios conquistados</Text>
+        </View>
+        <View style={styles.statBox}>
+          <Text style={styles.statValor}>{maxBarriosSimultaneos}</Text>
+          <Text style={styles.statLabel}>máximo barrios a la vez</Text>
+        </View>
       </View>
 
       {/* Barrios conquistados */}
-      <Text style={styles.seccionTitulo}>🚩 Barrios conquistados ({barrios.length})</Text>
+      <SeccionTitulo icon="flag-checkered">Barrios conquistados ({barrios.length})</SeccionTitulo>
       {barrios.length === 0 ? (
         <EstadoVacio titulo="Aún no has conquistado ningún barrio" subtitulo="¡Sal a correr y conquista tu zona!" />
       ) : (
@@ -608,7 +733,7 @@ export default function PerfilScreen() {
       {/* Barrios en disputa */}
       {barriosEnDisputa.length > 0 && (
         <>
-          <Text style={styles.seccionTitulo}>⚔️ Zonas en disputa ({barriosEnDisputa.length})</Text>
+          <SeccionTitulo icon="sword-cross">Zonas en disputa ({barriosEnDisputa.length})</SeccionTitulo>
           {barriosEnDisputa.map(barrio => {
             const progreso = barrio.duenoPuntos > 0
               ? Math.min(1, barrio.misMarcas / barrio.duenoPuntos)
@@ -634,7 +759,7 @@ export default function PerfilScreen() {
       )}
 
       {/* Logros */}
-      <Text style={styles.seccionTitulo}>🏅 Logros ({logros.length}/{LOGROS.length})</Text>
+      <SeccionTitulo icon="medal-outline">Logros ({logros.length}/{LOGROS.length})</SeccionTitulo>
       <Text style={styles.logrosIntro}>
         Cada logro suma puntos una sola vez y refuerza el territorio donde más hayas puntuado en esa carrera.
       </Text>
@@ -670,30 +795,8 @@ export default function PerfilScreen() {
       </View>
 
       {/* Grupos */}
-      <Text style={styles.seccionTitulo}>👥 Mis grupos ({grupos.length})</Text>
-      {grupos.length === 0 ? (
-        <EstadoVacio titulo="No perteneces a ningún grupo" subtitulo="Únete o crea uno en la pestaña Grupos." />
-      ) : (
-        grupos.map(grupo => (
-          <View key={grupo.id} style={styles.barrioFila}>
-            <View style={styles.barrioIcono}>
-              <Text style={styles.barrioIconoTexto}>👥</Text>
-            </View>
-            <View style={styles.barrioInfo}>
-              <Text style={styles.barrioNombre}>{grupo.nombre}</Text>
-              <Text style={styles.barrioPuntos}>
-                {grupo.miembros.length} miembros · {((grupo.distanciaTotal ?? 0) / 1000).toFixed(0)} km · {grupo.puntosTotales ?? 0} pts
-              </Text>
-            </View>
-            <Text style={{ color: grupo.esPublico ? colors.route : colors.muted, fontSize: 12 }}>
-              {grupo.esPublico ? '🌍' : '🔒'}
-            </Text>
-          </View>
-        ))
-      )}
-
       <View style={styles.seccion}>
-        <Text style={styles.seccionTitulo}>🔔 Notificaciones</Text>
+        <SeccionTitulo icon="bell-outline">Notificaciones</SeccionTitulo>
         <Text style={styles.privacidadTexto}>
           Recibe avisos cuando conquistes un territorio, te lo quiten o desbloquees un logro.
         </Text>
@@ -724,6 +827,7 @@ export default function PerfilScreen() {
               const uid = auth.currentUser?.uid;
               if (!uid) return;
               await registrarNotificaciones(uid);
+              await prepararSolicitudResena(uid);
               obtenerEstadoPermiso().then(setEstadoNotif).catch(() => {});
             }}
           >
@@ -733,7 +837,17 @@ export default function PerfilScreen() {
       </View>
 
       <View style={styles.seccion}>
-        <Text style={styles.seccionTitulo}>Privacidad y seguridad</Text>
+        <SeccionTitulo icon="information-outline">ConqueRun</SeccionTitulo>
+        <Text style={styles.privacidadTexto}>
+          Tu reseña ayuda a que más corredores descubran el juego de conquistar la ciudad.
+        </Text>
+        <TouchableOpacity style={styles.botonNotif} onPress={() => abrirResenaManual().catch(() => {})}>
+          <Text style={styles.botonNotifTexto}>Valorar ConqueRun</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.seccion}>
+        <SeccionTitulo icon="shield-outline">Privacidad y seguridad</SeccionTitulo>
         <Text style={styles.privacidadTexto}>
           ConqueRun usa tu email para la cuenta, tu ubicación solo mientras grabas carreras, y tus fotos se revisan antes de mostrarse públicamente. Puedes solicitar la eliminación de tu cuenta y datos desde aquí.
         </Text>
@@ -810,7 +924,7 @@ export default function PerfilScreen() {
               {
                 emoji: '🏆',
                 titulo: 'Ranking de ciudad',
-                texto: 'Tus puntos totales te sitúan en el ranking de corredores de tu ciudad. Se actualiza en tiempo real.',
+                texto: 'Compites por barrios conquistados dentro de tu ritmo de conquista. Los puntos sirven para conquistar y desempatar.',
               },
               {
                 emoji: '👥',
@@ -889,6 +1003,22 @@ export default function PerfilScreen() {
     </View>
   );
 }
+
+
+function SeccionTitulo({ icon, children }) {
+  return (
+    <View style={seccionTituloStyle.fila}>
+      <MaterialCommunityIcons name={icon} size={16} color="#C6F432" style={seccionTituloStyle.icono} />
+      <Text style={seccionTituloStyle.texto}>{children}</Text>
+    </View>
+  );
+}
+
+const seccionTituloStyle = StyleSheet.create({
+  fila: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  icono: { marginRight: 7 },
+  texto: { fontSize: 13, fontWeight: '700', color: '#C6F432', textTransform: 'uppercase', letterSpacing: 0.8 },
+});
 
 const styles = StyleSheet.create({
   selectorPrincipal: {
@@ -1079,11 +1209,34 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   paisConquistaBotonActivo: {
-    backgroundColor: '#d6aa4c18',
+    backgroundColor: '#C6F43218',
     borderColor: colors.gold,
   },
   paisConquistaTexto: { color: colors.muted, fontSize: 13, fontWeight: '700' },
   paisConquistaTextoActivo: { color: colors.gold },
+  paisProximamente: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  paisProximamenteTexto: { color: colors.subdued, fontSize: 12, fontStyle: 'italic' },
+  ciudadBusqueda: {
+    backgroundColor: colors.bg,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    color: colors.text,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  ciudadListaScroll: {
+    maxHeight: 220,
+  },
   ciudadLista: {
     backgroundColor: colors.bg,
     borderColor: colors.border,
@@ -1101,7 +1254,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
   },
-  ciudadOpcionActiva: { backgroundColor: '#d6aa4c18' },
+  ciudadOpcionActiva: { backgroundColor: '#C6F43218' },
   ciudadOpcionNombre: { color: colors.text, fontSize: 15, fontWeight: '700' },
   ciudadOpcionPais: { color: colors.muted, fontSize: 12, marginTop: 2 },
   ciudadCheck: { color: colors.gold, fontSize: 16, fontWeight: '900' },
@@ -1128,10 +1281,10 @@ const styles = StyleSheet.create({
     alignItems: 'center', width: '47%',
   },
   statValor: { fontSize: 22, fontWeight: 'bold', color: colors.text },
-  statLabel: { fontSize: 12, color: colors.muted, marginTop: 4 },
+  statLabel: { fontSize: 12, color: colors.muted, marginTop: 4, textAlign: 'center' },
 
   rachaBox: {
-    backgroundColor: '#d6aa4c20', borderColor: colors.gold, borderWidth: 1,
+    backgroundColor: '#C6F43220', borderColor: colors.gold, borderWidth: 1,
     borderRadius: 12, padding: 12, alignItems: 'center', marginBottom: 14,
   },
   rachaTexto: { color: colors.gold, fontSize: 15, fontWeight: 'bold' },
@@ -1148,7 +1301,7 @@ const styles = StyleSheet.create({
     borderRadius: 12, padding: 12, alignItems: 'center', width: '47%',
   },
   logroBoxDesbloqueado: {
-    backgroundColor: '#d6aa4c18',
+    backgroundColor: '#C6F43218',
     borderColor: colors.gold,
     borderWidth: 1,
   },
@@ -1175,10 +1328,10 @@ const styles = StyleSheet.create({
   },
   barrioIcono: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#d6aa4c20', alignItems: 'center', justifyContent: 'center', marginRight: 12,
+    backgroundColor: '#C6F43220', alignItems: 'center', justifyContent: 'center', marginRight: 12,
   },
   barrioIconoConquista: { backgroundColor: '#ef344420', borderColor: '#ef3444', borderWidth: 1 },
-  barrioIconoDisputa: { backgroundColor: '#d6aa4c20', borderColor: colors.gold, borderWidth: 1 },
+  barrioIconoDisputa: { backgroundColor: '#C6F43220', borderColor: colors.gold, borderWidth: 1 },
   disputaTrack: {
     height: 3,
     backgroundColor: colors.border,
@@ -1214,7 +1367,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
   },
-  botonNotifTexto: { color: colors.gold ?? '#d6aa4c', fontSize: 14, fontWeight: '600' },
+  botonNotifTexto: { color: colors.gold ?? '#C6F432', fontSize: 14, fontWeight: '600' },
   botonEliminar: {
     backgroundColor: '#2a1215',
     borderColor: '#e63946',

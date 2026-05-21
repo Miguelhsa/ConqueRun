@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
   },
   ciudadRowActiva: {
     borderColor: colors.gold,
-    backgroundColor: '#d6aa4c18',
+    backgroundColor: '#C6F43218',
   },
   ciudadNombre: {
     fontSize: 17,

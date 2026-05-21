@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ImageBackground, Platform, ActivityIndicator, Linking, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Image, ImageBackground, Platform, ActivityIndicator, Linking, ScrollView } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { auth } from '../firebaseConfig';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
+import { iniciarSesionGoogle, iniciarSesionApple, appleDisponible } from '../utils/socialAuth';
 import { colors, radius } from '../utils/theme';
 
 const URL_TERMINOS = 'https://conquerrun-8d30e.web.app/terminos';
@@ -23,6 +25,7 @@ export default function LoginScreen({ onLogin }) {
   const [password, setPassword] = useState('');
   const [esRegistro, setEsRegistro] = useState(false);
   const [cargando, setCargando] = useState(false);
+  const [cargandoSocial, setCargandoSocial] = useState(null);
   const [anioNacimiento, setAnioNacimiento] = useState('');
   const [aceptaTerminos, setAceptaTerminos] = useState(false);
 
@@ -90,6 +93,38 @@ export default function LoginScreen({ onLogin }) {
     }
   };
 
+  const handleGoogle = async () => {
+    if (cargando || cargandoSocial) return;
+    setCargandoSocial('google');
+    try {
+      const result = await iniciarSesionGoogle();
+      if (result) onLogin();
+    } catch (error) {
+      if (error.message === 'MODULO_NATIVO_NO_DISPONIBLE') {
+        Alert.alert('No disponible en desarrollo', 'Google Sign-In requiere la app compilada (build de producción). Usa email/contraseña mientras desarrollas.');
+      } else {
+        Alert.alert('Error con Google', 'No se pudo iniciar sesión con Google. Inténtalo de nuevo.');
+      }
+    } finally {
+      setCargandoSocial(null);
+    }
+  };
+
+  const handleApple = async () => {
+    if (cargando || cargandoSocial) return;
+    setCargandoSocial('apple');
+    try {
+      const result = await iniciarSesionApple();
+      if (result) onLogin();
+    } catch (error) {
+      if (error.code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert('Error con Apple', 'No se pudo iniciar sesión con Apple. Inténtalo de nuevo.');
+      }
+    } finally {
+      setCargandoSocial(null);
+    }
+  };
+
   return (
     <ImageBackground
       source={require('../assets/login-map-flag-centered.jpg')}
@@ -100,7 +135,11 @@ export default function LoginScreen({ onLogin }) {
       <View style={styles.overlay} />
 
       <View style={styles.marca}>
-        <Text style={styles.titulo}>ConqueRun</Text>
+        <Image
+          source={require('../assets/splash-icon.png')}
+          style={styles.logoMarca}
+          resizeMode="contain"
+        />
         <Text style={styles.subtitulo}>Conquista tu barrio</Text>
       </View>
 
@@ -195,18 +234,56 @@ export default function LoginScreen({ onLogin }) {
           </TouchableOpacity>
         )}
 
-        {!esRegistro && (
-          <Text style={styles.legalTexto}>
-            Al continuar aceptas los{' '}
-            <Text style={styles.enlace} onPress={() => Linking.openURL(URL_TERMINOS)}>
-              Términos de Uso
-            </Text>
-            {' '}y la{' '}
-            <Text style={styles.enlace} onPress={() => Linking.openURL(URL_PRIVACIDAD)}>
-              Política de Privacidad
-            </Text>
-          </Text>
+        <View style={styles.separador}>
+          <View style={styles.separadorLinea} />
+          <Text style={styles.separadorTexto}>o continúa con</Text>
+          <View style={styles.separadorLinea} />
+        </View>
+
+        <TouchableOpacity
+          style={[styles.botonSocial, (cargando || cargandoSocial) && styles.botonDesactivado]}
+          onPress={handleGoogle}
+          disabled={Boolean(cargando || cargandoSocial)}
+        >
+          {cargandoSocial === 'google'
+            ? <ActivityIndicator color="#05070c" size="small" />
+            : (
+              <>
+                <MaterialCommunityIcons name="google" size={20} color="#05070c" />
+                <Text style={styles.botonSocialTexto}>Continuar con Google</Text>
+              </>
+            )
+          }
+        </TouchableOpacity>
+
+        {appleDisponible && (
+          <TouchableOpacity
+            style={[styles.botonSocial, styles.botonApple, (cargando || cargandoSocial) && styles.botonDesactivado]}
+            onPress={handleApple}
+            disabled={Boolean(cargando || cargandoSocial)}
+          >
+            {cargandoSocial === 'apple'
+              ? <ActivityIndicator color="#f8fafc" size="small" />
+              : (
+                <>
+                  <MaterialCommunityIcons name="apple" size={20} color="#f8fafc" />
+                  <Text style={[styles.botonSocialTexto, styles.botonAppleTexto]}>Continuar con Apple</Text>
+                </>
+              )
+            }
+          </TouchableOpacity>
         )}
+
+        <Text style={styles.legalTexto}>
+          Al continuar aceptas los{' '}
+          <Text style={styles.enlace} onPress={() => Linking.openURL(URL_TERMINOS)}>
+            Términos de Uso
+          </Text>
+          {' '}y la{' '}
+          <Text style={styles.enlace} onPress={() => Linking.openURL(URL_PRIVACIDAD)}>
+            Política de Privacidad
+          </Text>
+        </Text>
       </ScrollView>
     </ImageBackground>
   );
@@ -240,19 +317,10 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
   },
-  titulo: {
-    fontFamily: Platform.select({
-      ios: 'AvenirNext-Heavy',
-      android: 'sans-serif-condensed',
-      default: 'System',
-    }),
-    fontSize: 54,
-    fontWeight: '900',
-    color: '#f8fafc',
+  logoMarca: {
+    width: '80%',
+    height: 72,
     marginBottom: 8,
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 8,
   },
   subtitulo: {
     fontFamily: Platform.select({
@@ -360,5 +428,44 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 20,
     lineHeight: 16,
+  },
+  separador: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+    gap: 10,
+  },
+  separadorLinea: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(248,250,252,0.15)',
+  },
+  separadorTexto: {
+    color: 'rgba(248,250,252,0.4)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  botonSocial: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    width: '100%',
+    backgroundColor: '#f8fafc',
+    padding: 15,
+    borderRadius: radius.md,
+    marginBottom: 12,
+    minHeight: 52,
+  },
+  botonApple: {
+    backgroundColor: '#000000',
+  },
+  botonSocialTexto: {
+    color: '#05070c',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  botonAppleTexto: {
+    color: '#f8fafc',
   },
 });

@@ -6,7 +6,7 @@ export const colors = {
   text: '#f8fafc',
   muted: '#94a3b8',
   subdued: '#64748b',
-  gold: '#d6aa4c',
+  gold: '#C6F432',
   conquest: '#e63946',
   sport: '#2dd4bf',
   route: '#38bdf8',

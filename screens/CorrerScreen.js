@@ -4,18 +4,20 @@ import { RouteLine, TerritoryMap } from '../components/map/MapAdapter';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import { db, auth } from '../firebaseConfig';
-import { serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
+import { serverTimestamp, collection, doc, getDoc, getDocs, orderBy, query, setDoc, Timestamp, where } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { obtenerBarriosSegmentados, buildIndiceEspacial, calcularBarrio, calcularResumenTerritorial, invalidarCacheTerritorios } from '../utils/barrios';
-import { notificarConquista, notificarLogro, notificarSegmento } from '../utils/notificaciones';
+import { notificarLogro, notificarSegmento } from '../utils/notificaciones';
 import {
   calcularPuntos,
   obtenerMisGrupos,
   validarCarrera,
 } from '../utils/grupos';
 import { normalizarCarrera, esCarreraPuntuable } from '../utils/carreras';
+import DetalleCarreraScreen from './DetalleCarreraScreen';
 import { LOGROS } from '../utils/logros';
-import { calcularAvisoProximoSegmento, calcularSegmentos30d, calcularSegmentosDesdePerfilYRitmo } from '../utils/segmentos';
+import { pedirResenaSiProcede } from '../utils/reviews';
+import { calcularAvisoProximoSegmento, calcularSegmentos30d, calcularSegmentosDesdePerfilYRitmo, SEGMENTOS_RITMO } from '../utils/segmentos';
 import { obtenerCiudadCercana, CIUDAD_FALLBACK } from '../utils/ciudades';
 import { colors, radius } from '../utils/theme';
 import { formatTiempo, formatRitmo } from '../utils/formatters';
@@ -55,7 +57,9 @@ export default function CorrerScreen() {
   const [confirmarFin, setConfirmarFin] = useState(false);
   const [selectorGrupoFin, setSelectorGrupoFin] = useState({ visible: false, grupos: [] });
   const [carrerasRecientes, setCarrerasRecientes] = useState([]);
+  const [carreraDetalle, setCarreraDetalle] = useState(null);
   const [mostrarInfoPuntos, setMostrarInfoPuntos] = useState(false);
+  const [ritmoActual, setRitmoActual] = useState(null);
   const [stravaModalVisible, setStravaModalVisible] = useState(false);
   const [stravaCode, setStravaCode] = useState('');
   const [stravaConectado, setStravaConectado] = useState(false);
@@ -86,22 +90,30 @@ export default function CorrerScreen() {
   const cargarCarrerasRecientes = async () => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const snap = await getDoc(doc(db, 'usuarios', uid));
-    const data = snap.exists() ? snap.data() : {};
-    setStravaConectado(Boolean(data.stravaConectado));
-    setCarrerasRecientes((data.ultimasCarreras ?? []).map(normalizarCarrera));
+    const [userSnap, carrerasSnap] = await Promise.all([
+      getDoc(doc(db, 'usuarios', uid)),
+      getDocs(query(
+        collection(db, 'carreras'),
+        where('uid', '==', uid),
+        where('fecha', '>=', Timestamp.fromMillis(Date.now() - 30 * 24 * 60 * 60 * 1000)),
+        orderBy('fecha', 'desc'),
+      )),
+    ]);
+    setStravaConectado(Boolean(userSnap.exists() && userSnap.data().stravaConectado));
+    setCarrerasRecientes(carrerasSnap.docs.map(d => normalizarCarrera({ id: d.id, ...d.data() })));
   };
 
   const clasificarTerritorio = (territorioCarrera, uid) => territorioCarrera.reduce((acc, barrio) => {
+    const puntosEfectivos = barrio.puntosAcumuladosUsuario ?? barrio.puntos;
     if (barrio.dueno === uid) {
       acc.defendidas.push(`${barrio.nombre} · ${(barrio.distanciaMetros / 1000).toFixed(2)} km`);
-    } else if (!barrio.dueno || barrio.duenoPuntos < barrio.puntos) {
+    } else if (!barrio.dueno || puntosEfectivos > (barrio.duenoPuntos ?? 0)) {
       acc.conquistadas.push(`${barrio.nombre} · ${(barrio.distanciaMetros / 1000).toFixed(2)} km`);
     } else {
       acc.rivalesPendientes.push({
         nombre: barrio.nombre,
         puntosDueno: barrio.duenoPuntos ?? 0,
-        puntosCarrera: barrio.puntos,
+        puntosCarrera: puntosEfectivos,
       });
     }
 
@@ -157,6 +169,14 @@ export default function CorrerScreen() {
 
     const barrio = calcularBarrio(ultimoPunto, indiceBarriosRef.current ?? barriosRef.current);
     if (barrio) setBarrioActual(barrio);
+
+    const recientes = rutaTracking.slice(-5).filter(p => p.speed != null && p.speed > 0.4);
+    if (recientes.length > 0) {
+      const speedMedia = recientes.reduce((sum, p) => sum + p.speed, 0) / recientes.length;
+      setRitmoActual(Math.round(1000 / speedMedia));
+    } else {
+      setRitmoActual(null);
+    }
 
     return { ruta: rutaTracking, distancia: distanciaActual, segundos: segundosActuales };
   };
@@ -270,7 +290,12 @@ export default function CorrerScreen() {
   const iniciarCarrera = async () => {
     if (preparandoGps) return;
     setPreparandoGps(true);
-    const uid = auth.currentUser.uid;
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      setPreparandoGps(false);
+      Alert.alert('Sesión expirada', 'Inicia sesión de nuevo para correr.');
+      return;
+    }
 
     try {
       const [userSnap, privadoSnap] = await Promise.all([
@@ -389,7 +414,7 @@ export default function CorrerScreen() {
   };
 
   const pararCarrera = async () => {
-    const uid = auth.currentUser.uid;
+    const uid = auth.currentUser?.uid;
     setCorriendo(false);
     setTrackingSegundoPlano(false);
     setPausada(false);
@@ -467,7 +492,6 @@ export default function CorrerScreen() {
       puntos,
       distanciaFinal
     );
-    const territorio = clasificarTerritorio(territorioCarrera, uid);
     const rutaParaGuardar = simplificarRutaParaGuardar(rutaFinal);
     try {
       const registrarCarrera = httpsCallable(getFunctions(), 'registrarCarreraConqurun');
@@ -479,6 +503,8 @@ export default function CorrerScreen() {
         ciudadId: ciudadRef.current.id,
       });
       const nuevosTerritorios = data.conquistas ?? [];
+      const territorioConfirmado = data.territorioCarrera ?? territorioCarrera;
+      const territorio = clasificarTerritorio(territorioConfirmado, uid);
       const segmentosGuardados = data.segmentos ?? segmentos;
       const puntosGuardados = data.puntos ?? puntos;
       const bonusLogros = data.bonusLogros ?? 0;
@@ -487,20 +513,20 @@ export default function CorrerScreen() {
         .filter(Boolean);
 
       // Fire-and-forget local notifications after successful commit
-      if (nuevosTerritorios.length > 0) {
-        const nombresConquistados = [...new Set(nuevosTerritorios.map(b => b.nombre))];
-        notificarConquista(nombresConquistados).catch(() => {});
-      }
       if (debeNotificarSegmento) {
         if (cambioSegmento) {
+          const ritmoAnterior = segmentoAnterior?.split('_')?.[0] ?? null;
+          const indexAnterior = SEGMENTOS_RITMO.findIndex(s => s.id === ritmoAnterior);
+          const indexNuevo = SEGMENTOS_RITMO.findIndex(s => s.id === segmentosGuardados.segmentoRitmo);
+          const esSubida = indexAnterior > indexNuevo;
           notificarSegmento(
-            'Nueva liga desbloqueada',
+            esSubida ? '¡Subiste de liga!' : 'Has bajado de liga',
             `Ahora compites en ${segmentosGuardados.segmentoEtiqueta}.`
           ).catch(() => {});
         } else if (avisoProximoSegmento) {
           notificarSegmento(
-            'Estas muy cerca de subir de liga',
-            `Mejora ${avisoProximoSegmento.segundosParaSubir}s/km en tu ritmo de conquista de 30 dias para entrar en ${avisoProximoSegmento.segmento.nombre}.`
+            'Estás muy cerca de subir de liga',
+            `Mejora ${avisoProximoSegmento.segundosParaSubir}s/km en tu ritmo de conquista de 30 días para entrar en ${avisoProximoSegmento.segmento.nombre}.`
           ).catch(() => {});
         }
       }
@@ -508,9 +534,11 @@ export default function CorrerScreen() {
         notificarLogro(logro).catch(() => {});
       }
       const barriosUnicos = [...new Set(nuevosTerritorios.map(b => `${b.nombre} · ${(b.distanciaMetros / 1000).toFixed(2)} km`))];
+      const nombresConquistados = new Set(nuevosTerritorios.map(b => b.nombre));
       const territorioResumen = {
         ...territorio,
         conquistadas: barriosUnicos,
+        rivalesPendientes: territorio.rivalesPendientes.filter(b => !nombresConquistados.has(b.nombre)),
       };
 
       await limpiarTrackingCarrera();
@@ -611,11 +639,21 @@ export default function CorrerScreen() {
 
   const confirmarPararCarrera = () => setConfirmarFin(true);
 
+  const cerrarResumenCarrera = () => {
+    const uid = auth.currentUser?.uid;
+    const resumen = resumenCarrera;
+    setResumenCarrera(null);
+    if (!uid || !resumen) return;
+    pedirResenaSiProcede(uid, 'carrera_completada', { accionPositiva: true }).catch(() => {});
+  };
+
   const construirUrlRetornoStrava = () => {
     const expoBase = Constants.linkingUri;
     if (!expoBase) return 'conquerun://strava';
     const base = expoBase.endsWith('/') ? expoBase.slice(0, -1) : expoBase;
-    return `${base}/strava`;
+    // Expo Go requiere /--/ antes de la ruta para no confundirla con rutas de Metro
+    const separador = expoBase.startsWith('exp://') ? '/--' : '';
+    return `${base}${separador}/strava`;
   };
 
   const getStravaAuthUrl = () => {
@@ -645,6 +683,8 @@ export default function CorrerScreen() {
 
   const importarConquistasStrava = async ({ requerirCode = false, codeOverride = null } = {}) => {
     if (importandoStrava) return;
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
     const codeParaEnviar = codeOverride ?? stravaCode;
     if (requerirCode && !codeParaEnviar.trim()) {
       Alert.alert('Strava', 'Pega el code que aparece en la URL de retorno de Strava.');
@@ -663,7 +703,21 @@ export default function CorrerScreen() {
       invalidarCacheTerritorios(ciudadRef.current?.id).catch(() => {});
       Alert.alert(
         'Importación Strava',
-        `Revisadas: ${data.revisadas}\nImportadas: ${data.importadas}\nConquistas: ${data.conquistadas}`
+        `Revisadas: ${data.revisadas}\nImportadas: ${data.importadas}\nConquistas: ${data.conquistadas}`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              const totalConquistas = Array.isArray(data.conquistadas)
+                ? data.conquistadas.length
+                : data.conquistadas ?? 0;
+              const accionPositiva = (data.importadas ?? 0) > 0 || totalConquistas > 0;
+              if (accionPositiva) {
+                pedirResenaSiProcede(uid, 'strava_importado', { accionPositiva: true }).catch(() => {});
+              }
+            },
+          },
+        ]
       );
     } catch (e) {
       if (e.code === 'functions/failed-precondition' || e.message?.includes('conectar Strava')) {
@@ -713,143 +767,8 @@ export default function CorrerScreen() {
     return () => subscription.remove();
   }, []);
 
-  return (
-    <ImageBackground
-      source={require('../assets/login-map-flag-centered.jpg')}
-      style={styles.container}
-      resizeMode="cover"
-    >
-      <View style={styles.overlay} />
-      {corriendo ? (
-        ubicacion ? (
-          <TerritoryMap style={styles.mapa} region={ubicacion} showsUserLocation>
-            {ruta.length > 1 && (
-              <RouteLine coordinates={ruta} strokeColor={colors.gold} strokeWidth={4} />
-            )}
-          </TerritoryMap>
-        ) : (
-          <View style={styles.mapaVacio}>
-            <Text style={styles.mapaVacioTitulo}>Buscando señal GPS...</Text>
-          </View>
-        )
-      ) : (
-        <ScrollView style={styles.historial} contentContainerStyle={styles.historialContenido}>
-          <Text style={styles.historialTitulo}>Últimas carreras</Text>
-          <TouchableOpacity
-            style={[styles.stravaImportarCard, importandoStrava && styles.stravaImportarCardDisabled]}
-            onPress={iniciarImportacionStrava}
-            disabled={importandoStrava}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.stravaImportarTitulo}>
-              {importandoStrava ? 'Importando desde Strava...' : 'Importar conquistas de Strava'}
-            </Text>
-            <Text style={styles.stravaImportarTexto}>Carreras recientes con GPS válido</Text>
-          </TouchableOpacity>
-          {carrerasRecientes.length === 0 ? (
-            <Text style={styles.historialVacio}>Aún no has corrido. ¡A por el primer kilómetro!</Text>
-          ) : (
-            carrerasRecientes.map(carrera => {
-              const puntuable = esCarreraPuntuable(carrera);
-              return (
-                <View key={carrera.id} style={[styles.carreraCard, !puntuable && styles.carreraCardAtenuada]}>
-                  <View style={styles.carreraFila}>
-                    <Text style={styles.carreraFecha}>{formatFecha(carrera.fecha)}</Text>
-                    <Text style={styles.carreraPuntos}>{(carrera.puntosPersonales ?? carrera.puntos ?? 0).toLocaleString()} pts</Text>
-                  </View>
-                  <View style={styles.carreraFila}>
-                    <Text style={styles.carreraMetrica}>{(carrera.distancia / 1000).toFixed(2)} km</Text>
-                    <Text style={styles.carreraMetrica}>{formatRitmo(carrera.ritmoMedio)} min/km</Text>
-                  </View>
-                </View>
-              );
-            })
-          )}
-        </ScrollView>
-      )}
-
-      <View style={styles.panel}>
-        {barrioActual && (
-          <EtiquetaBarrio barrio={barrioActual} uid={auth.currentUser?.uid} />
-        )}
-        {corriendo && gpsDebil && (
-          <Text style={styles.gpsDebilTexto}>⚠ GPS débil — ruta pausada hasta recuperar señal</Text>
-        )}
-        <View style={styles.stats}>
-          <View style={styles.stat}>
-            <Text style={styles.statValor}>{(distancia / 1000).toFixed(2)}</Text>
-            <Text style={styles.statLabel}>km</Text>
-          </View>
-          <View style={styles.separador} />
-          <View style={styles.stat}>
-            <Text style={styles.statValor}>{formatTiempo(segundos)}</Text>
-            <Text style={styles.statLabel}>tiempo</Text>
-          </View>
-          <View style={styles.separador} />
-          <View style={styles.stat}>
-            <Text style={styles.statValor}>{formatRitmo(distancia > 0 ? segundos / (distancia / 1000) : null)}</Text>
-            <Text style={styles.statLabel}>ritmo medio</Text>
-          </View>
-        </View>
-
-        {corriendo && !pausada && (
-          <BarraMinimo distancia={distancia} segundos={segundos} />
-        )}
-
-        {corriendo && (
-          <View style={[styles.estadoTrackingBox, pausada && styles.estadoTrackingBoxPausado]}>
-            <Text style={[styles.estadoTracking, pausada && styles.estadoTrackingPausado]}>
-              {pausada
-                ? 'Carrera pausada'
-                : trackingSegundoPlano
-                ? 'Grabando con pantalla apagada'
-                : 'Grabando solo con la app abierta'}
-            </Text>
-            {pausada && (
-              <Text style={styles.estadoTrackingDetalle}>No se suma distancia ni tiempo</Text>
-            )}
-          </View>
-        )}
-
-        {corriendo ? (
-          <View style={styles.accionesCarrera}>
-            <TouchableOpacity
-              style={[styles.botonSecundario, pausada && styles.botonReanudar, preparandoGps && styles.botonDesactivado]}
-              onPress={pausada ? reanudarCarrera : pausarCarrera}
-              disabled={preparandoGps}
-            >
-              <Text style={[styles.botonSecundarioTexto, pausada && styles.botonReanudarTexto]}>
-                {preparandoGps ? 'Preparando GPS...' : pausada ? 'Reanudar' : 'Pausar'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.boton, styles.botonParar, styles.botonTerminar]}
-              onPress={confirmarPararCarrera}
-              disabled={preparandoGps}
-            >
-              <Text style={styles.botonTexto}>Terminar</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={[styles.boton, preparandoGps && styles.botonDesactivado]}
-            onPress={iniciarCarrera}
-            disabled={preparandoGps}
-          >
-            <Text style={styles.botonTexto}>
-              {preparandoGps ? 'Preparando GPS...' : 'Start ConqueR'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Botón info puntos */}
-      {!corriendo && (
-        <TouchableOpacity style={styles.botonInfoPuntos} onPress={() => setMostrarInfoPuntos(true)}>
-          <Text style={styles.botonInfoPuntosTexto}>ⓘ</Text>
-        </TouchableOpacity>
-      )}
-
+  const modales = (
+    <>
       <Modal visible={mostrarInfoPuntos} transparent animationType="slide">
         <View style={styles.infoPuntosOverlay}>
           <View style={styles.infoPuntosCard}>
@@ -863,7 +782,7 @@ export default function CorrerScreen() {
 
             <View style={styles.infoPuntosTabla}>
               {[
-                ['2:50 min/km', '×5.0'],
+                ['3:00 min/km', '×5.0'],
                 ['3:30 min/km', '×4.6'],
                 ['4:00 min/km', '×3.8'],
                 ['4:30 min/km', '×2.6'],
@@ -898,7 +817,7 @@ export default function CorrerScreen() {
 
       <ResumenCarreraModal
         resumen={resumenCarrera}
-        onClose={() => setResumenCarrera(null)}
+        onClose={cerrarResumenCarrera}
         formatTiempo={formatTiempo}
         formatRitmo={formatRitmo}
       />
@@ -915,6 +834,93 @@ export default function CorrerScreen() {
         grupos={selectorGrupoFin.grupos}
         onSeleccionar={resolverSeleccionGrupoFin}
       />
+    </>
+  );
+
+  if (corriendo) {
+    return (
+      <View style={styles.containerSolido}>
+        <VistaCorrer
+          barrio={barrioActual}
+          uid={auth.currentUser?.uid}
+          distancia={distancia}
+          segundos={segundos}
+          ritmoActual={ritmoActual}
+          gpsDebil={gpsDebil}
+          pausada={pausada}
+          trackingSegundoPlano={trackingSegundoPlano}
+          preparandoGps={preparandoGps}
+          onPausar={pausada ? reanudarCarrera : pausarCarrera}
+          onTerminar={confirmarPararCarrera}
+        />
+        {modales}
+      </View>
+    );
+  }
+
+  return (
+    <ImageBackground
+      source={require('../assets/login-map-flag-centered.jpg')}
+      style={styles.container}
+      resizeMode="cover"
+    >
+      <View style={styles.overlay} />
+
+      <ScrollView style={styles.historial} contentContainerStyle={styles.historialContenido}>
+        <Text style={styles.historialTitulo}>Últimas carreras</Text>
+        <TouchableOpacity
+          style={[styles.stravaImportarCard, importandoStrava && styles.stravaImportarCardDisabled]}
+          onPress={iniciarImportacionStrava}
+          disabled={importandoStrava}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.stravaImportarTitulo}>
+            {importandoStrava ? 'Importando desde Strava...' : 'Importar conquistas de Strava'}
+          </Text>
+          <Text style={styles.stravaImportarTexto}>Carreras recientes con GPS válido</Text>
+        </TouchableOpacity>
+        {carrerasRecientes.length === 0 ? (
+          <Text style={styles.historialVacio}>Aún no has corrido. ¡A por el primer kilómetro!</Text>
+        ) : (
+          carrerasRecientes.map(carrera => {
+            const puntuable = esCarreraPuntuable(carrera);
+            return (
+              <TouchableOpacity key={carrera.id} style={[styles.carreraCard, !puntuable && styles.carreraCardAtenuada]} onPress={() => setCarreraDetalle(carrera)} activeOpacity={0.8}>
+                <View style={styles.carreraFila}>
+                  <Text style={styles.carreraFecha}>{formatFecha(carrera.fecha)}</Text>
+                  <Text style={styles.carreraPuntos}>{(carrera.puntosPersonales ?? carrera.puntos ?? 0).toLocaleString()} pts</Text>
+                </View>
+                <View style={styles.carreraFila}>
+                  <Text style={styles.carreraMetrica}>{(carrera.distancia / 1000).toFixed(2)} km</Text>
+                  <Text style={styles.carreraMetrica}>{formatRitmo(carrera.ritmoMedio)} min/km</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })
+        )}
+        {carreraDetalle && (
+          <DetalleCarreraScreen carrera={carreraDetalle} onClose={() => setCarreraDetalle(null)} />
+        )}
+      </ScrollView>
+
+      <View style={styles.panelInicio}>
+        <TouchableOpacity
+          style={[styles.botonEmpezar, preparandoGps && styles.botonDesactivado]}
+          onPress={iniciarCarrera}
+          disabled={preparandoGps}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.botonEmpezarTexto}>
+            {preparandoGps ? 'Preparando GPS...' : 'Empezar'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity style={styles.botonInfoPuntos} onPress={() => setMostrarInfoPuntos(true)}>
+        <Text style={styles.botonInfoPuntosTexto}>ⓘ</Text>
+      </TouchableOpacity>
+
+      {modales}
     </ImageBackground>
   );
 }
@@ -1155,6 +1161,114 @@ const formatFecha = (fecha) => {
   return new Date(ms).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
 };
 
+function VistaCorrer({ barrio, uid, distancia, segundos, ritmoActual, gpsDebil, pausada, trackingSegundoPlano, preparandoGps, onPausar, onTerminar }) {
+  const km = (distancia / 1000).toFixed(2);
+  const ritmoMedio = distancia > 0 ? segundos / (distancia / 1000) : null;
+
+  const esPropio = barrio?.dueno === uid;
+  const esLibre = barrio && !barrio.dueno;
+  const barrioLabel = !barrio
+    ? (gpsDebil ? '⚠ GPS débil' : 'Buscando zona...')
+    : esPropio
+    ? `🛡 Defendiendo ${barrio.nombre}`
+    : esLibre
+    ? `📍 ${barrio.nombre} — zona libre`
+    : `⚔ Conquistando ${barrio.nombre}`;
+  const barrioColor = !barrio ? colors.muted : esPropio ? colors.gold : esLibre ? colors.sport : colors.conquest;
+  const barrioBg = !barrio ? colors.surfaceAlt : esPropio ? '#C6F43218' : esLibre ? '#2dd4bf18' : '#e6394618';
+  const barrioBorder = !barrio ? colors.border : esPropio ? '#C6F43240' : esLibre ? '#2dd4bf40' : '#e6394640';
+
+  return (
+    <View style={styles.vistaCorrer}>
+
+      {/* Tarjeta barrio */}
+      <View style={[styles.tarjetaBarrio, { backgroundColor: barrioBg, borderColor: barrioBorder }]}>
+        <Text style={[styles.tarjetaBarrioLabel, { color: barrioColor }]}>{barrioLabel}</Text>
+        {pausada && (
+          <Text style={[styles.tarjetaBarrioEstado, { color: colors.conquest }]}>Pausada · no suma tiempo ni distancia</Text>
+        )}
+      </View>
+
+      {/* Tarjetas grandes: km y tiempo */}
+      <View style={styles.filaTarjetas}>
+        <View style={styles.tarjetaStat}>
+          <Text style={styles.tarjetaStatValor}>{km}</Text>
+          <Text style={styles.tarjetaStatLabel}>kilómetros</Text>
+        </View>
+        <View style={styles.tarjetaStat}>
+          <Text style={styles.tarjetaStatValor}>{formatTiempo(segundos)}</Text>
+          <Text style={styles.tarjetaStatLabel}>tiempo</Text>
+        </View>
+      </View>
+
+      {/* Tarjetas secundarias: ritmos */}
+      <View style={styles.filaTarjetas}>
+        <View style={styles.tarjetaStat}>
+          <Text style={styles.tarjetaStatValorSec}>{formatRitmo(ritmoMedio)}</Text>
+          <Text style={styles.tarjetaStatLabel}>ritmo medio</Text>
+        </View>
+        <View style={styles.tarjetaStat}>
+          <Text style={styles.tarjetaStatValorSec}>{ritmoActual ? formatRitmo(ritmoActual) : '–:––'}</Text>
+          <Text style={styles.tarjetaStatLabel}>ritmo actual</Text>
+        </View>
+      </View>
+
+      <View style={styles.botonesCarrera}>
+        <TouchableOpacity
+          style={[styles.botonCarrera, pausada ? styles.botonCarreraReanudar : styles.botonCarreraPausar, preparandoGps && styles.botonDesactivado]}
+          onPress={onPausar}
+          disabled={preparandoGps}
+          activeOpacity={0.85}
+        >
+          <Text style={[styles.botonCarreraTexto, pausada && { color: colors.bg }]}>
+            {preparandoGps ? 'GPS...' : pausada ? 'Reanudar' : 'Pausar'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.botonCarrera, styles.botonCarreraTerminar, preparandoGps && styles.botonDesactivado]}
+          onPress={onTerminar}
+          disabled={preparandoGps}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.botonCarreraTexto}>Terminar</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function TarjetaBarrio({ barrio, uid, pausada, gpsDebil, trackingSegundoPlano }) {
+  let icono, label, color, bg;
+  if (!barrio) {
+    icono = '📡';
+    label = gpsDebil ? 'GPS débil — esperando señal' : 'Buscando zona...';
+    color = colors.muted;
+    bg = colors.surfaceAlt;
+  } else {
+    const esPropio = barrio.dueno === uid;
+    const esLibre = !barrio.dueno;
+    icono = esPropio ? '🛡' : esLibre ? '📍' : '⚔';
+    label = esPropio ? `Defendiendo ${barrio.nombre}` : esLibre ? `${barrio.nombre} — zona libre` : `Atacando ${barrio.nombre}`;
+    color = esPropio ? colors.gold : esLibre ? colors.sport : colors.conquest;
+    bg = esPropio ? '#C6F43212' : esLibre ? '#2dd4bf12' : '#e6394612';
+  }
+
+  const estadoTracking = pausada
+    ? 'Pausada · no suma tiempo ni distancia'
+    : gpsDebil
+    ? '⚠ GPS débil — ruta pausada'
+    : trackingSegundoPlano
+    ? 'Grabando con pantalla apagada'
+    : 'Grabando solo con app abierta';
+
+  return (
+    <View style={[styles.tarjetaBarrio, { backgroundColor: bg, borderColor: color }]}>
+      <Text style={[styles.tarjetaBarrioLabel, { color }]}>{icono} {label}</Text>
+      <Text style={[styles.tarjetaBarrioEstado, pausada && { color: colors.conquest }]}>{estadoTracking}</Text>
+    </View>
+  );
+}
+
 function EtiquetaBarrio({ barrio, uid }) {
   const esPropio = barrio.dueno === uid;
   const esLibre = !barrio.dueno;
@@ -1194,6 +1308,7 @@ function BarraMinimo({ distancia, segundos }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  containerSolido: { flex: 1, backgroundColor: colors.bg },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,7,18,0.78)' },
   mapa: { flex: 1 },
   mapaVacio: {
@@ -1202,6 +1317,119 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   mapaVacioTitulo: { color: colors.muted, fontSize: 14, textAlign: 'center' },
+
+  // Vista corriendo — pantalla de estadísticas
+  vistaCorrer: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    paddingTop: Constants.statusBarHeight + 12,
+    paddingHorizontal: 14,
+    paddingBottom: 20,
+    gap: 10,
+  },
+  tarjetaBarrio: {
+    borderWidth: 1,
+    borderRadius: radius.lg,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  tarjetaBarrioLabel: {
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  tarjetaBarrioEstado: {
+    color: colors.muted,
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  filaTarjetas: {
+    flexDirection: 'row',
+    gap: 10,
+    flex: 1,
+  },
+  tarjetaStat: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  tarjetaStatValor: {
+    color: colors.text,
+    fontSize: 52,
+    fontWeight: '900',
+    letterSpacing: -1.5,
+    lineHeight: 56,
+  },
+  tarjetaStatValorSec: {
+    color: colors.text,
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  tarjetaStatLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: 4,
+  },
+  botonesCarrera: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  botonCarrera: {
+    flex: 1,
+    paddingVertical: 18,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botonCarreraPausar: {
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  botonCarreraReanudar: {
+    backgroundColor: colors.gold,
+  },
+  botonCarreraTerminar: {
+    backgroundColor: colors.conquest,
+  },
+  botonCarreraTexto: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+
+  // Panel inicio (no corriendo)
+  panelInicio: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    paddingTop: 8,
+    backgroundColor: 'rgba(8,11,20,0.92)',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  botonEmpezar: {
+    backgroundColor: colors.gold,
+    borderRadius: radius.lg,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  botonEmpezarTexto: {
+    color: colors.bg,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+
   historial: { flex: 1 },
   historialContenido: { padding: 16, paddingBottom: 8 },
   historialTitulo: { color: colors.muted, fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 10 },
@@ -1635,7 +1863,7 @@ const styles = StyleSheet.create({
     borderColor: colors.conquest,
   },
   resumenTerritorio_defensa: {
-    backgroundColor: '#d6aa4c20',
+    backgroundColor: '#C6F43220',
     borderColor: colors.gold,
   },
   resumenTerritorio_rival: {

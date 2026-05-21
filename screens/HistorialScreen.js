@@ -75,6 +75,7 @@ export default function HistorialScreen() {
                 <Text style={styles.metrica}>{(carrera.distancia / 1000).toFixed(2)} km</Text>
                 <Text style={styles.metrica}>{formatRitmo(carrera.ritmoMedio)} min/km</Text>
                 <Text style={styles.metrica}>{(carrera.puntosPersonales ?? carrera.puntos ?? 0).toLocaleString()} pts</Text>
+                <Text style={styles.metrica}>🚩 {carrera.barriosConquistados ?? 0}</Text>
               </View>
               {carrera.aportacionesGrupo.length > 0 && (
                 <View style={styles.aportacionesBox}>

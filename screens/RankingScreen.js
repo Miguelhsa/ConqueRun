@@ -7,6 +7,7 @@ import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/
 import { LOGROS } from '../utils/logros';
 import { bloquearUsuario, crearReporte, fotoAprobada } from '../utils/moderacion';
 import { CIUDAD_FALLBACK } from '../utils/ciudades';
+import { repararConsistenciaUsuario } from '../utils/consistencia';
 import { cargarTopRankingCiudad, cargarPosicionUsuario, cargarTotalCorredoresCiudad, cargarMiEntradaRanking } from '../utils/rankingsCiudad';
 import { colors, radius } from '../utils/theme';
 
@@ -35,9 +36,15 @@ export default function RankingScreen() {
   const cargarInicial = async () => {
     try {
       const { ciudad: ciudadUsuario, segmentoCompetitivo, bloqueados: listaBloqueados } = await cargarCiudadUsuario();
+      const uid = auth.currentUser?.uid;
+      if (uid && ciudadUsuario.id && segmentoCompetitivo) {
+        await repararConsistenciaUsuario({
+          clave: `${uid}_${ciudadUsuario.id}_${segmentoCompetitivo}`,
+        }).catch(e => console.warn('[RankingScreen] No se pudo reparar consistencia:', e));
+      }
       await Promise.all([
         cargarRankingCiudad(ciudadUsuario, segmentoCompetitivo, listaBloqueados),
-        cargarMiResumen(),
+        cargarMiResumen(ciudadUsuario.id, segmentoCompetitivo),
         cargarGrupos(ciudadUsuario.id),
       ]);
     } finally {
@@ -63,19 +70,19 @@ export default function RankingScreen() {
     return { ciudad: c, segmentoCompetitivo, bloqueados: data.usuariosBloqueados ?? [] };
   };
 
-  const cargarMiResumen = async () => {
+  const cargarMiResumen = async (ciudadId, segmentoCompetitivo) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const [snap, snapTerritorios, snapBarrios] = await Promise.all([
+    const [snap, miEntrada] = await Promise.all([
       getDoc(doc(db, 'usuarios', uid)),
-      Promise.resolve({ size: 0 }),
-      Promise.resolve({ size: 0 }),
+      ciudadId ? cargarMiEntradaRanking(ciudadId, uid, segmentoCompetitivo) : Promise.resolve(null),
     ]);
     if (!snap.exists()) return;
     const data = snap.data();
+    const sinEntradaEnSegmento = !miEntrada && segmentoCompetitivo;
     setMiResumen({
-      barrios: data.barriosConquistadosTotal ?? snapTerritorios.size + snapBarrios.size,
-      puntos: data.puntosTotales ?? 0,
+      barrios: sinEntradaEnSegmento ? 0 : (miEntrada?.barrios ?? data.barriosConquistadosTotal ?? 0),
+      puntos: sinEntradaEnSegmento ? 0 : (miEntrada?.puntos ?? data.puntosTotales ?? 0),
       nickname: data.nickname ?? 'Tú',
       fotoPerfil: data.fotoPerfil ?? null,
       fotoPerfilEstado: data.fotoPerfilEstado ?? null,
@@ -103,7 +110,7 @@ export default function RankingScreen() {
     if (uid && miEntrada) {
       const posicion = estaEnTop
         ? lista.find(item => item.uid === uid)?.posicion ?? null
-        : await cargarPosicionUsuario(c.id, miEntrada.puntos, segmentoCompetitivo);
+        : await cargarPosicionUsuario(c.id, miEntrada.barrios ?? 0, miEntrada.puntos ?? 0, segmentoCompetitivo);
       setMiPosicion(posicion);
       setMiPosicionFueraTop(!estaEnTop);
     } else {

@@ -645,7 +645,7 @@ const styles = StyleSheet.create({
     flex: 1, padding: 12, borderRadius: 8,
     borderColor: colors.border, borderWidth: 1, alignItems: 'center',
   },
-  toggleBtnActivo: { borderColor: colors.gold, backgroundColor: '#d6aa4c20' },
+  toggleBtnActivo: { borderColor: colors.gold, backgroundColor: '#C6F43220' },
   toggleTexto: { color: colors.muted, fontSize: 14 },
   toggleTextoActivo: { color: colors.gold, fontWeight: 'bold' },
   botonCrear: {

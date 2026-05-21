@@ -10,14 +10,16 @@ if (!__DEV__) {
 }
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { ActivityIndicator, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { auth, db } from './firebaseConfig';
 import './utils/trackingCarrera';
 import { registrarNotificaciones } from './utils/notificaciones';
+import { prepararSolicitudResena } from './utils/reviews';
 import { colors } from './utils/theme';
 import { calcularDistanciaFiltrada, obtenerMetaTracking, obtenerRutaTracking } from './utils/trackingCarrera';
 import { formatTiempo } from './utils/formatters';
@@ -44,7 +46,7 @@ export default function App() {
   const [esAdmin, setEsAdmin] = useState(false);
   const [biometriaBloqueada, setBiometriaBloqueada] = useState(false);
   const [cargandoSesion, setCargandoSesion] = useState(true);
-  const [mostrandoIntro, setMostrandoIntro] = useState(true);
+
   const [carreraActiva, setCarreraActiva] = useState(null);
   const [notifPendientes, setNotifPendientes] = useState([]);
   const loginManualRef = useRef(false);
@@ -67,7 +69,7 @@ export default function App() {
           loginManualRef.current = false;
           const perfil = await comprobarPerfil(user.uid);
           if (perfil?.onboardingCompletado) {
-            registrarNotificaciones(user.uid).catch(() => {});
+            prepararPostOnboarding(user.uid);
             cargarNotifPendientes(user.uid).catch(() => {});
           }
         }
@@ -81,10 +83,6 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  useEffect(() => {
-    const timeout = setTimeout(() => setMostrandoIntro(false), 1800);
-    return () => clearTimeout(timeout);
-  }, []);
 
   useEffect(() => {
     if (!usuario || biometriaBloqueada || !tieneNickname || (onboardingPendiente && !onboardingCompletado)) {
@@ -133,13 +131,29 @@ export default function App() {
     if (!snap.exists()) return;
     const pendientes = snap.data().notificacionesPendientes ?? [];
     if (pendientes.length === 0) return;
-    const perdidas = pendientes.filter(n =>
-      n.tipo === 'territorio_perdido' || n.tipo === 'territorio_perdido_grupo'
+    const visibles = pendientes.filter(n =>
+      n.tipo === 'territorio_perdido' ||
+      n.tipo === 'territorio_perdido_grupo' ||
+      n.tipo === 'territorio_ganado_grupo'
     );
-    if (perdidas.length > 0) setNotifPendientes(perdidas);
-    await updateDoc(doc(db, 'usuarios', uid, 'privado', 'notificaciones'), {
-      notificacionesPendientes: [],
-    });
+    if (visibles.length > 0) setNotifPendientes(visibles);
+  };
+
+  const confirmarNotifPendientes = async () => {
+    setNotifPendientes([]);
+    if (!usuario?.uid) return;
+    try {
+      const marcarLeidas = httpsCallable(getFunctions(), 'marcarNotificacionesPendientesLeidas');
+      await marcarLeidas();
+    } catch (e) {
+      console.warn('[App] No se pudieron marcar notificaciones como leídas:', e);
+    }
+  };
+
+  const prepararPostOnboarding = (uid) => {
+    registrarNotificaciones(uid)
+      .catch(() => {})
+      .finally(() => prepararSolicitudResena(uid).catch(() => {}));
   };
 
   const debeUsarBiometria = async () => {
@@ -150,7 +164,7 @@ export default function App() {
     return Boolean(inscrito);
   };
 
-  if (mostrandoIntro || cargandoSesion) {
+  if (cargandoSesion) {
     return (
       <SplashIntro cargando={cargandoSesion} />
     );
@@ -178,6 +192,7 @@ export default function App() {
     return <OnboardingScreen onCompletado={() => {
       setOnboardingCompletado(true);
       setOnboardingPendiente(false);
+      if (usuario?.uid) prepararPostOnboarding(usuario.uid);
     }} />;
   }
 
@@ -188,13 +203,15 @@ export default function App() {
       <Modal visible={notifPendientes.length > 0} transparent animationType="fade">
         <View style={styles.notifOverlay}>
           <View style={styles.notifCard}>
-            <Text style={styles.notifTitulo}>⚔️ Territorios perdidos</Text>
+            <Text style={styles.notifTitulo}>Novedades de territorios</Text>
             <Text style={styles.notifSubtitulo}>
-              Mientras estabas fuera perdiste {notifPendientes.length === 1 ? 'este barrio' : 'estos barrios'}:
+              Mientras estabas fuera hubo {notifPendientes.length === 1 ? 'este cambio' : 'estos cambios'}:
             </Text>
             {notifPendientes.map((n, i) => (
               <View key={i} style={styles.notifFila}>
-                <Text style={styles.notifBullet}>🏴</Text>
+                <Text style={styles.notifBullet}>
+                  {n.tipo === 'territorio_ganado_grupo' ? '🏁' : '🏴'}
+                </Text>
                 <View>
                   <Text style={styles.notifNombre}>{n.nombre}</Text>
                   {n.tipo === 'territorio_perdido_grupo' && (
@@ -202,11 +219,16 @@ export default function App() {
                       {n.grupoNombre}{n.grupoGanadorNombre ? ` · conquistado por ${n.grupoGanadorNombre}` : ''}
                     </Text>
                   )}
+                  {n.tipo === 'territorio_ganado_grupo' && (
+                    <Text style={styles.notifGrupo}>
+                      {n.grupoNombre ? `${n.grupoNombre} lo conquistó` : 'Tu equipo lo conquistó'}
+                    </Text>
+                  )}
                 </View>
               </View>
             ))}
-            <TouchableOpacity style={styles.notifBoton} onPress={() => setNotifPendientes([])}>
-              <Text style={styles.notifBotonTexto}>¡Voy a recuperarlo!</Text>
+            <TouchableOpacity style={styles.notifBoton} onPress={confirmarNotifPendientes}>
+              <Text style={styles.notifBotonTexto}>Entendido</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -234,7 +256,7 @@ export default function App() {
           />
         )}
       </Tab.Navigator>
-        <ConquistandoBanner carrera={carreraActiva} />
+
       </View>
     </NavigationContainer>
   );
@@ -257,17 +279,6 @@ const TabIcon = (name, alertaActiva = false) => ({ color, size, focused }) => (
 );
 
 
-function ConquistandoBanner({ carrera }) {
-  if (!carrera) return null;
-
-  return (
-    <View style={styles.conquistandoBanner}>
-      <Text style={styles.conquistandoTitulo}>{carrera.pausada ? 'Pausado' : 'Conquistando'}</Text>
-      <Text style={styles.conquistandoDato}>{(carrera.distancia / 1000).toFixed(2)} km</Text>
-      <Text style={styles.conquistandoDato}>{formatTiempo(carrera.segundos)}</Text>
-    </View>
-  );
-}
 
 function SplashIntro({ cargando }) {
   return (
@@ -286,30 +297,6 @@ const styles = StyleSheet.create({
   appShell: {
     flex: 1,
     backgroundColor: colors.bg,
-  },
-  conquistandoBanner: {
-    position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: TAB_BAR_HEIGHT,
-    backgroundColor: colors.conquest,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  conquistandoTitulo: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  conquistandoDato: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: '600',
   },
   splash: {
     flex: 1,
@@ -367,7 +354,7 @@ const styles = StyleSheet.create({
   },
   notifBoton: {
     marginTop: 20,
-    backgroundColor: '#d6aa4c',
+    backgroundColor: '#C6F432',
     borderRadius: 10,
     padding: 14,
     alignItems: 'center',

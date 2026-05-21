@@ -204,7 +204,7 @@ export const iniciarTrackingCarrera = async () => {
     foregroundService: {
       notificationTitle: 'ConqueRun activo',
       notificationBody: 'Grabando tu carrera y conquistando barrios.',
-      notificationColor: '#d6aa4c',
+      notificationColor: '#C6F432',
     },
   });
 };

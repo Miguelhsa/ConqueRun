@@ -49,13 +49,19 @@ Login → NicknameScreen → CiudadScreen → OnboardingScreen → App
 ## Mecánica de puntos
 
 ```
-puntos = km × factor_ritmo × 1000
-factor_ritmo = clamp(1 + (300 - ritmoMedio) / 300, 0.5, 2.0)
+puntos = round(km × factorRitmo)
+
+Si ritmoMedio ≤ 300 s/km (≤ 5:00 min/km):
+  factorRitmo = clamp(5 - 4 × ((ritmoMedio - 170) / 130)², 1.0, 5.0)
+
+Si ritmoMedio > 300 s/km (> 5:00 min/km):
+  factorRitmo = clamp(1 - 0.5 × (ritmoMedio - 300) / 300, 0.5, 1.0)
 ```
 
-- Ritmo base: 5 min/km = factor 1.0
-- Ritmo muy rápido (2:30 min/km): factor 2.0 máximo
-- Caminar lento (>20 min/km): no puntúa (carrera inválida)
+- Ritmo base: 5:00 min/km = factor 1.0
+- Ritmo de élite (≤ 2:50 min/km ≈ 170 s/km): factor 5.0 máximo
+- Caminar lento (> 12:00 min/km): factor 0.5 mínimo
+- **Mínimo válido: 3:00 min/km (180 s/km)**. Ritmos más rápidos son rechazados por el servidor como imposibles a pie (antitrampas motos/bicicletas).
 
 **Aportación a grupos:**
 ```
@@ -63,6 +69,32 @@ puntosGrupo = puntos × multiplicadorGrupo
 multiplicadorGrupo = min(1.10, 1 + miembros × 0.01)
 ```
 Los puntos de grupo son independientes del ranking individual.
+
+---
+
+## Sistema de ligas (segmentos competitivos)
+
+Cada usuario compite dentro de su propio segmento, calculado como `{ritmo}_{genero}_{edad}` (ej: `plata_hombre_adulto`). Esto evita que corredores de élite dominen a los usuarios casuales.
+
+### Segmentos de ritmo
+
+| ID | Etiqueta | Ritmo (s/km) |
+|----|----------|-------------|
+| `elite` | Leyenda | < 255 (< 4:15 min/km) |
+| `oro` | Señor del mapa | 255–299 |
+| `plata` | Conquistador | 300–344 |
+| `bronce` | Retador | 345–389 |
+| `popular` | Marcador | 390–479 |
+| `iniciacion` | Explorador | 480–720 (≥ 8:00 min/km) |
+
+El ritmo se calcula sobre las carreras de los **últimos 30 días**. Si no hay carreras recientes, el usuario queda en `iniciacion` hasta acumular datos.
+
+### Segmentos de género y edad
+
+- Género: `hombre`, `mujer`, `sin_genero`
+- Edad: `junior` (< 18), `adulto` (18–39), `master` (40–59), `senior` (60+), `sin_edad`
+
+El `segmentoCompetitivo` activo se guarda en `usuarios/{uid}` y `rankingsCiudad`. Al cambiar de segmento, el usuario recibe una notificación push indicando si subió o bajó de liga.
 
 ---
 
@@ -124,10 +156,27 @@ Los bonus de logros van al territorio donde el usuario tiene más puntos acumula
 ```
 nickname, ciudadActualId, ciudadActualNombre, paisCodigo, pais,
 puntosTotales, distanciaTotal, duracionTotal, carrerasTotal, barriosConquistadosTotal,
-logros[], racha, pushToken,
+barriosConquistadosHistorico, maxBarriosSimultaneos,
+logros[], racha,
+segmentoCompetitivo, segmentoRitmo, segmentoGenero, segmentoEdad, segmentoEtiqueta,
 fotoPendiente, fotoPerfilEstado, fotoMotivoRechazo,
 onboardingPendiente, onboardingCompletado, esAdmin
 ```
+
+> `pushToken` **no** vive aquí — vive en `usuarios/{uid}/privado/notificaciones` para no exponerlo en reglas de lectura pública.
+
+#### Subcollección `usuarios/{uid}/privado/datos`
+Datos personales sensibles no accesibles por otros usuarios.
+```
+fechaNacimiento (YYYY-MM-DD), genero ('hombre'|'mujer'|'otro')
+```
+Usado para calcular `segmentoGenero` y `segmentoEdad`. Solo readable por el propio usuario.
+
+#### Subcollección `usuarios/{uid}/privado/notificaciones`
+```
+pushToken (ExponentPushToken[...])
+```
+Leída por Cloud Functions para enviar notificaciones push (conquistas, cambio de liga, carrera inválida).
 
 #### Subcollección `usuarios/{uid}/marcasTerritoriales/{barrioId}`
 Puntos acumulados del usuario en cada territorio, particionados por ciudad. Evita el límite de 20.000 campos/documento de Firestore al escalar a cientos de ciudades.
@@ -180,12 +229,21 @@ puntosBase, multiplicadorGrupo, puntosGrupo,
 miembrosGrupoEnEseMomento, distancia, fecha
 ```
 
+### `territorios/{id}/segmentos/{segmentoCompetitivo}`
+Conquista por segmento competitivo. La fuente de verdad para saber quién domina cada barrio dentro de cada liga.
+```
+dueno, duenoPuntos, conquistadoEn,
+top10Uids[], top10: { [uid]: { puntos, nickname } }
+```
+
 ### `rankingsCiudad/{ciudadId}_{uid}`
-Ranking desnormalizado. Se actualiza con `increment()` en cada carrera.
+Ranking desnormalizado por ciudad y segmento. Se actualiza con `increment()` en cada carrera.
 ```
-ciudadId, uid, puntos, carreras, totalKm,
-nickname, fotoPerfil, fotoPerfilEstado, pais, topLogros[], barrios
+ciudadId, uid, puntos, carreras, totalKm, barrios,
+nickname, fotoPerfil, fotoPerfilEstado, pais, topLogros[],
+segmentoCompetitivo, segmentoRitmo, segmentoGenero, segmentoEdad, segmentoEtiqueta
 ```
+El ranking agrupa por `segmentoCompetitivo` — solo compiten entre sí usuarios del mismo segmento.
 
 ### `reportes/{uid}_{recursoId}`
 ID determinístico para rate limiting (máx. 1 reporte por usuario por recurso).
@@ -204,23 +262,88 @@ uid, email, estado: 'pendiente', solicitadoEn
 
 ## Índices Firestore
 
-| Colección | Campos |
-|-----------|--------|
-| `carreras` | uid ASC, fecha DESC |
-| `rankingsCiudad` | ciudadId ASC, puntos DESC |
-| `rankingsCiudad` | ciudadId ASC, puntos ASC |
-| `rankingsCiudad` | ciudadId ASC, uid ASC |
-| `territorios` | dueno ASC, ciudadId ASC |
-| `grupos` | esPublico ASC, puntosTotales DESC |
-| `grupos` | esPublico ASC, ciudadId ASC |
-| `grupos` | ciudadId ASC, puntosTotales DESC |
+### `carreras`
+| Campos |
+|--------|
+| uid ASC, fecha DESC |
+| uid ASC, fecha ASC |
+
+### `rankingsCiudad`
+| Campos |
+|--------|
+| ciudadId ASC, puntos DESC |
+| ciudadId ASC, puntos ASC |
+| ciudadId ASC, uid ASC |
+| ciudadId ASC, barrios DESC |
+| ciudadId ASC, barrios ASC |
+| ciudadId ASC, barrios DESC, puntos DESC |
+| ciudadId ASC, barrios ASC, puntos ASC |
+| ciudadId ASC, segmentoCompetitivo ASC, uid ASC |
+| ciudadId ASC, segmentoCompetitivo ASC, puntos DESC |
+| ciudadId ASC, segmentoCompetitivo ASC, puntos ASC |
+| ciudadId ASC, segmentoCompetitivo ASC, barrios DESC |
+| ciudadId ASC, segmentoCompetitivo ASC, barrios ASC |
+| ciudadId ASC, segmentoCompetitivo ASC, barrios DESC, puntos DESC |
+| ciudadId ASC, segmentoCompetitivo ASC, barrios ASC, puntos ASC |
+
+### `territorios`
+| Campos |
+|--------|
+| dueno ASC, ciudadId ASC |
+
+### `segmentos` (collection group)
+| Campos |
+|--------|
+| segmentoCompetitivo ASC, territorioId ASC |
+| ciudadId ASC, segmentoCompetitivo ASC, dueno ASC |
+
+### `grupos`
+| Campos |
+|--------|
+| esPublico ASC, puntosTotales DESC |
+| esPublico ASC, ciudadId ASC |
+| ciudadId ASC, puntosTotales DESC |
+| ciudadId ASC, esPublico ASC, puntosTotales DESC |
+
+---
+
+## Cloud Functions
+
+| Función | Trigger | Descripción |
+|---------|---------|-------------|
+| `registrarCarreraConqurun` | HTTPS callable | Guarda carrera, calcula conquistas en servidor, actualiza ranking y grupos |
+| `validarCarrera` | Firestore onWrite `carreras/{id}` | Validación asíncrona post-guardado: recomputa puntos, verifica GPS, detecta trampas. Si falla, revierte batch y envía push al usuario |
+| `sincronizarRankingPerfil` | Firestore onWrite `usuarios/{uid}` | Sincroniza cambios de segmento competitivo en `rankingsCiudad` |
+| `descontarTerritorioSegmentadoPerdido` | Firestore onWrite `territorios/.../segmentos/{seg}` | Ajusta `barriosConquistadosTotal` cuando otro usuario conquista un territorio |
+| `descontarBarrioSegmentadoPerdido` | Firestore onWrite `barrios/.../segmentos/{seg}` | Mismo para la colección `barrios` (compatibilidad) |
+| `enviarNotificacionTerritorios` | Firestore onWrite territorios | Notifica push al exdueño cuando pierde un barrio |
+| `importarConquistasStrava` | HTTPS callable | Importa actividades Strava, calcula conquistas equivalentes |
+| `stravaOAuthCallback` | HTTPS endpoint | Callback OAuth Strava, guarda tokens y hace deep link a la app |
+| `unirseAGrupoConCodigo` | HTTPS callable | Valida código y ciudad, añade al grupo |
+| `repararConsistenciaUsuario` | HTTPS callable | Recalcula barrios conquistados del usuario desde fuente de verdad |
+| `marcarNotificacionesPendientesLeidas` | HTTPS callable | Marca notificaciones como leídas |
+| `notificarReporte` | Firestore onWrite `reportes/{id}` | Envía email al admin cuando llega un reporte (requiere GMAIL_USER/PASS configurados) |
+| `eliminarCuenta` | HTTPS callable | Borra todos los datos del usuario: carreras, ranking, territorios, grupos, reportes |
+
+### Antitrampas en `validarCarrera`
+
+- Pace mínimo: **180 s/km (3:00 min/km)**. Por debajo → carrera rechazada (bloquea motos y bicis)
+- Recalcula puntos en servidor; si difieren > umbral → rechaza
+- Verifica distancia GPS vs distancia declarada (± 20%)
+- Verifica que los territorios tocados están en el trayecto GPS real
+- Si la carrera no pasa: revierte todos los cambios con batch y envía notificación push al usuario
 
 ---
 
 ## Decisiones de arquitectura
 
 ### Stats desnormalizados en usuario
-`distanciaTotal`, `carrerasTotal`, `duracionTotal`, `puntosTotales`, `barriosConquistadosTotal` se actualizan con `increment()` en cada carrera. Evita leer todas las carreras para mostrar el perfil.
+`distanciaTotal`, `carrerasTotal`, `duracionTotal`, `puntosTotales`, `barriosConquistadosTotal`, `barriosConquistadosHistorico` y `maxBarriosSimultaneos` se mantienen desde Cloud Functions. Perfil no debe leer todas las carreras para calcular agregados.
+
+- `barriosConquistadosTotal`: barrios que el usuario posee ahora en su ciudad y segmento activos. Puede bajar si pierde territorio o cambia de ciudad/segmento.
+- `barriosConquistadosHistorico`: total acumulado de conquistas conseguidas. No baja al perder barrios.
+- `carreras/{id}.barriosConquistados`: numero de conquistas logradas solo en esa carrera.
+- `carreras/{id}.conquistasCarrera`: listado resumido de las zonas conquistadas en esa carrera; es la fuente principal del detalle de carrera.
 
 ### rankingsCiudad — ranking sin agregación
 Un doc por usuario por ciudad, actualizado incrementalmente. Coste ~$20/mes a 100k usuarios activos vs. $270k/mes si se leyeran todas las carreras.
@@ -322,18 +445,38 @@ npx expo start    # servidor de desarrollo
 ### Estado actual
 La app esta cerca de estar lista para tiendas, pero antes hay que validar un build EAS real con las credenciales nativas de Firebase y App Check activado.
 
-### Bloqueantes antes de subir
+### Estado de builds (mayo 2026)
 
-**Cuentas (sin ellas no se puede subir nada):**
-- [ ] Crear cuenta Apple Developer — $99/año → [developer.apple.com](https://developer.apple.com) → tarda 24–48h en activarse
-- [ ] Crear cuenta Google Play Console — $25 único → [play.google.com/console](https://play.google.com/console) → inmediato
+- ✅ Android .aab (versionCode 4) — listo en EAS
+- ⏳ iOS .ipa — build iniciado, pendiente de completar con Apple ID interactivo
 
-**Google Play — obligatorio para ubicación en segundo plano:**
-- [ ] Grabar vídeo de 30–60s mostrando el dialog de disclosure antes de pedir el permiso de ubicación en segundo plano
-- [ ] Rellenar formulario de declaración en Play Console: *Policy → App content → Sensitive permissions*
+### Cuentas developer
+
+- ✅ Apple Developer account creada
+- ✅ Google Play Developer account creada
+- ✅ EAS CLI logueado como miguelhsa
+
+### Pendiente para subir a tiendas
+
+**Google Play:**
+- [ ] Subir .aab a Play Console
+- [ ] Rellenar Data Safety section
+- [ ] Rellenar declaración background location: *Policy → App content → Sensitive permissions*
+- [ ] Crear cuenta demo `review@conquerun.app` con barrios, carreras y ranking reales
+
+**App Store:**
+- [ ] Completar build iOS .ipa
+- [ ] Subir .ipa a App Store Connect
+- [ ] Rellenar App Privacy (datos recolectados, vinculación)
+- [ ] Crear cuenta demo para revisores de Apple
+
+**Ambas tiendas:**
+- [ ] Capturas de pantalla (≥ 3 iPhone 6.7" + ≥ 2 Android)
+- [ ] Feature graphic Android (1024 × 500 px)
+- [ ] Cuestionario IARC de clasificación de contenido
 
 **Verificar:**
-- [ ] Hacer `eas build --platform all --profile production` y confirmar que el `applicationId` del APK es `com.conquerun.app` (el archivo local `android/app/build.gradle` muestra `com.anonymous.conqurun`)
+- [ ] Confirmar que `conquerun.app` (GitHub Pages) está live con política de privacidad y términos accesibles
 
 **App Check / Firebase nativo:**
 - [x] Descargar `GoogleService-Info.plist` y `google-services.json` desde Firebase Console para las apps `com.conquerun.app`
@@ -369,6 +512,12 @@ La app esta cerca de estar lista para tiendas, pero antes hay que validar un bui
 | ✅ | Age gate — verificación de 13+ años en el registro |
 | ✅ | Content moderation — reporte de contenido funcional |
 | ✅ | expo-doctor — 17/17 checks OK |
+| ✅ | Textos de ficha en español e inglés (nombre, subtítulo, descripción, keywords) |
+| ✅ | Notas para revisores Apple/Google (UGC, background location, cuenta demo) |
+| ✅ | Data Safety form para Google Play (completo) |
+| ✅ | App Privacy para App Store Connect (completo) |
+| ✅ | Notificación push cuando carrera es invalidada por antitrampas |
+| ✅ | Notificación push diferenciada subida/bajada de liga |
 
 ### Tiempos de revisión estimados
 - **Apple:** 1–3 días hábiles (primera vez puede tardar más)
@@ -379,6 +528,11 @@ La app esta cerca de estar lista para tiendas, pero antes hay que validar un bui
 ## Roadmap
 
 - [ ] CRÍTICO: evaluar migración del adaptador de mapa a MapLibre + tiles de bajo coste para reducir dependencia de Google Maps, controlar costes en Android y mantener intacta la lógica de territorios/conquistas.
+- [ ] CRÍTICO ANTES DE TIENDAS: ejecutar el plan de reparacion de consistencia en `docs/roadmap.md` para que perfil, mapa, ranking, carrera, historial y equipos beban de la misma fuente de verdad.
+- [ ] POST-LANZAMIENTO REAL: validar en builds de tienda iOS/Android el prompt nativo de reseñas, el boton "Valorar ConqueRun" y configurar `ios.appStoreUrl` cuando exista el App Store ID.
+- [ ] POST-LANZAMIENTO REAL: revisar metricas de la notificacion/recordatorio de reseña a los 7 dias para asegurar que no molesta ni incumple politicas de Apple/Google.
+- [ ] POST-LANZAMIENTO REAL: validar de extremo a extremo Strava OAuth fuera de Expo Go: autorizacion, retorno a la app, importacion, conquistas y reflejo en perfil, ranking, mapa e historial.
+- [ ] POST-LANZAMIENTO REAL: monitorizar logs de Functions, errores de App Check, costes Firestore/Maps/Strava y ratio de carreras fallidas durante la primera semana.
 - [ ] Historial de carreras con mapa de ruta
 - [ ] Grupos: chat interno y salidas organizadas
 - [ ] Selector de país en ranking (filtro por país)

@@ -102,3 +102,5 @@ Ideas buenas para implementar cuando ConqueRun pase revisión de App Store / Goo
 - Medir uso de grupos.
 - Medir conversión de usuarios con Strava conectado.
 - Añadir crash reporting antes de beta cerrada.
+- Post-lanzamiento real: monitorizar errores de App Check, deep links de Strava, coste de Maps/Firestore/Functions, carreras no guardadas y discrepancias entre perfil, ranking y mapa.
+- Post-lanzamiento real: validar que el prompt nativo de reseñas respeta cadencia, no aparece demasiado pronto y que el boton manual abre la ficha correcta en App Store y Google Play.

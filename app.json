@@ -29,6 +29,13 @@
       "@react-native-firebase/app",
       "@react-native-firebase/app-check",
       [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.743879769903-aajbv22jpkgdd576mu4a18cle77qagal"
+        }
+      ],
+      "expo-apple-authentication",
+      [
         "expo-build-properties",
         {
           "ios": {
@@ -49,7 +56,8 @@
         "googleMapsApiKey": "AIzaSyD-8fZ3pa4Omddju-fmJH2HhJeAxOPueRU"
       },
       "entitlements": {
-        "com.apple.developer.devicecheck.appattest-environment": "production"
+        "com.apple.developer.devicecheck.appattest-environment": "production",
+        "com.apple.developer.applesignin": ["Default"]
       },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "ConqueRun usa tu ubicación mientras grabas una carrera para medir distancia, ritmo y conquistar barrios.",
@@ -181,6 +189,7 @@
     },
     "android": {
       "googleServicesFile": "./firebase-native/google-services.json",
+      "playStoreUrl": "https://play.google.com/store/apps/details?id=com.conquerun.app",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyDLx9lkmn7dtcDKAN6E3bvfbD0-WWWoULI"
