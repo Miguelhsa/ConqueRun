@@ -2,15 +2,26 @@ const { withDangerousMod } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
-// react-native-maps and RNFirebase need small target-scoped tweaks when
-// useFrameworks: static is enabled. Keep these settings scoped to the affected
-// pods instead of changing the whole Pods project.
+// Firebase iOS + use_frameworks: static needs this Podfile global.
+// react-native-maps also needs a narrow module-map tweak with static frameworks.
 const withReactNativeMapsfix = (config) =>
   withDangerousMod(config, [
     'ios',
     (config) => {
       const podfilePath = path.join(config.modRequest.platformProjectRoot, 'Podfile');
       let contents = fs.readFileSync(podfilePath, 'utf8');
+
+      if (!contents.includes('$RNFirebaseAsStaticFramework = true')) {
+        contents = contents.replace(
+          /(  use_frameworks! :linkage => ENV\['USE_FRAMEWORKS'\]\.to_sym if ENV\['USE_FRAMEWORKS'\])(\r?\n)/,
+          "$1$2  $RNFirebaseAsStaticFramework = true\n"
+        );
+
+        contents = contents.replace(
+          /(  use_frameworks! :linkage => podfile_properties\['ios.useFrameworks'\]\.to_sym if podfile_properties\['ios.useFrameworks'\])(\r?\n)(?!  use_frameworks! :linkage => ENV)/,
+          "$1$2  $RNFirebaseAsStaticFramework = true\n"
+        );
+      }
 
       const blocks = [];
 
@@ -45,21 +56,21 @@ const withReactNativeMapsfix = (config) =>
         ].join('\n'));
       }
 
-      if (blocks.length === 0) {
-        return config;
+      if (blocks.length > 0) {
+        const patched = contents.replace(
+          /(post_install do \|installer\|)(\r?\n)/,
+          `$1$2${blocks.join('\n')}\n`
+        );
+
+        if (patched === contents) {
+          console.warn('[withReactNativeMapsfix] post_install block not found - patch not applied.');
+          return config;
+        }
+
+        contents = patched;
       }
 
-      const patched = contents.replace(
-        /(post_install do \|installer\|)(\r?\n)/,
-        `$1$2${blocks.join('\n')}\n`
-      );
-
-      if (patched === contents) {
-        console.warn('[withReactNativeMapsfix] post_install block not found — patch not applied.');
-        return config;
-      }
-
-      fs.writeFileSync(podfilePath, patched);
+      fs.writeFileSync(podfilePath, contents);
       return config;
     },
   ]);
