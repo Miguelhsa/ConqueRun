@@ -11,15 +11,14 @@ const withReactNativeMapsfix = (config) =>
       const podfilePath = path.join(config.modRequest.platformProjectRoot, 'Podfile');
       let contents = fs.readFileSync(podfilePath, 'utf8');
 
-      if (!contents.includes('$RNFirebaseAsStaticFramework = true')) {
-        contents = contents.replace(
-          /(  use_frameworks! :linkage => ENV\['USE_FRAMEWORKS'\]\.to_sym if ENV\['USE_FRAMEWORKS'\])(\r?\n)/,
-          "$1$2  $RNFirebaseAsStaticFramework = true\n"
-        );
+      contents = contents
+        .replace(/\n\s*# \[ConqueRun\] RNFirebase static framework\n\s*\$RNFirebaseAsStaticFramework = true\n/g, '\n')
+        .replace(/\n\s*\$RNFirebaseAsStaticFramework = true\n/g, '\n');
 
+      if (!contents.includes('[ConqueRun] RNFirebase static framework')) {
         contents = contents.replace(
-          /(  use_frameworks! :linkage => podfile_properties\['ios.useFrameworks'\]\.to_sym if podfile_properties\['ios.useFrameworks'\])(\r?\n)(?!  use_frameworks! :linkage => ENV)/,
-          "$1$2  $RNFirebaseAsStaticFramework = true\n"
+          /(prepare_react_native_project!\r?\n)/,
+          '$1\n# [ConqueRun] RNFirebase static framework\n$RNFirebaseAsStaticFramework = true\n'
         );
       }
 
