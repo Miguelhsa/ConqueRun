@@ -28,7 +28,10 @@ service firebase.storage {
 
     match /grupos/{fileName} {
       allow read: if signedIn();
-      allow write: if false;
+      allow write: if signedIn() &&
+        fileName.matches('^[A-Za-z0-9_-]+\\.jpg$') &&
+        request.resource.size < 5 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
     }
   }
 }

@@ -701,24 +701,29 @@ export default function CorrerScreen() {
       setStravaConectado(true);
       await cargarCarrerasRecientes();
       invalidarCacheTerritorios(ciudadRef.current?.id).catch(() => {});
-      Alert.alert(
-        'Importación Strava',
-        `Revisadas: ${data.revisadas}\nImportadas: ${data.importadas}\nConquistas: ${data.conquistadas}`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              const totalConquistas = Array.isArray(data.conquistadas)
-                ? data.conquistadas.length
-                : data.conquistadas ?? 0;
-              const accionPositiva = (data.importadas ?? 0) > 0 || totalConquistas > 0;
-              if (accionPositiva) {
-                pedirResenaSiProcede(uid, 'strava_importado', { accionPositiva: true }).catch(() => {});
-              }
-            },
+      const importadas = data.importadas ?? 0;
+      const totalConquistas = Array.isArray(data.conquistadas)
+        ? data.conquistadas.length
+        : data.conquistadas ?? 0;
+      const accionPositiva = importadas > 0 || totalConquistas > 0;
+      let mensaje;
+      if (importadas === 0) {
+        mensaje = 'Ya estás al día. No hay carreras nuevas desde la última importación.';
+      } else if (totalConquistas === 0) {
+        mensaje = `Se importaron ${importadas} carrera${importadas !== 1 ? 's' : ''} de Strava, pero no conquistaste barrios nuevos en esta ciudad.`;
+      } else {
+        mensaje = `Se importaron ${importadas} carrera${importadas !== 1 ? 's' : ''} de Strava y conquistaste ${totalConquistas} barrio${totalConquistas !== 1 ? 's' : ''} nuevos. ¡Sigue así!`;
+      }
+      Alert.alert('Importación Strava', mensaje, [
+        {
+          text: 'OK',
+          onPress: () => {
+            if (accionPositiva) {
+              pedirResenaSiProcede(uid, 'strava_importado', { accionPositiva: true }).catch(() => {});
+            }
           },
-        ]
-      );
+        },
+      ]);
     } catch (e) {
       if (e.code === 'functions/failed-precondition' || e.message?.includes('conectar Strava')) {
         setStravaConectado(false);

@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
+import * as SplashScreen from 'expo-splash-screen';
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 if (!__DEV__) {
   console.log = () => {};
@@ -9,7 +12,7 @@ if (!__DEV__) {
   console.debug = () => {};
 }
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { ActivityIndicator, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -164,11 +167,13 @@ export default function App() {
     return Boolean(inscrito);
   };
 
-  if (cargandoSesion) {
-    return (
-      <SplashIntro cargando={cargandoSesion} />
-    );
-  }
+  useEffect(() => {
+    if (!cargandoSesion) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [cargandoSesion]);
+
+  if (cargandoSesion) return null;
 
   if (!usuario) {
     return <LoginScreen onLogin={() => {
@@ -244,9 +249,9 @@ export default function App() {
           tabBarIcon: TabIcon(iconoTab(route.name), route.name === 'Correr' && Boolean(carreraActiva)),
         })}
       >
-        <Tab.Screen name="Mapa" component={MapaScreen} />
         <Tab.Screen name="Ranking" component={RankingScreen} />
         <Tab.Screen name="Correr" component={CorrerScreen} />
+        <Tab.Screen name="Mapa" component={MapaScreen} />
         <Tab.Screen name="Perfil" component={PerfilScreen} />
         {esAdmin && (
           <Tab.Screen
@@ -280,36 +285,11 @@ const TabIcon = (name, alertaActiva = false) => ({ color, size, focused }) => (
 
 
 
-function SplashIntro({ cargando }) {
-  return (
-    <View style={styles.splash}>
-      <Image
-        source={require('./assets/conquerun-logo.png')}
-        style={styles.logo}
-        resizeMode="contain"
-      />
-      {cargando && <ActivityIndicator color={colors.gold} size="small" />}
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   appShell: {
     flex: 1,
     backgroundColor: colors.bg,
-  },
-  splash: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.bg,
-    paddingHorizontal: 28,
-  },
-  logo: {
-    width: '86%',
-    maxWidth: 420,
-    aspectRatio: 1,
-    marginBottom: 18,
   },
   notifOverlay: {
     flex: 1,

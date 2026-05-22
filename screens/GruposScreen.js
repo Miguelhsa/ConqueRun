@@ -92,7 +92,7 @@ export default function GruposScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.5,
@@ -104,7 +104,7 @@ export default function GruposScreen() {
 
   const subirFotoGrupo = async (uri, grupoId) => {
     const storage = getStorage();
-    const storageRef = ref(storage, `gruposPendientes/${auth.currentUser.uid}/${grupoId}.jpg`);
+    const storageRef = ref(storage, `grupos/${grupoId}.jpg`);
     const response = await fetch(uri);
     const blob = await response.blob();
     await uploadBytes(storageRef, blob);
@@ -137,7 +137,7 @@ export default function GruposScreen() {
     } catch (e) {
       if (fotoPendienteUrl) {
         const storage = getStorage();
-        deleteObject(ref(storage, `gruposPendientes/${auth.currentUser.uid}/${grupoRef.id}.jpg`)).catch(() => {});
+        deleteObject(ref(storage, `grupos/${grupoRef.id}.jpg`)).catch(() => {});
       }
       Alert.alert('Error', 'No se pudo crear el grupo');
     } finally {

@@ -1,105 +1,130 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { EstadoVacio, PantallaCargando } from '../components/ui';
-import { collection, doc, getDocs, query, updateDoc, where, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, updateDoc, where, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { FOTO_ESTADOS } from '../utils/moderacion';
 import { colors, radius } from '../utils/theme';
 
 export default function ModeracionScreen() {
-  const [pendientes, setPendientes] = useState([]);
+  const [reportes, setReportes] = useState([]);
   const [cargando, setCargando] = useState(true);
 
-  useEffect(() => {
-    cargarPendientes();
-  }, []);
+  useFocusEffect(useCallback(() => {
+    cargarReportes();
+  }, []));
 
-  const cargarPendientes = async () => {
+  const cargarReportes = async () => {
     setCargando(true);
     try {
-      const [usuariosSnap, gruposSnap] = await Promise.all([
-        getDocs(query(collection(db, 'usuarios'), where('fotoPerfilEstado', '==', FOTO_ESTADOS.PENDIENTE))),
-        getDocs(query(collection(db, 'grupos'), where('fotoEstado', '==', FOTO_ESTADOS.PENDIENTE))),
-      ]);
+      const snap = await getDocs(
+        query(collection(db, 'reportes'), where('estado', '==', 'pendiente'))
+      );
 
-      const usuarios = usuariosSnap.docs
-        .map(d => ({ id: d.id, tipo: 'usuario', nombre: d.data().nickname ?? 'Usuario', url: d.data().fotoPendiente }))
-        .filter(item => item.url);
+      const items = await Promise.all(
+        snap.docs.map(async (d) => {
+          const reporte = { id: d.id, ...d.data() };
+          const esUsuario = reporte.tipo === 'usuario';
+          const coleccion = esUsuario ? 'usuarios' : 'grupos';
+          const userSnap = await getDoc(doc(db, coleccion, reporte.recursoId));
+          if (!userSnap.exists()) return null;
+          const data = userSnap.data();
+          return {
+            reporteId: d.id,
+            recursoId: reporte.recursoId,
+            tipo: reporte.tipo,
+            nombre: esUsuario ? (data.nickname ?? 'Usuario') : (data.nombre ?? 'Grupo'),
+            fotoUrl: esUsuario ? data.fotoPerfil : data.foto,
+            fotoEstadoCampo: esUsuario ? 'fotoPerfilEstado' : 'fotoEstado',
+          };
+        })
+      );
 
-      const grupos = gruposSnap.docs
-        .map(d => ({ id: d.id, tipo: 'grupo', nombre: d.data().nombre ?? 'Grupo', url: d.data().fotoPendiente }))
-        .filter(item => item.url);
-
-      setPendientes([...usuarios, ...grupos]);
+      setReportes(items.filter(Boolean));
     } catch (e) {
-      Alert.alert('Error', 'No se pudieron cargar las fotos pendientes');
+      Alert.alert('Error', 'No se pudieron cargar los reportes');
     } finally {
       setCargando(false);
     }
   };
 
-  const aprobar = async (item) => {
-    const ref = doc(db, item.tipo === 'usuario' ? 'usuarios' : 'grupos', item.id);
-    const payload = item.tipo === 'usuario'
-      ? {
-          fotoPerfil: item.url,
-          fotoPerfilEstado: FOTO_ESTADOS.APROBADA,
-          fotoRevisadaEn: serverTimestamp(),
-          fotoMotivoRechazo: null,
-        }
-      : {
-          foto: item.url,
-          fotoEstado: FOTO_ESTADOS.APROBADA,
-          fotoRevisadaEn: serverTimestamp(),
-          fotoMotivoRechazo: null,
-        };
-
-    await updateDoc(ref, payload);
-    await cargarPendientes();
+  const eliminarFoto = async (item) => {
+    Alert.alert(
+      'Eliminar foto',
+      `¿Eliminar la foto de ${item.nombre}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const coleccion = item.tipo === 'usuario' ? 'usuarios' : 'grupos';
+              await updateDoc(doc(db, coleccion, item.recursoId), {
+                [item.fotoEstadoCampo]: FOTO_ESTADOS.RECHAZADA,
+                fotoRevisadaEn: serverTimestamp(),
+                fotoMotivoRechazo: 'contenido_no_permitido',
+              });
+              await updateDoc(doc(db, 'reportes', item.reporteId), {
+                estado: 'resuelto',
+                resolvedAt: serverTimestamp(),
+              });
+              cargarReportes();
+            } catch {
+              Alert.alert('Error', 'No se pudo eliminar la foto');
+            }
+          },
+        },
+      ]
+    );
   };
 
-  const rechazar = async (item) => {
-    const ref = doc(db, item.tipo === 'usuario' ? 'usuarios' : 'grupos', item.id);
-    const payload = item.tipo === 'usuario'
-      ? {
-          fotoPerfilEstado: FOTO_ESTADOS.RECHAZADA,
-          fotoRevisadaEn: serverTimestamp(),
-          fotoMotivoRechazo: 'contenido_no_permitido',
-        }
-      : {
-          fotoEstado: FOTO_ESTADOS.RECHAZADA,
-          fotoRevisadaEn: serverTimestamp(),
-          fotoMotivoRechazo: 'contenido_no_permitido',
-        };
-
-    await updateDoc(ref, payload);
-    await cargarPendientes();
+  const ignorar = async (item) => {
+    try {
+      await updateDoc(doc(db, 'reportes', item.reporteId), {
+        estado: 'ignorado',
+        resolvedAt: serverTimestamp(),
+      });
+      cargarReportes();
+    } catch {
+      Alert.alert('Error', 'No se pudo ignorar el reporte');
+    }
   };
 
   if (cargando) return <PantallaCargando />;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contenido}>
-      {pendientes.length === 0 ? (
-        <EstadoVacio titulo="No hay fotos pendientes" subtitulo="Todo está al día." />
+      {reportes.length === 0 ? (
+        <EstadoVacio titulo="Sin reportes pendientes" subtitulo="Todo está al día." />
       ) : (
-        pendientes.map(item => (
-          <View key={`${item.tipo}-${item.id}`} style={styles.card}>
-            <Image source={{ uri: item.url }} style={styles.preview} />
-            <View style={styles.info}>
-              <Text style={styles.nombre}>{item.nombre}</Text>
-              <Text style={styles.tipo}>{item.tipo}</Text>
-              <View style={styles.acciones}>
-                <TouchableOpacity style={styles.aprobar} onPress={() => aprobar(item)}>
-                  <Text style={styles.accionTexto}>Aprobar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.rechazar} onPress={() => rechazar(item)}>
-                  <Text style={styles.accionTexto}>Rechazar</Text>
-                </TouchableOpacity>
+        <>
+          <Text style={styles.encabezado}>{reportes.length} reporte{reportes.length !== 1 ? 's' : ''} pendiente{reportes.length !== 1 ? 's' : ''}</Text>
+          {reportes.map(item => (
+            <View key={item.reporteId} style={styles.card}>
+              {item.fotoUrl ? (
+                <Image source={{ uri: item.fotoUrl }} style={styles.preview} />
+              ) : (
+                <View style={[styles.preview, styles.sinFoto]}>
+                  <Text style={styles.sinFotoTexto}>Sin foto</Text>
+                </View>
+              )}
+              <View style={styles.info}>
+                <Text style={styles.nombre}>{item.nombre}</Text>
+                <Text style={styles.tipo}>{item.tipo}</Text>
+                <View style={styles.acciones}>
+                  <TouchableOpacity style={styles.botonEliminar} onPress={() => eliminarFoto(item)}>
+                    <Text style={styles.accionTexto}>Eliminar foto</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.botonIgnorar} onPress={() => ignorar(item)}>
+                    <Text style={styles.accionTexto}>Ignorar</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
-          </View>
-        ))
+          ))}
+        </>
       )}
     </ScrollView>
   );
@@ -108,13 +133,19 @@ export default function ModeracionScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   contenido: { padding: 16, paddingBottom: 40 },
-  card: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.lg, padding: 12, marginBottom: 12, gap: 12 },
+  encabezado: { color: colors.muted, fontSize: 13, marginBottom: 16 },
+  card: {
+    flexDirection: 'row', backgroundColor: colors.surface,
+    borderRadius: radius.lg, padding: 12, marginBottom: 12, gap: 12,
+  },
   preview: { width: 88, height: 88, borderRadius: radius.md, backgroundColor: colors.border },
+  sinFoto: { alignItems: 'center', justifyContent: 'center' },
+  sinFotoTexto: { color: colors.muted, fontSize: 11 },
   info: { flex: 1 },
   nombre: { color: colors.text, fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
   tipo: { color: colors.muted, fontSize: 12, marginBottom: 12 },
   acciones: { flexDirection: 'row', gap: 8 },
-  aprobar: { flex: 1, backgroundColor: '#2a9d8f', borderRadius: 8, padding: 10, alignItems: 'center' },
-  rechazar: { flex: 1, backgroundColor: '#e63946', borderRadius: 8, padding: 10, alignItems: 'center' },
+  botonEliminar: { flex: 1, backgroundColor: '#e63946', borderRadius: 8, padding: 10, alignItems: 'center' },
+  botonIgnorar: { flex: 1, backgroundColor: colors.border, borderRadius: 8, padding: 10, alignItems: 'center' },
   accionTexto: { color: colors.text, fontSize: 13, fontWeight: 'bold' },
 });

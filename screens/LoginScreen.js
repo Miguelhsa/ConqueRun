@@ -118,7 +118,7 @@ export default function LoginScreen({ onLogin }) {
       if (result) onLogin();
     } catch (error) {
       if (error.code !== 'ERR_REQUEST_CANCELED') {
-        Alert.alert('Error con Apple', 'No se pudo iniciar sesión con Apple. Inténtalo de nuevo.');
+        Alert.alert('Error con Apple', `${error.code ?? ''}\n${error.message ?? 'sin mensaje'}`);
       }
     } finally {
       setCargandoSocial(null);

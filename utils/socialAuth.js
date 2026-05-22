@@ -1,19 +1,18 @@
-import { Platform } from 'react-native';
+import { Platform, TurboModuleRegistry } from 'react-native';
 import { GoogleAuthProvider, OAuthProvider, signInWithCredential } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
 
-// Obtén este valor en: Firebase Console → Authentication → Sign-in method → Google
-// → Web SDK configuration → Client ID web
 const GOOGLE_WEB_CLIENT_ID = '743879769903-emv2olgja4o0nhu1b389ocdml6em79da.apps.googleusercontent.com';
 
 let googleConfigurado = false;
 
 function requireGoogleSignin() {
-  try {
-    return require('@react-native-google-signin/google-signin');
-  } catch {
+  // TurboModuleRegistry.get returns null (no crash) if the native module isn't registered.
+  // getEnforcing throws a fatal error that bypasses try/catch, so we check first.
+  if (!TurboModuleRegistry.get('RNGoogleSignin')) {
     throw new Error('MODULO_NATIVO_NO_DISPONIBLE');
   }
+  return require('@react-native-google-signin/google-signin');
 }
 
 function asegurarGoogleConfigurado() {

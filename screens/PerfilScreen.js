@@ -305,7 +305,7 @@ export default function PerfilScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.5,
@@ -348,10 +348,10 @@ export default function PerfilScreen() {
           : {}),
         ...(fotoPendiente && fotoPendiente.startsWith('file://')
           ? {
-              fotoPendiente: fotoUrl,
-              fotoPerfilEstado: FOTO_ESTADOS.PENDIENTE,
+              fotoPerfil: fotoUrl,
+              fotoPendiente: null,
+              fotoPerfilEstado: FOTO_ESTADOS.APROBADA,
               fotoMotivoRechazo: null,
-              fotoRevisadaEn: null,
             }
           : {}),
       }, { merge: true });
@@ -363,8 +363,9 @@ export default function PerfilScreen() {
       }).catch(() => {});
 
       if (fotoPendiente && fotoPendiente.startsWith('file://')) {
-        setFotoPendiente(fotoUrl);
-        setFotoPerfilEstado(FOTO_ESTADOS.PENDIENTE);
+        setFotoPerfil(fotoUrl);
+        setFotoPendiente(null);
+        setFotoPerfilEstado(FOTO_ESTADOS.APROBADA);
       }
       if (ciudadSeleccionada?.id) {
         setCiudadActualId(ciudadSeleccionada.id);
@@ -374,9 +375,7 @@ export default function PerfilScreen() {
       setEditando(false);
       setMostrarEditorPerfil(false);
       setMostrarCiudades(false);
-      Alert.alert('Perfil guardado', fotoPendiente?.startsWith('file://')
-        ? 'Tu foto queda pendiente de revisión antes de mostrarse públicamente'
-        : 'Tus cambios se han guardado');
+      Alert.alert('Perfil guardado', 'Tus cambios se han guardado');
     } catch (e) {
       Alert.alert('Error', 'No se pudo guardar el perfil');
     } finally {
