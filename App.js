@@ -1,8 +1,17 @@
+import './utils/cryptoPolyfill';
 import { useState, useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Updates from 'expo-updates';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+if (!__DEV__) {
+  Updates.checkForUpdateAsync()
+    .then(({ isAvailable }) => { if (isAvailable) return Updates.fetchUpdateAsync(); })
+    .then((result) => { if (result) Updates.reloadAsync(); })
+    .catch(() => {});
+}
 
 if (!__DEV__) {
   console.log = () => {};
@@ -40,6 +49,8 @@ import ModeracionScreen from './screens/ModeracionScreen';
 const Tab = createBottomTabNavigator();
 const TAB_BAR_HEIGHT = 84;
 
+const SPLASH_MIN_MS = 2500;
+
 export default function App() {
   const [usuario, setUsuario] = useState(null);
   const [tieneNickname, setTieneNickname] = useState(false);
@@ -49,6 +60,7 @@ export default function App() {
   const [esAdmin, setEsAdmin] = useState(false);
   const [biometriaBloqueada, setBiometriaBloqueada] = useState(false);
   const [cargandoSesion, setCargandoSesion] = useState(true);
+  const splashInicioRef = useRef(Date.now());
 
   const [carreraActiva, setCarreraActiva] = useState(null);
   const [notifPendientes, setNotifPendientes] = useState([]);
@@ -79,7 +91,9 @@ export default function App() {
       } catch (e) {
         console.error(e);
       } finally {
-        setCargandoSesion(false);
+        const elapsed = Date.now() - splashInicioRef.current;
+        const restante = Math.max(0, SPLASH_MIN_MS - elapsed);
+        setTimeout(() => setCargandoSesion(false), restante);
       }
     });
 
@@ -208,16 +222,21 @@ export default function App() {
       <Modal visible={notifPendientes.length > 0} transparent animationType="fade">
         <View style={styles.notifOverlay}>
           <View style={styles.notifCard}>
-            <Text style={styles.notifTitulo}>Novedades de territorios</Text>
+            <View style={styles.notifHeader}>
+              <MaterialCommunityIcons name="crosshairs-gps" size={18} color="#FF4F2E" />
+              <Text style={styles.notifTitulo}>Novedades de territorios</Text>
+            </View>
             <Text style={styles.notifSubtitulo}>
               Mientras estabas fuera hubo {notifPendientes.length === 1 ? 'este cambio' : 'estos cambios'}:
             </Text>
             {notifPendientes.map((n, i) => (
               <View key={i} style={styles.notifFila}>
-                <Text style={styles.notifBullet}>
-                  {n.tipo === 'territorio_ganado_grupo' ? '🏁' : '🏴'}
-                </Text>
-                <View>
+                <MaterialCommunityIcons
+                  name={n.tipo === 'territorio_ganado_grupo' ? 'flag-variant' : 'flag-remove'}
+                  size={16}
+                  color={n.tipo === 'territorio_ganado_grupo' ? '#C6F432' : '#FF4F2E'}
+                />
+                <View style={styles.notifFilaTexto}>
                   <Text style={styles.notifNombre}>{n.nombre}</Text>
                   {n.tipo === 'territorio_perdido_grupo' && (
                     <Text style={styles.notifGrupo}>
@@ -293,55 +312,69 @@ const styles = StyleSheet.create({
   },
   notifOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
+    backgroundColor: 'rgba(0,0,0,0.82)',
     justifyContent: 'center',
     padding: 24,
   },
   notifCard: {
-    backgroundColor: '#111827',
+    backgroundColor: '#0A0A0A',
     borderRadius: 16,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: '#4a3000',
+    borderWidth: 1.5,
+    borderColor: '#C6F432',
+    overflow: 'hidden',
+  },
+  notifHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 4,
   },
   notifTitulo: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#f8fafc',
-    marginBottom: 10,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F2EFE8',
+    flex: 1,
+    letterSpacing: 0.2,
   },
   notifSubtitulo: {
-    fontSize: 14,
-    color: '#94a3b8',
-    marginBottom: 16,
-    lineHeight: 20,
+    fontSize: 13,
+    color: '#555',
+    marginHorizontal: 20,
+    marginTop: 6,
+    marginBottom: 4,
+    lineHeight: 18,
   },
   notifFila: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    gap: 10,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    gap: 12,
+    marginTop: 8,
   },
-  notifBullet: { fontSize: 16 },
-  notifGrupo: { fontSize: 12, color: '#64748b', marginTop: 1 },
+  notifFilaTexto: { flex: 1 },
+  notifGrupo: { fontSize: 11, color: '#4a4a4a', marginTop: 2 },
   notifNombre: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#f8fafc',
-    flex: 1,
+    color: '#F2EFE8',
   },
   notifBoton: {
-    marginTop: 20,
+    margin: 16,
+    marginTop: 12,
     backgroundColor: '#C6F432',
     borderRadius: 10,
-    padding: 14,
+    padding: 13,
     alignItems: 'center',
   },
   notifBotonTexto: {
     color: '#080b14',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
+    letterSpacing: 0.3,
   },
 });

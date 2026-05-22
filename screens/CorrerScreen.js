@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, ImageBackground, Linking } from 'react-native';
+import { ActivityIndicator, AppState, View, Text, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, ImageBackground, Linking } from 'react-native';
 import { RouteLine, TerritoryMap } from '../components/map/MapAdapter';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
@@ -61,7 +61,6 @@ export default function CorrerScreen() {
   const [mostrarInfoPuntos, setMostrarInfoPuntos] = useState(false);
   const [ritmoActual, setRitmoActual] = useState(null);
   const [stravaModalVisible, setStravaModalVisible] = useState(false);
-  const [stravaCode, setStravaCode] = useState('');
   const [stravaConectado, setStravaConectado] = useState(false);
   const [importandoStrava, setImportandoStrava] = useState(false);
   const timerRef = useRef(null);
@@ -75,6 +74,7 @@ export default function CorrerScreen() {
   const distanciaRef = useRef(0);
   const segundosRef = useRef(0);
   const resolverGrupoFinRef = useRef(null);
+  const esperandoStravaRef = useRef(false);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);
@@ -657,7 +657,8 @@ export default function CorrerScreen() {
   };
 
   const getStravaAuthUrl = () => {
-    const state = JSON.stringify({ returnUrl: construirUrlRetornoStrava() });
+    const uid = auth.currentUser?.uid ?? '';
+    const state = JSON.stringify({ returnUrl: construirUrlRetornoStrava(), uid });
     return (
       'https://www.strava.com/oauth/authorize' +
       `?client_id=${STRAVA_CLIENT_ID}` +
@@ -669,35 +670,24 @@ export default function CorrerScreen() {
     );
   };
 
-  const extraerStravaCode = (valor) => {
-    const texto = String(valor ?? '').trim();
-    const match = texto.match(/[?&]?code=([^&\s]+)/);
-    return decodeURIComponent(match?.[1] ?? texto);
-  };
-
   const abrirAutorizacionStrava = () => {
+    esperandoStravaRef.current = true;
     Linking.openURL(getStravaAuthUrl()).catch(() => {
+      esperandoStravaRef.current = false;
       Alert.alert('Strava', 'No se pudo abrir la autorización de Strava.');
     });
   };
 
-  const importarConquistasStrava = async ({ requerirCode = false, codeOverride = null } = {}) => {
+  const importarConquistasStrava = async () => {
     if (importandoStrava) return;
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const codeParaEnviar = codeOverride ?? stravaCode;
-    if (requerirCode && !codeParaEnviar.trim()) {
-      Alert.alert('Strava', 'Pega el code que aparece en la URL de retorno de Strava.');
-      return;
-    }
 
     setImportandoStrava(true);
     try {
       const importar = httpsCallable(getFunctions(), 'importarConquistasStrava');
-      const payload = (requerirCode || codeOverride) ? { code: extraerStravaCode(codeParaEnviar) } : {};
-      const { data } = await importar(payload);
+      const { data } = await importar({});
       setStravaModalVisible(false);
-      setStravaCode('');
       setStravaConectado(true);
       await cargarCarrerasRecientes();
       invalidarCacheTerritorios(ciudadRef.current?.id).catch(() => {});
@@ -742,7 +732,7 @@ export default function CorrerScreen() {
       setStravaModalVisible(true);
       return;
     }
-    importarConquistasStrava();
+    importarConquistasStrava().catch(console.error);
   };
 
   const procesarStravaCallbackUrl = (url) => {
@@ -754,13 +744,18 @@ export default function CorrerScreen() {
     ) {
       return false;
     }
-    const code = extraerStravaCode(url);
-    if (!code || code === url) {
-      Alert.alert('Strava', 'Strava no devolvió autorización para importar.');
+    esperandoStravaRef.current = false;
+    if (textoUrl.includes('error=')) {
+      const errorParam = textoUrl.match(/[?&]error=([^&]*)/)?.[1] ?? '';
+      const msg = errorParam === 'exchange_failed'
+        ? 'No se pudo completar la conexión con Strava. Inténtalo de nuevo.'
+        : 'Strava denegó el acceso.';
+      Alert.alert('Strava', msg);
       return true;
     }
-    setStravaCode(code);
-    importarConquistasStrava({ codeOverride: code });
+    setStravaConectado(true);
+    setStravaModalVisible(false);
+    importarConquistasStrava();
     return true;
   };
 
@@ -770,6 +765,26 @@ export default function CorrerScreen() {
       procesarStravaCallbackUrl(url);
     });
     return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    const handleAppState = async (nextState) => {
+      if (nextState !== 'active') return;
+      if (!esperandoStravaRef.current) return;
+      esperandoStravaRef.current = false;
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      try {
+        const snap = await getDoc(doc(db, 'usuarios', uid));
+        if (snap.exists() && snap.data().stravaConectado) {
+          setStravaConectado(true);
+          setStravaModalVisible(false);
+          importarConquistasStrava();
+        }
+      } catch (e) {}
+    };
+    const sub = AppState.addEventListener('change', handleAppState);
+    return () => sub.remove();
   }, []);
 
   const modales = (
@@ -968,23 +983,29 @@ function SelectorGrupoFinCarrera({ visible, grupos, onSeleccionar }) {
 
 function StravaImportModal({ visible, importando, onAbrirStrava, onCancelar }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancelar}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={importando ? undefined : onCancelar}>
       <View style={styles.stravaOverlay}>
         <View style={styles.stravaPanel}>
-          <Text style={styles.stravaModalTitulo}>Conectar Strava</Text>
-          <Text style={styles.stravaModalTexto}>
-            Autoriza ConqueRun en Strava y volverás automáticamente a la app. Solo importaremos carreras con GPS válido para conquistar.
+          <Text style={styles.stravaModalTitulo}>
+            {importando ? 'Importando desde Strava...' : 'Conectar Strava'}
           </Text>
-
-          <TouchableOpacity style={styles.stravaAutorizarBoton} onPress={onAbrirStrava} activeOpacity={0.85}>
-            <Text style={styles.stravaAutorizarTexto}>Conectar con Strava</Text>
-          </TouchableOpacity>
-
-          <View style={styles.stravaAcciones}>
-            <TouchableOpacity style={styles.stravaCancelarBoton} onPress={onCancelar} disabled={importando}>
-              <Text style={styles.stravaCancelarTexto}>Cancelar</Text>
-            </TouchableOpacity>
-          </View>
+          {importando ? (
+            <ActivityIndicator color={colors.gold} size="large" style={{ marginVertical: 20 }} />
+          ) : (
+            <>
+              <Text style={styles.stravaModalTexto}>
+                Autoriza ConqueRun en Strava y volverás automáticamente a la app. Solo importaremos carreras con GPS válido para conquistar.
+              </Text>
+              <TouchableOpacity style={styles.stravaAutorizarBoton} onPress={onAbrirStrava} activeOpacity={0.85}>
+                <Text style={styles.stravaAutorizarTexto}>Conectar con Strava</Text>
+              </TouchableOpacity>
+              <View style={styles.stravaAcciones}>
+                <TouchableOpacity style={styles.stravaCancelarBoton} onPress={onCancelar}>
+                  <Text style={styles.stravaCancelarTexto}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
       </View>
     </Modal>

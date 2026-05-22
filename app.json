@@ -10,6 +10,14 @@
     "newArchEnabled": false,
     "plugins": [
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0A0A0A"
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "ConqueRun usa tu ubicación mientras grabas una carrera para medir distancia, ritmo y conquistar barrios.",
@@ -46,9 +54,9 @@
       ]
     ],
     "splash": {
-      "image": "./assets/icon.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#080b14"
+      "backgroundColor": "#0A0A0A"
     },
     "ios": {
       "supportsTablet": true,

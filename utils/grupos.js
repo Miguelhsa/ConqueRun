@@ -22,10 +22,14 @@ const ejecutarOps = async (ops) => {
 const MAX_GRUPOS_POR_USUARIO = 50;
 const CHARS_CODIGO = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
-// Código criptográficamente seguro de 6 caracteres
 export const generarCodigo = () => {
   const bytes = new Uint8Array(6);
-  crypto.getRandomValues(bytes);
+  const cryptoObj = global.crypto ?? globalThis.crypto;
+  if (cryptoObj?.getRandomValues) {
+    cryptoObj.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
   return Array.from(bytes, b => CHARS_CODIGO[b % CHARS_CODIGO.length]).join('');
 };
 

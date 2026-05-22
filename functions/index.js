@@ -796,8 +796,8 @@ async function obtenerTokenStrava(uid, code = null) {
   const db = getFirestore();
   const { FieldValue } = require('firebase-admin/firestore');
   const ref = db.collection('usuarios').doc(uid).collection('privado').doc('strava');
-  const clientId = STRAVA_CLIENT_ID.value();
-  const clientSecret = STRAVA_CLIENT_SECRET.value();
+  const clientId = STRAVA_CLIENT_ID.value().trim();
+  const clientSecret = STRAVA_CLIENT_SECRET.value().trim();
   if (!clientId || !clientSecret) {
     throw new HttpsError('failed-precondition', 'Strava no está configurado en backend.');
   }
@@ -1438,30 +1438,88 @@ exports.marcarNotificacionesPendientesLeidas = onCall(async (request) => {
   return { ok: true, limpiadas: Array.isArray(pendientes) ? pendientes.length : 0 };
 });
 
-exports.stravaOAuthCallback = onRequest({ secrets: [STRAVA_CLIENT_SECRET] }, (req, res) => {
+exports.stravaOAuthCallback = onRequest({ secrets: [STRAVA_CLIENT_SECRET] }, async (req, res) => {
   const code = String(req.query.code ?? '').trim();
-  const error = String(req.query.error ?? '').trim();
-  const scope = String(req.query.scope ?? '').trim();
+  let error = String(req.query.error ?? '').trim();
   const state = String(req.query.state ?? '').trim();
-  const params = new URLSearchParams();
-  if (code) params.set('code', code);
-  if (error) params.set('error', error);
-  if (scope) params.set('scope', scope);
-  const query = params.toString() ? `?${params.toString()}` : '';
-  let stateDeepLink = null;
+
+  let returnUrl = null;
+  let uid = null;
   try {
     const stateData = state ? JSON.parse(state) : {};
-    const returnUrl = String(stateData.returnUrl ?? '').trim();
-    const parsed = new URL(returnUrl);
-    if (['conquerun:', 'exp:', 'exps:', 'exp+conqurun:'].includes(parsed.protocol)) {
-      stateDeepLink = `${returnUrl}${returnUrl.includes('?') ? '&' : '?'}${params.toString()}`;
+    returnUrl = String(stateData.returnUrl ?? '').trim() || null;
+    uid = String(stateData.uid ?? '').trim() || null;
+  } catch (e) {}
+
+  // Intercambiar el código server-side para que el token quede guardado
+  // aunque el deep link no abra la app automáticamente.
+  console.log('[stravaOAuthCallback] recibido', { hasCode: Boolean(code), hasUid: Boolean(uid), hasError: Boolean(error) });
+  if (code && uid) {
+    try {
+      const db = getFirestore();
+      const { FieldValue } = require('firebase-admin/firestore');
+      const clientId = STRAVA_CLIENT_ID.value().trim();
+      const clientSecret = STRAVA_CLIENT_SECRET.value().trim();
+      const redirectUri = STRAVA_REDIRECT_URI.value().trim();
+      console.log('[stravaOAuthCallback] intercambiando código con redirect_uri:', redirectUri, 'secretLen:', clientSecret.length);
+      const exchangeRes = await fetch('https://www.strava.com/oauth/token', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
+        }),
+      });
+      const data = await exchangeRes.json().catch(() => null);
+      console.log('[stravaOAuthCallback] respuesta Strava', { ok: exchangeRes.ok, status: exchangeRes.status, hasAccessToken: Boolean(data?.access_token), error: data?.message });
+      if (exchangeRes.ok && data?.access_token) {
+        const stravaRef = db.collection('usuarios').doc(uid).collection('privado').doc('strava');
+        await stravaRef.set({
+          athleteId: data.athlete?.id ?? null,
+          athleteUsername: data.athlete?.username ?? null,
+          athleteFirstname: data.athlete?.firstname ?? null,
+          refreshToken: data.refresh_token,
+          accessToken: data.access_token,
+          expiresAt: data.expires_at,
+          scope: data.scope ?? null,
+          conectadoEn: FieldValue.serverTimestamp(),
+          actualizadoEn: FieldValue.serverTimestamp(),
+        }, { merge: true });
+        await db.collection('usuarios').doc(uid).set({
+          stravaConectado: true,
+          stravaAthleteId: data.athlete?.id ?? null,
+          stravaConectadoEn: FieldValue.serverTimestamp(),
+          actualizadoEn: FieldValue.serverTimestamp(),
+        }, { merge: true });
+        console.log('[stravaOAuthCallback] token guardado en Firestore para uid:', uid);
+      } else {
+        console.error('[stravaOAuthCallback] Strava rechazó el intercambio', { status: exchangeRes.status, data });
+        error = 'exchange_failed';
+      }
+    } catch (e) {
+      console.error('[stravaOAuthCallback] Error al intercambiar código:', e);
+      error = 'exchange_failed';
     }
-  } catch (e) {
-    stateDeepLink = null;
+  } else {
+    console.log('[stravaOAuthCallback] sin code o uid, no se intercambia', { hasCode: Boolean(code), hasUid: Boolean(uid) });
   }
-  const deepLink = `conquerun://strava${query}`;
-  const expoDeepLink = `exp+conqurun://strava${query}`;
-  const primaryDeepLink = stateDeepLink ?? deepLink;
+
+  // Deep link (el token ya está guardado en Firestore, o hay error)
+  const deepLinkBase = 'conquerun://strava';
+  const expoDeepLink = 'exp+conqurun://strava';
+  let primaryDeepLink = deepLinkBase;
+  if (returnUrl) {
+    try {
+      const parsed = new URL(returnUrl);
+      if (['conquerun:', 'exp:', 'exps:', 'exp+conqurun:'].includes(parsed.protocol)) {
+        primaryDeepLink = returnUrl.split('?')[0];
+      }
+    } catch (e) {}
+  }
+  if (error) primaryDeepLink += `?error=${encodeURIComponent(error)}`;
 
   res.status(200).send(`<!doctype html>
 <html lang="es">
@@ -1475,21 +1533,19 @@ exports.stravaOAuthCallback = onRequest({ secrets: [STRAVA_CLIENT_SECRET] }, (re
     h1{font-size:24px;margin:0 0 12px}
     p{color:#aeb6c8;line-height:1.45}
     a{display:block;margin-top:14px;background:#fc4c02;color:white;text-decoration:none;font-weight:800;padding:14px 18px;border-radius:10px}
-    a.secondary{background:#1d2638}
+    a.secondary{background:#1d2638;margin-top:10px}
   </style>
   <script>
-    const appLink = ${JSON.stringify(primaryDeepLink)};
-    const devLink = ${JSON.stringify(expoDeepLink)};
-    window.location.href = appLink;
-    setTimeout(() => { window.location.href = devLink; }, 900);
+    window.location.href = ${JSON.stringify(primaryDeepLink)};
+    setTimeout(() => { window.location.href = ${JSON.stringify(expoDeepLink)}; }, 900);
   </script>
 </head>
 <body>
   <main>
-    <h1>Volviendo a ConqueRun</h1>
-    <p>Si la app no se abre automaticamente, toca una de estas opciones.</p>
+    <h1>Strava conectado ✓</h1>
+    <p>Volviendo a ConqueRun para importar tus carreras...</p>
     <a href="${primaryDeepLink}">Abrir ConqueRun</a>
-    <a class="secondary" href="${expoDeepLink}">Abrir version de desarrollo</a>
+    <a class="secondary" href="${expoDeepLink}">Abrir versión de desarrollo</a>
   </main>
 </body>
 </html>`);
