@@ -586,3 +586,129 @@ Metricas secundarias:
 La proxima gran meta no es anadir muchas pantallas. Es hacer que la experiencia principal sea clara, justa y repetible. El Sprint 0 elimina la deuda visible. Los Sprints 1 y 2 cierran el core para que sea testeable con usuarios reales. El Sprint 3 mueve la logica competitiva al backend para que la competicion sea honesta. Solo entonces tiene sentido abrir a mas usuarios, integrar Strava y preparar las tiendas.
 
 La monetizacion debe llegar cuando haya retencion real y siempre evitando ventajas competitivas de pago.
+
+---
+
+## Escalado Global
+
+Principio: no expandir antes de validar retencion en el mercado actual. Expandir sin retencion es quemar dinero y tiempo.
+
+**Trigger para cada fase: 500-1000 usuarios activos mensuales en la fase anterior.**
+
+---
+
+### Fase E1 — Espana completa (estado actual)
+
+- 52 ciudades espanolas configuradas con territorios reales via Overpass API.
+- Objetivo: validar el producto con usuarios reales en Espana.
+- Metricas a vigilar antes de pasar a E2: retencion D7 > 20%, al menos una carrera por semana por usuario activo.
+
+---
+
+### Fase E2 — Latinoamerica (sin cambios de idioma)
+
+**Por que antes que el ingles:** mismo idioma, coste cero de traduccion, mercado de 400M de hispanohablantes.
+
+**Ciudades objetivo:**
+- Mexico: Ciudad de Mexico, Monterrey, Guadalajara
+- Argentina: Buenos Aires, Cordoba, Rosario
+- Colombia: Bogota, Medellin, Cali
+- Chile: Santiago, Valparaiso
+- Peru: Lima
+- Uruguay: Montevideo
+
+**Tecnico:**
+- El script `scripts/cargarCiudadesMundo.js` ya esta preparado. Solo hay que ejecutarlo por ciudad.
+- Los IDs ya siguen el patron `{paisCodigo}-{slug}` (ej: `mx-ciudad-de-mexico`).
+- Overpass API busca `admin_level` correcto por pais con fallback a `place=neighbourhood`.
+- Tiempo estimado para cargar 15 ciudades: 1-2 horas de ejecucion de scripts.
+
+**Producto:**
+- Anadir ciudades LATAM al selector de ciudad en `CiudadScreen`.
+- Ranking por pais (nuevo segmento junto al ranking por ciudad).
+- Adaptar referencias culturales del onboarding si es necesario (los "barrios" en LATAM pueden llamarse "colonias" en Mexico o "comunas" en Chile — considerar mostrar el nombre local).
+
+---
+
+### Fase E3 — Europa e ingles
+
+**Internacionalizacion tecnica (i18n):**
+
+La app tiene aproximadamente 250-300 strings hardcodeados en espanol distribuidos por todas las pantallas. Internacionalizar es un sprint completo de 2-3 semanas.
+
+Pasos tecnicos:
+1. Instalar `react-i18next` + `i18next`.
+2. Extraer todos los strings a ficheros de traduccion `locales/es.json` y `locales/en.json`.
+3. Configurar deteccion automatica de idioma segun `Localization.locale` del dispositivo.
+4. Traducir textos al ingles (puede hacerse con ayuda de IA + revision nativa).
+5. Gestionar pluralizacion: espanol e ingles tienen reglas distintas (`1 barrio` / `2 barrios` vs `1 territory` / `2 territories`).
+6. Traducir fichas de App Store y Google Play al ingles.
+7. Traducir documentos legales (terminos y privacidad).
+
+**Lo que NO cambia:**
+- La logica de puntos, conquistas y rankings es idioma-agnostica.
+- Firestore almacena datos en espanol solo donde el usuario los introduce (nickname, nombre de grupo). El resto es estructural.
+- Los nombres de ciudades y barrios vienen de OpenStreetMap en el idioma local — correcto por defecto.
+
+**Ciudades europeas objetivo:**
+- UK: Londres, Manchester, Birmingham
+- Francia: Paris, Lyon, Marsella
+- Alemania: Berlin, Munich, Hamburg
+- Italia: Roma, Milan
+- Portugal: Lisboa, Oporto
+- Paises Bajos: Amsterdam
+
+**Tecnico adicional:**
+- Revisar que los nombres de territorios OSM en cada pais sean legibles (pueden estar en otro alfabeto).
+- Anadir soporte RTL si se contempla arabe o hebreo en el futuro (cambio de arquitectura de UI importante, mejor planificarlo desde el principio si hay intencion).
+
+---
+
+### Fase E4 — Expansion mundial
+
+**Mercados objetivo:**
+- EEUU: Nueva York, Los Angeles, Chicago, Miami (competencia alta pero mercado enorme)
+- Brasil: Sao Paulo, Rio de Janeiro (requiere portugues — tercer idioma)
+- Asia: Tokio, Singapur, Seoul (mercados de running muy activos)
+- Oriente Medio: Dubai (running popular, poder adquisitivo alto)
+- Australia: Sydney, Melbourne
+
+**Idiomas adicionales:** portugues (Brasil), japones, coreano, arabe (RTL).
+
+**Infraestructura:**
+- Evaluar Firestore multi-region si hay latencia notable desde Asia.
+- CDN para assets y mapas.
+- Soporte de monedas locales para monetizacion.
+- App Store localizada en cada mercado.
+
+---
+
+### Consideraciones tecnicas transversales para escalado
+
+**Rendimiento con muchos territorios:**
+- El sistema actual carga todos los territorios de la ciudad activa. Con ciudades grandes (Londres, NYC) puede haber 500-800 territorios.
+- Implementar carga por viewport/zoom antes de lanzar ciudades grandes (ya en Fase 5 del roadmap principal).
+- Indexar territorios por geohash para queries eficientes.
+
+**Costes Firestore a escala:**
+- 1.000 usuarios activos x 3 carreras/semana x 10 lecturas/carrera = 30.000 lecturas/dia. Asumible.
+- 10.000 usuarios: 300.000 lecturas/dia (~9M/mes) = ~$2-5/mes. Todavia barato.
+- 100.000 usuarios: mover rankings y agregados a Cloud Functions con escrituras batch para evitar hotspots.
+
+**Ciudades por demanda:**
+- Crear sistema para que usuarios sugieran su ciudad (formulario simple → notificacion al admin).
+- Herramienta admin para cargar una ciudad nueva desde el panel sin tocar codigo.
+- Priorizar ciudades con mayor demanda medida (lista de espera).
+
+---
+
+### Orden recomendado
+
+| Cuando | Fase | Trigger |
+|---|---|---|
+| Ahora | E1 — Espana | App en tiendas, primeros usuarios |
+| ~500 usuarios activos | E2 — LATAM | Retencion D7 validada |
+| ~2.000 usuarios activos | E3 — Europa + ingles | Traccion fuera de Espana |
+| ~10.000 usuarios activos | E4 — Mundial | Modelo de negocio probado |
+
+**Regla de oro:** cada expansion geografica debe ir acompanada de un plan de adquisicion local (running clubs, influencers de running, redes sociales locales). Sin distribucion local, los territorios nuevos quedan vacios y la experiencia pierde sentido.

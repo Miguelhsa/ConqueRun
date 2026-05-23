@@ -2,16 +2,8 @@ import './utils/cryptoPolyfill';
 import { useState, useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
-import * as Updates from 'expo-updates';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
-
-if (!__DEV__) {
-  Updates.checkForUpdateAsync()
-    .then(({ isAvailable }) => { if (isAvailable) return Updates.fetchUpdateAsync(); })
-    .then((result) => { if (result) Updates.reloadAsync(); })
-    .catch(() => {});
-}
 
 if (!__DEV__) {
   console.log = () => {};
