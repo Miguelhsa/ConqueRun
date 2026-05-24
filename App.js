@@ -24,9 +24,11 @@ import { auth, db } from './firebaseConfig';
 import './utils/trackingCarrera';
 import { registrarNotificaciones } from './utils/notificaciones';
 import { prepararSolicitudResena } from './utils/reviews';
+import * as Notifications from 'expo-notifications';
 import { colors } from './utils/theme';
 import { calcularDistanciaFiltrada, obtenerMetaTracking, obtenerRutaTracking } from './utils/trackingCarrera';
 import { formatTiempo } from './utils/formatters';
+import ToastNotificacion from './components/ToastNotificacion';
 import BiometricUnlockScreen from './screens/BiometricUnlockScreen';
 import CiudadScreen from './screens/CiudadScreen';
 import LoginScreen from './screens/LoginScreen';
@@ -56,7 +58,16 @@ export default function App() {
 
   const [carreraActiva, setCarreraActiva] = useState(null);
   const [notifPendientes, setNotifPendientes] = useState([]);
+  const [toast, setToast] = useState(null);
   const loginManualRef = useRef(false);
+
+  useEffect(() => {
+    const sub = Notifications.addNotificationReceivedListener(notif => {
+      const { title, body } = notif.request.content;
+      if (title || body) setToast({ titulo: title ?? null, cuerpo: body ?? null });
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -273,6 +284,7 @@ export default function App() {
         )}
       </Tab.Navigator>
 
+      <ToastNotificacion toast={toast} onOcultar={() => setToast(null)} />
       </View>
     </NavigationContainer>
   );

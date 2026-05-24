@@ -1621,6 +1621,22 @@ exports.importarConquistasStrava = onCall({ secrets: [STRAVA_CLIENT_SECRET] }, a
       continue;
     }
 
+    // Evitar doble conteo si el usuario grabó la misma carrera en ConqueRun y Strava a la vez.
+    // Compara ventana temporal con carreras nativas ya cargadas (sin lecturas extra a Firestore).
+    const stravaInicioMs = new Date(activity.start_date).getTime();
+    const stravaFinMs = stravaInicioMs + (activity.elapsed_time ?? activity.moving_time ?? 0) * 1000;
+    const TOLERANCIA_MS = 5 * 60 * 1000; // 5 minutos de margen para relojes desincronizados
+    const carreraParalela = carreras30dBase.find(c => {
+      if (c.source === 'strava') return false;
+      const cInicioMs = c.fecha?.toMillis?.() ?? (typeof c.fecha === 'number' ? c.fecha : 0);
+      const cFinMs = cInicioMs + (c.duracion ?? 0) * 1000;
+      return cInicioMs < stravaFinMs + TOLERANCIA_MS && cFinMs > stravaInicioMs - TOLERANCIA_MS;
+    });
+    if (carreraParalela) {
+      resultados.push({ id: activity.id, nombre: activity.name, estado: 'ignorada', motivo: 'grabada_en_conquerun' });
+      continue;
+    }
+
     const streams = await stravaFetch(
       `/activities/${activity.id}/streams?keys=latlng,time,distance,moving&key_by_type=true`,
       accessToken

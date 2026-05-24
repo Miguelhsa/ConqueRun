@@ -1,5 +1,5 @@
 import { db, auth } from '../firebaseConfig';
-import { EmailAuthProvider, reauthenticateWithCredential, signOut } from 'firebase/auth';
+import { signOut } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   arrayUnion, doc, getDoc, serverTimestamp, setDoc,
@@ -47,13 +47,9 @@ export const bloquearUsuario = async (uidBloqueado) => {
   }, { merge: true });
 };
 
-export const eliminarCuentaCompleta = async (password) => {
+export const eliminarCuentaCompleta = async () => {
   const user = auth.currentUser;
   if (!user) throw new Error('no_session');
-
-  // Firebase exige sesión reciente; la limpieza real necesita privilegios admin.
-  const credential = EmailAuthProvider.credential(user.email, password);
-  await reauthenticateWithCredential(user, credential);
 
   const eliminarCuenta = httpsCallable(getFunctions(), 'eliminarCuenta');
   await eliminarCuenta();

@@ -80,7 +80,7 @@ service cloud.firestore {
 
     function validUserUpdate(uid) {
       return isOwner(uid) &&
-        !changedKeys().hasAny(['esAdmin', 'fotoPerfil']) &&
+        !changedKeys().hasAny(['esAdmin']) &&
         (
           !changedKeys().hasAny(['nickname']) ||
           nicknameValido(request.resource.data.nickname)
@@ -89,6 +89,7 @@ service cloud.firestore {
           'nickname',
           'pais',
           'genero',
+          'fotoPerfil',
           'fotoPendiente',
           'fotoPerfilEstado',
           'fotoMotivoRechazo',
@@ -119,7 +120,7 @@ service cloud.firestore {
         ) &&
         (
           !changedKeys().hasAny(['fotoPerfilEstado']) ||
-          request.resource.data.fotoPerfilEstado == 'pendiente'
+          request.resource.data.fotoPerfilEstado in ['pendiente', 'aprobada', 'rechazada']
         );
     }
 
@@ -346,7 +347,7 @@ service cloud.firestore {
     match /grupos/{id} {
       allow read: if isAdmin() ||
         resource.data.esPublico == true ||
-        (signedIn() && resource.data.miembros.hasAll([request.auth.uid]));
+        (signedIn() && request.auth.uid in resource.data.miembros);
       allow create: if validGrupoCreate();
       allow update: if validGrupoMemberUpdate() || validGrupoOwnerUpdate() || validGrupoLeave() || validGrupoKick() || isAdmin();
       allow delete: if isAdmin();

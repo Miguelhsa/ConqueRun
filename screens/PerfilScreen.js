@@ -61,7 +61,6 @@ export default function PerfilScreen() {
   const [mostrarInfo, setMostrarInfo] = useState(false);
   const [mostrarSegmentosRitmo, setMostrarSegmentosRitmo] = useState(false);
   const [mostrarModalEliminar, setMostrarModalEliminar] = useState(false);
-  const [passwordEliminar, setPasswordEliminar] = useState('');
   const [eliminando, setEliminando] = useState(false);
   const [estadoNotif, setEstadoNotif] = useState(null);
   const [tabPrincipal, setTabPrincipal] = useState('perfil');
@@ -384,24 +383,16 @@ export default function PerfilScreen() {
   };
 
   const confirmarEliminacion = () => {
-    setPasswordEliminar('');
     setMostrarModalEliminar(true);
   };
 
   const ejecutarEliminacion = async () => {
-    if (!passwordEliminar.trim()) return;
     setEliminando(true);
     try {
-      await eliminarCuentaCompleta(passwordEliminar);
+      await eliminarCuentaCompleta();
     } catch (e) {
       setEliminando(false);
-      if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
-        Alert.alert('Contraseña incorrecta', 'Introduce tu contraseña actual para confirmar.');
-      } else if (e.code === 'auth/too-many-requests') {
-        Alert.alert('Demasiados intentos', 'Espera unos minutos e inténtalo de nuevo.');
-      } else {
-        Alert.alert('Error', 'No se pudo eliminar la cuenta. Comprueba tu conexión.');
-      }
+      Alert.alert('Error', 'No se pudo eliminar la cuenta. Inténtalo más tarde.');
     }
   };
 
@@ -870,16 +861,6 @@ export default function PerfilScreen() {
           <Text style={styles.eliminarTexto}>
             Esta acción borrará permanentemente tu cuenta, territorios, historial y datos. No se puede deshacer.
           </Text>
-          <Text style={styles.eliminarTexto}>Introduce tu contraseña para confirmar:</Text>
-          <TextInput
-            style={styles.eliminarInput}
-            placeholder="Contraseña"
-            placeholderTextColor={colors.subdued}
-            secureTextEntry
-            value={passwordEliminar}
-            onChangeText={setPasswordEliminar}
-            autoFocus
-          />
           <View style={styles.eliminarBotones}>
             <TouchableOpacity
               style={styles.eliminarBotonCancelar}
@@ -889,9 +870,9 @@ export default function PerfilScreen() {
               <Text style={styles.eliminarBotonCancelarTexto}>Cancelar</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.eliminarBotonConfirmar, (!passwordEliminar.trim() || eliminando) && { opacity: 0.5 }]}
+              style={[styles.eliminarBotonConfirmar, eliminando && { opacity: 0.5 }]}
               onPress={ejecutarEliminacion}
-              disabled={!passwordEliminar.trim() || eliminando}
+              disabled={eliminando}
             >
               <Text style={styles.eliminarBotonConfirmarTexto}>
                 {eliminando ? 'Eliminando...' : 'Eliminar'}

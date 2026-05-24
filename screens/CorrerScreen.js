@@ -695,14 +695,20 @@ export default function CorrerScreen() {
       const totalConquistas = Array.isArray(data.conquistadas)
         ? data.conquistadas.length
         : data.conquistadas ?? 0;
+      const sinTerritorio = (data.resultados ?? []).filter(r => r.motivo === 'sin_territorio').length;
       const accionPositiva = importadas > 0 || totalConquistas > 0;
       let mensaje;
-      if (importadas === 0) {
+      if (importadas === 0 && sinTerritorio === 0) {
         mensaje = 'Ya estás al día. No hay carreras nuevas desde la última importación.';
+      } else if (importadas === 0 && sinTerritorio > 0) {
+        mensaje = `${sinTerritorio} carrera${sinTerritorio !== 1 ? 's' : ''} fuera de las zonas conquistables de tu ciudad no se importó${sinTerritorio !== 1 ? 'n' : ''}.`;
       } else if (totalConquistas === 0) {
         mensaje = `Se importaron ${importadas} carrera${importadas !== 1 ? 's' : ''} de Strava, pero no conquistaste barrios nuevos en esta ciudad.`;
       } else {
         mensaje = `Se importaron ${importadas} carrera${importadas !== 1 ? 's' : ''} de Strava y conquistaste ${totalConquistas} barrio${totalConquistas !== 1 ? 's' : ''} nuevos. ¡Sigue así!`;
+      }
+      if (sinTerritorio > 0 && importadas > 0) {
+        mensaje += `\n\n${sinTerritorio} carrera${sinTerritorio !== 1 ? 's' : ''} fuera de las zonas conquistables no se importó${sinTerritorio !== 1 ? 'n' : ''}.`;
       }
       Alert.alert('Importación Strava', mensaje, [
         {

@@ -55,6 +55,24 @@ const withReactNativeMapsfix = (config) =>
         ].join('\n'));
       }
 
+      if (
+        !contents.includes('[ConqueRun] fmt consteval fix') &&
+        !contents.includes("installer.sandbox.pod_dir('fmt')")
+      ) {
+        blocks.push([
+          "  # [ConqueRun] fmt consteval fix for Xcode 26.4+",
+          "  fmt_base = File.join(installer.sandbox.pod_dir('fmt'), 'include', 'fmt', 'base.h')",
+          '  if File.exist?(fmt_base)',
+          '    fmt_content = File.read(fmt_base)',
+          "    patched_fmt = fmt_content.gsub(/^#\\s*define FMT_USE_CONSTEVAL 1$/, '#  define FMT_USE_CONSTEVAL 0')",
+          '    if patched_fmt != fmt_content',
+          '      File.chmod(0644, fmt_base)',
+          '      File.write(fmt_base, patched_fmt)',
+          '    end',
+          '  end',
+        ].join('\n'));
+      }
+
       if (blocks.length > 0) {
         const patched = contents.replace(
           /(post_install do \|installer\|)(\r?\n)/,

@@ -11,11 +11,11 @@ const esErrorIndiceFirestore = (error) => (
 );
 
 export const cargarTopRankingCiudad = async (ciudadId, segmentoCompetitivo = null) => {
-  const filtros = [where('ciudadId', '==', ciudadId)];
-  if (segmentoCompetitivo) filtros.push(where('segmentoCompetitivo', '==', segmentoCompetitivo));
+  if (!segmentoCompetitivo) return [];
   const snap = await getDocs(query(
     collection(db, 'rankingsCiudad'),
-    ...filtros,
+    where('ciudadId', '==', ciudadId),
+    where('segmentoCompetitivo', '==', segmentoCompetitivo),
     orderBy('barrios', 'desc'),
     orderBy('puntos', 'desc'),
     limit(10),
@@ -27,7 +27,7 @@ export const cargarTopRankingCiudad = async (ciudadId, segmentoCompetitivo = nul
 };
 
 export const cargarPosicionUsuario = async (ciudadId, misBarrios, misPuntos = 0, segmentoCompetitivo = null) => {
-  if (misBarrios == null) return null;
+  if (misBarrios == null || !segmentoCompetitivo) return null;
   const barrios = Number(misBarrios) || 0;
   const puntos = Number(misPuntos) || 0;
   const filtrosBase = [where('ciudadId', '==', ciudadId)];
@@ -58,9 +58,12 @@ export const cargarPosicionUsuario = async (ciudadId, misBarrios, misPuntos = 0,
 };
 
 export const cargarTotalCorredoresCiudad = async (ciudadId, segmentoCompetitivo = null) => {
-  const filtros = [where('ciudadId', '==', ciudadId)];
-  if (segmentoCompetitivo) filtros.push(where('segmentoCompetitivo', '==', segmentoCompetitivo));
-  const snap = await getCountFromServer(query(collection(db, 'rankingsCiudad'), ...filtros));
+  if (!segmentoCompetitivo) return 0;
+  const snap = await getCountFromServer(query(
+    collection(db, 'rankingsCiudad'),
+    where('ciudadId', '==', ciudadId),
+    where('segmentoCompetitivo', '==', segmentoCompetitivo),
+  ));
   return snap.data().count;
 };
 

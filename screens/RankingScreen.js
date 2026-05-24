@@ -333,7 +333,11 @@ export default function RankingScreen() {
               </View>
             ) : null
           }
-          ListEmptyComponent={<EstadoVacio titulo={`Aún no hay carreras en ${ciudad.nombre}`} />}
+          ListEmptyComponent={
+            <EstadoVacio
+              titulo={miSegmentoCompetitivo ? `Aún no hay corredores en tu liga en ${ciudad.nombre}` : 'Completa tu primera carrera para ver tu liga'}
+            />
+          }
           contentContainerStyle={styles.lista}
         />
       ) : (
