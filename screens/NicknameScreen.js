@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, FlatList } from 'react-native';
 import { db, auth } from '../firebaseConfig';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { contieneTextoProhibido } from '../utils/moderacion';
@@ -48,6 +48,7 @@ export default function NicknameScreen({ onGuardado }) {
   const [genero, setGenero] = useState(null);
   const [fechaInput, setFechaInput] = useState('');
   const [mostrarNacionalidades, setMostrarNacionalidades] = useState(false);
+  const [busquedaPais, setBusquedaPais] = useState('');
   const [guardando, setGuardando] = useState(false);
 
   const listo = nickname.trim().length >= 3 && nacionalidad && genero && fechaInput.length === 10;
@@ -170,7 +171,7 @@ export default function NicknameScreen({ onGuardado }) {
       <Text style={styles.label}>Nacionalidad</Text>
       <TouchableOpacity
         style={[styles.selectorBoton, nacionalidad && styles.selectorBotonActivo]}
-        onPress={() => setMostrarNacionalidades(v => !v)}
+        onPress={() => { setMostrarNacionalidades(v => !v); setBusquedaPais(''); }}
       >
         <Text style={[styles.selectorTexto, nacionalidad && styles.selectorTextoActivo]}>
           {nacionalidad ? `${nacionalidad.bandera}  ${nacionalidad.nombre}` : 'Selecciona tu nacionalidad'}
@@ -178,20 +179,40 @@ export default function NicknameScreen({ onGuardado }) {
         <Text style={styles.chevron}>{mostrarNacionalidades ? '▲' : '▼'}</Text>
       </TouchableOpacity>
 
-      {mostrarNacionalidades && (
-        <View style={styles.lista}>
-          {PAISES.map(p => (
-            <TouchableOpacity
-              key={p.nombre}
-              style={[styles.opcion, nacionalidad?.nombre === p.nombre && styles.opcionActiva]}
-              onPress={() => { setNacionalidad(p); setMostrarNacionalidades(false); }}
-            >
-              <Text style={styles.opcionTexto}>{p.bandera}  {p.nombre}</Text>
-              {nacionalidad?.nombre === p.nombre && <Text style={styles.check}>✓</Text>}
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      {mostrarNacionalidades && (() => {
+        const filtrados = PAISES.filter(p =>
+          p.nombre.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+            .includes(busquedaPais.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''))
+        );
+        return (
+          <View style={styles.lista}>
+            <TextInput
+              style={styles.buscador}
+              placeholder="Buscar país..."
+              placeholderTextColor={colors.subdued}
+              value={busquedaPais}
+              onChangeText={setBusquedaPais}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <FlatList
+              data={filtrados}
+              keyExtractor={p => p.nombre}
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: 260 }}
+              renderItem={({ item: p }) => (
+                <TouchableOpacity
+                  style={[styles.opcion, nacionalidad?.nombre === p.nombre && styles.opcionActiva]}
+                  onPress={() => { setNacionalidad(p); setMostrarNacionalidades(false); setBusquedaPais(''); }}
+                >
+                  <Text style={styles.opcionTexto}>{p.bandera}  {p.nombre}</Text>
+                  {nacionalidad?.nombre === p.nombre && <Text style={styles.check}>✓</Text>}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        );
+      })()}
 
       <TouchableOpacity
         style={[styles.boton, (!listo || guardando) && styles.botonDesactivado]}
@@ -264,6 +285,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     marginBottom: 24,
     overflow: 'hidden',
+    maxHeight: 320,
+  },
+  buscador: {
+    padding: 12,
+    color: colors.text,
+    fontSize: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.bg,
   },
   opcion: {
     flexDirection: 'row',
