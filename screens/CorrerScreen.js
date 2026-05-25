@@ -660,7 +660,7 @@ export default function CorrerScreen() {
     const uid = auth.currentUser?.uid ?? '';
     const state = JSON.stringify({ returnUrl: construirUrlRetornoStrava(), uid });
     return (
-      'https://www.strava.com/oauth/authorize' +
+      'https://www.strava.com/oauth/mobile/authorize' +
       `?client_id=${STRAVA_CLIENT_ID}` +
       '&response_type=code' +
       `&redirect_uri=${encodeURIComponent(STRAVA_REDIRECT_URI)}` +

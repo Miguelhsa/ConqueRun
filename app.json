@@ -80,7 +80,8 @@
         ],
         "NSPhotoLibraryUsageDescription": "ConqueRun usa tu galería para elegir fotos de perfil o grupo, que se revisan antes de publicarse.",
         "NSFaceIDUsageDescription": "ConqueRun usa Face ID para desbloquear tu sesión guardada.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": ["strava"]
       },
       "privacyManifests": {
         "NSPrivacyTracking": false,

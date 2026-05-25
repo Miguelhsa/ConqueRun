@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Animated, Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { colors, radius } from '../utils/theme';
+
+const SAFE_TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) + 8 : 52;
 
 const DURACION_MS = 4000;
 const ANIMACION_MS = 320;
@@ -9,7 +10,6 @@ const ANIMACION_MS = 320;
 export default function ToastNotificacion({ toast, onOcultar }) {
   const translateY = useRef(new Animated.Value(-120)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!toast) return;
@@ -39,7 +39,7 @@ export default function ToastNotificacion({ toast, onOcultar }) {
     <Animated.View
       style={[
         styles.container,
-        { top: insets.top + 8, transform: [{ translateY }], opacity },
+        { top: SAFE_TOP, transform: [{ translateY }], opacity },
       ]}
     >
       <View style={styles.card}>
