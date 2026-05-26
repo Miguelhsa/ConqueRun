@@ -234,10 +234,14 @@ export default function MapaScreen() {
       return nombreA.localeCompare(nombreB);
     });
 
-    return Object.fromEntries(idsOrdenados.map((grupoId, index) => [
-      grupoId,
-      COLORES_EQUIPOS_PROPIOS[index % COLORES_EQUIPOS_PROPIOS.length],
-    ]));
+    return Object.fromEntries(idsOrdenados.map((grupoId, index) => {
+      const base = COLORES_EQUIPOS_PROPIOS[index % COLORES_EQUIPOS_PROPIOS.length];
+      return [grupoId, {
+        base,
+        fill: aplicarAlpha(base, '42'),
+        fillSelected: aplicarAlpha(base, '70'),
+      }];
+    }));
   }, [gruposInfo, misGruposIds]);
 
   const resumenEquipos = useMemo(() => {
@@ -261,7 +265,7 @@ export default function MapaScreen() {
         acc[barrio.duenoGrupo] = {
           id: barrio.duenoGrupo,
           nombre: grupo.nombre ?? 'Equipo',
-          color: coloresEquipos[barrio.duenoGrupo] ?? colors.gold,
+          color: coloresEquipos[barrio.duenoGrupo]?.base ?? colors.gold,
           zonas: [],
           puntos: 0,
         };
@@ -281,16 +285,14 @@ export default function MapaScreen() {
 
   const obtenerEstiloEquipo = useCallback((barrio, seleccionado) => {
     const estilo = getEstiloTerritorioGrupo(barrio, misGruposIds, seleccionado);
-    if (!barrio.duenoGrupo || !misGruposIds.has(barrio.duenoGrupo)) {
-      return estilo;
-    }
+    const entrada = barrio.duenoGrupo ? coloresEquipos[barrio.duenoGrupo] : null;
+    if (!entrada) return estilo;
 
-    const colorEquipo = coloresEquipos[barrio.duenoGrupo] ?? colors.gold;
     return {
       ...estilo,
-      color: colorEquipo,
-      fillColor: aplicarAlpha(colorEquipo, seleccionado ? '70' : '42'),
-      strokeColor: colorEquipo,
+      color: entrada.base,
+      fillColor: seleccionado ? entrada.fillSelected : entrada.fill,
+      strokeColor: entrada.base,
     };
   }, [coloresEquipos, misGruposIds]);
 
@@ -316,7 +318,7 @@ export default function MapaScreen() {
             ? gruposInfo[barrio.duenoGrupo]?.nombre
             : null;
           const grupoColor = barrio.duenoGrupo && misGruposIds.has(barrio.duenoGrupo)
-            ? coloresEquipos[barrio.duenoGrupo]
+            ? coloresEquipos[barrio.duenoGrupo]?.base
             : null;
 
           return (
@@ -369,7 +371,7 @@ export default function MapaScreen() {
           modoMapa={modoMapa}
           misGruposIds={misGruposIds}
           grupoInfo={barrioSeleccionado.duenoGrupo ? gruposInfo[barrioSeleccionado.duenoGrupo] : null}
-          grupoColor={barrioSeleccionado.duenoGrupo ? coloresEquipos[barrioSeleccionado.duenoGrupo] : null}
+          grupoColor={barrioSeleccionado.duenoGrupo ? coloresEquipos[barrioSeleccionado.duenoGrupo]?.base : null}
           onNavegar={() => abrirNavegacion(barrioSeleccionado)}
           onCerrar={() => setBarrioSeleccionado(null)}
           onDetalle={() => setBarrioDetalle(barrioSeleccionado)}
@@ -527,13 +529,17 @@ function SelectorCiudad({ visible, ciudades, onSeleccionar, onCerrar }) {
   const [paisElegido, setPaisElegido] = useState(null);
   const [busqueda, setBusqueda] = useState('');
 
-  const paises = [...new Map(ciudades.map(c => [c.paisCodigo, c.paisNombre])).entries()]
-    .sort((a, b) => a[1].localeCompare(b[1]));
+  const paises = useMemo(() =>
+    [...new Map(ciudades.map(c => [c.paisCodigo, c.paisNombre])).entries()]
+      .sort((a, b) => a[1].localeCompare(b[1])),
+  [ciudades]);
 
-  const ciudadesFiltradas = ciudades
-    .filter(c => c.paisCodigo === paisElegido?.codigo &&
-      (!busqueda || c.nombre.toLowerCase().includes(busqueda.toLowerCase())))
-    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const ciudadesFiltradas = useMemo(() =>
+    ciudades
+      .filter(c => c.paisCodigo === paisElegido?.codigo &&
+        (!busqueda || c.nombre.toLowerCase().includes(busqueda.toLowerCase())))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre)),
+  [ciudades, paisElegido, busqueda]);
 
   const elegirPais = (codigo, nombre) => {
     setPaisElegido({ codigo, nombre });

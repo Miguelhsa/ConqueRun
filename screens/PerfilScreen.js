@@ -54,6 +54,7 @@ export default function PerfilScreen() {
   const [racha, setRacha] = useState(0);
   const [cargando, setCargando] = useState(true);
   const ultimoRecalculoSegmentosRef = useRef(0);
+  const ultimaCargaPerfilRef = useRef(0);
   const reparacionConsistenciaRef = useRef(null);
   const [guardando, setGuardando] = useState(false);
   const [editando, setEditando] = useState(false);
@@ -72,7 +73,10 @@ export default function PerfilScreen() {
     obtenerEstadoPermiso().then(setEstadoNotif).catch(() => {});
   }, []));
 
-  const cargarPerfil = async () => {
+  const cargarPerfil = async ({ forzar = false } = {}) => {
+    const TTL_CARGA_MS = 30 * 1000;
+    if (!forzar && Date.now() - ultimaCargaPerfilRef.current < TTL_CARGA_MS) return;
+    ultimaCargaPerfilRef.current = Date.now();
     try {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
@@ -449,7 +453,11 @@ export default function PerfilScreen() {
           <Text style={styles.fotoPendienteTexto}>Foto pendiente de revisión</Text>
         )}
         {fotoPerfilEstado === FOTO_ESTADOS.RECHAZADA && (
-          <Text style={styles.fotoRechazadaTexto}>Foto rechazada — contenido no permitido. Sube una nueva.</Text>
+          <Text style={styles.fotoRechazadaTexto}>
+            {fotoMotivoRechazo
+              ? `Foto rechazada: ${fotoMotivoRechazo}. Sube una nueva.`
+              : 'Foto rechazada — contenido no permitido. Sube una nueva.'}
+          </Text>
         )}
 
         <Text style={styles.nickname}>{pais?.bandera ? `${pais.bandera} ` : ''}{nickname}</Text>

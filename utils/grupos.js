@@ -33,7 +33,7 @@ export const generarCodigo = () => {
   return Array.from(bytes, b => CHARS_CODIGO[b % CHARS_CODIGO.length]).join('');
 };
 
-export const RITMO_MINIMO_VALIDO = 150; // 2:30 min/km: por debajo se considera carrera sospechosa.
+export const RITMO_MINIMO_VALIDO = 180; // 3:00 min/km: umbral mínimo, alineado con la Cloud Function.
 export const RITMO_MAXIMO_VALIDO = 1200; // 20:00 min/km: caminar muy lento no debería puntuar como carrera.
 export const DISTANCIA_MINIMA_CARRERA = 200; // 200 m: evita guardar arranques accidentales.
 export const DURACION_MINIMA_CARRERA = 60; // 60 s: evita pruebas demasiado cortas.

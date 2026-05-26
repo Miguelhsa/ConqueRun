@@ -44,8 +44,6 @@ const STRAVA_REDIRECT_URI = 'https://us-central1-conquerrun-8d30e.cloudfunctions
 export default function CorrerScreen() {
   const [corriendo, setCorriendo] = useState(false);
   const [gpsDebil, setGpsDebil] = useState(false);
-  const [ruta, setRuta] = useState([]);
-  const [ubicacion, setUbicacion] = useState(null);
   const [distancia, setDistancia] = useState(0);
   const [segundos, setSegundos] = useState(0);
   const [barrioActual, setBarrioActual] = useState(null);
@@ -75,6 +73,10 @@ export default function CorrerScreen() {
   const segundosRef = useRef(0);
   const resolverGrupoFinRef = useRef(null);
   const esperandoStravaRef = useRef(false);
+  const gpsDebilRef = useRef(false);
+  const barrioNombreRef = useRef(null);
+  const ritmoActualRef = useRef(null);
+  const preparandoGpsRef = useRef(false);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);
@@ -156,25 +158,36 @@ export default function CorrerScreen() {
     rutaRef.current = rutaTracking;
     distanciaRef.current = distanciaActual;
     segundosRef.current = segundosActuales;
-    setRuta(rutaTracking);
     setDistancia(distanciaActual);
     setSegundos(segundosActuales);
     setPausada(Boolean(metaTracking?.pausada));
 
     if (!ultimoPunto) return { ruta: rutaTracking, distancia: distanciaActual, segundos: segundosActuales };
 
-    setGpsDebil(ultimoPunto.accuracy != null && ultimoPunto.accuracy > GPS_ACCURACY_MAX_METROS);
-    setUbicacion({ ...ultimoPunto, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+    const nuevoGpsDebil = ultimoPunto.accuracy != null && ultimoPunto.accuracy > GPS_ACCURACY_MAX_METROS;
+    if (nuevoGpsDebil !== gpsDebilRef.current) {
+      gpsDebilRef.current = nuevoGpsDebil;
+      setGpsDebil(nuevoGpsDebil);
+    }
+
     await cargarCiudadYBarrios(ultimoPunto);
 
     const barrio = calcularBarrio(ultimoPunto, indiceBarriosRef.current ?? barriosRef.current);
-    if (barrio) setBarrioActual(barrio);
+    if (barrio && barrio.nombre !== barrioNombreRef.current) {
+      barrioNombreRef.current = barrio.nombre;
+      setBarrioActual(barrio);
+    }
 
     const recientes = rutaTracking.slice(-5).filter(p => p.speed != null && p.speed > 0.4);
     if (recientes.length > 0) {
       const speedMedia = recientes.reduce((sum, p) => sum + p.speed, 0) / recientes.length;
-      setRitmoActual(Math.round(1000 / speedMedia));
-    } else {
+      const nuevoRitmo = Math.round(1000 / speedMedia);
+      if (nuevoRitmo !== ritmoActualRef.current) {
+        ritmoActualRef.current = nuevoRitmo;
+        setRitmoActual(nuevoRitmo);
+      }
+    } else if (ritmoActualRef.current !== null) {
+      ritmoActualRef.current = null;
       setRitmoActual(null);
     }
 
@@ -226,7 +239,6 @@ export default function CorrerScreen() {
       latitude: loc.coords.latitude,
       longitude: loc.coords.longitude,
     };
-    setUbicacion({ ...punto, latitudeDelta: 0.01, longitudeDelta: 0.01 });
     await cargarCiudadYBarrios(punto);
   };
 
@@ -257,9 +269,9 @@ export default function CorrerScreen() {
     rutaRef.current = [];
     distanciaRef.current = 0;
     segundosRef.current = 0;
-    setRuta([]);
     setDistancia(0);
     setSegundos(0);
+    barrioNombreRef.current = null;
     setBarrioActual(null);
     setTrackingSegundoPlano(false);
     setPausada(false);
@@ -288,10 +300,12 @@ export default function CorrerScreen() {
   };
 
   const iniciarCarrera = async () => {
-    if (preparandoGps) return;
+    if (preparandoGpsRef.current) return;
+    preparandoGpsRef.current = true;
     setPreparandoGps(true);
     const uid = auth.currentUser?.uid;
     if (!uid) {
+      preparandoGpsRef.current = false;
       setPreparandoGps(false);
       Alert.alert('Sesión expirada', 'Inicia sesión de nuevo para correr.');
       return;
@@ -360,9 +374,9 @@ export default function CorrerScreen() {
         }
       }
 
-      setRuta([]);
       setDistancia(0);
       setSegundos(0);
+      barrioNombreRef.current = null;
       setBarrioActual(null);
       setTrackingSegundoPlano(permiteSegundoPlano);
       setPausada(false);
@@ -409,6 +423,7 @@ export default function CorrerScreen() {
       }
       Alert.alert('GPS no disponible', mensaje);
     } finally {
+      preparandoGpsRef.current = false;
       setPreparandoGps(false);
     }
   };
@@ -555,12 +570,18 @@ export default function CorrerScreen() {
         grupoActivoId: grupoActivo?.id ?? null,
         grupoActivoNombre: grupoActivo?.nombre ?? null,
       });
-      setRuta([]);
       setDistancia(0);
       setSegundos(0);
+      barrioNombreRef.current = null;
       setBarrioActual(null);
     } catch (e) {
-      Alert.alert('Error', 'No se pudo guardar la carrera. Revisa tu conexión e inténtalo de nuevo.');
+      if (e.code === 'functions/failed-precondition') {
+        Alert.alert('Carrera no válida', e.message ?? 'La carrera no cumple las condiciones para guardar.');
+      } else if (e.code === 'functions/invalid-argument') {
+        Alert.alert('Datos incorrectos', e.message ?? 'Los datos de la carrera no son válidos.');
+      } else {
+        Alert.alert('Error', 'No se pudo guardar la carrera. Revisa tu conexión e inténtalo de nuevo.');
+      }
     }
   };
 
@@ -569,9 +590,9 @@ export default function CorrerScreen() {
     rutaRef.current = [];
     distanciaRef.current = 0;
     segundosRef.current = 0;
-    setRuta([]);
     setDistancia(0);
     setSegundos(0);
+    barrioNombreRef.current = null;
     setBarrioActual(null);
     setTrackingSegundoPlano(false);
     setPausada(false);
@@ -605,7 +626,8 @@ export default function CorrerScreen() {
   };
 
   const reanudarCarrera = async () => {
-    if (preparandoGps) return;
+    if (preparandoGpsRef.current) return;
+    preparandoGpsRef.current = true;
     setPreparandoGps(true);
     try {
       const meta = await reanudarTrackingCarrera();
@@ -633,6 +655,7 @@ export default function CorrerScreen() {
       await pausarTrackingCarrera();
       setPausada(true);
     } finally {
+      preparandoGpsRef.current = false;
       setPreparandoGps(false);
     }
   };
@@ -844,8 +867,6 @@ export default function CorrerScreen() {
       <ResumenCarreraModal
         resumen={resumenCarrera}
         onClose={cerrarResumenCarrera}
-        formatTiempo={formatTiempo}
-        formatRitmo={formatRitmo}
       />
 
       <StravaImportModal
@@ -1049,7 +1070,7 @@ function ModalConfirmarFin({ visible, distancia, segundos, onCancelar, onConfirm
   );
 }
 
-function ResumenCarreraModal({ resumen, onClose, formatTiempo, formatRitmo }) {
+function ResumenCarreraModal({ resumen, onClose }) {
   if (!resumen) return null;
 
   const territorio = resumen.territorio ?? {
@@ -1269,74 +1290,6 @@ function VistaCorrer({ barrio, uid, distancia, segundos, ritmoActual, gpsDebil, 
   );
 }
 
-function TarjetaBarrio({ barrio, uid, pausada, gpsDebil, trackingSegundoPlano }) {
-  let icono, label, color, bg;
-  if (!barrio) {
-    icono = '📡';
-    label = gpsDebil ? 'GPS débil — esperando señal' : 'Buscando zona...';
-    color = colors.muted;
-    bg = colors.surfaceAlt;
-  } else {
-    const esPropio = barrio.dueno === uid;
-    const esLibre = !barrio.dueno;
-    icono = esPropio ? '🛡' : esLibre ? '📍' : '⚔';
-    label = esPropio ? `Defendiendo ${barrio.nombre}` : esLibre ? `${barrio.nombre} — zona libre` : `Atacando ${barrio.nombre}`;
-    color = esPropio ? colors.gold : esLibre ? colors.sport : colors.conquest;
-    bg = esPropio ? '#C6F43212' : esLibre ? '#2dd4bf12' : '#e6394612';
-  }
-
-  const estadoTracking = pausada
-    ? 'Pausada · no suma tiempo ni distancia'
-    : gpsDebil
-    ? '⚠ GPS débil — ruta pausada'
-    : trackingSegundoPlano
-    ? 'Grabando con pantalla apagada'
-    : 'Grabando solo con app abierta';
-
-  return (
-    <View style={[styles.tarjetaBarrio, { backgroundColor: bg, borderColor: color }]}>
-      <Text style={[styles.tarjetaBarrioLabel, { color }]}>{icono} {label}</Text>
-      <Text style={[styles.tarjetaBarrioEstado, pausada && { color: colors.conquest }]}>{estadoTracking}</Text>
-    </View>
-  );
-}
-
-function EtiquetaBarrio({ barrio, uid }) {
-  const esPropio = barrio.dueno === uid;
-  const esLibre = !barrio.dueno;
-  const label = esPropio
-    ? `Defendiendo ${barrio.nombre}`
-    : esLibre
-    ? `Zona libre · ${barrio.nombre}`
-    : `Atacando ${barrio.nombre}`;
-  const color = esPropio ? colors.gold : esLibre ? colors.muted : colors.conquest;
-  return <Text style={[styles.barrio, { color }]}>📍 {label}</Text>;
-}
-
-function BarraMinimo({ distancia, segundos }) {
-  const DIST_MIN = 200;
-  const SEG_MIN = 60;
-  const progDist = Math.min(1, distancia / DIST_MIN);
-  const progSeg = Math.min(1, segundos / SEG_MIN);
-  const cumple = progDist >= 1 && progSeg >= 1;
-  if (cumple) return null;
-
-  return (
-    <View style={styles.barraMinimo}>
-      <View style={styles.barraMinimoFila}>
-        <Text style={styles.barraMinimoTexto}>
-          {Math.round(distancia)} / {DIST_MIN} m
-        </Text>
-        <Text style={styles.barraMinimoTexto}>
-          {segundos} / {SEG_MIN} s
-        </Text>
-      </View>
-      <View style={styles.barraMinimoTrack}>
-        <View style={[styles.barraMinimoRelleno, { width: `${Math.min(progDist, progSeg) * 100}%` }]} />
-      </View>
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -1911,29 +1864,6 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 14,
     lineHeight: 20,
-  },
-  barraMinimo: {
-    marginBottom: 10,
-  },
-  barraMinimoFila: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 5,
-  },
-  barraMinimoTexto: {
-    color: colors.muted,
-    fontSize: 11,
-  },
-  barraMinimoTrack: {
-    height: 3,
-    backgroundColor: colors.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  barraMinimoRelleno: {
-    height: '100%',
-    backgroundColor: colors.gold,
-    borderRadius: 2,
   },
   resumenBoton: {
     backgroundColor: colors.gold,

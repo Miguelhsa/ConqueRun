@@ -1,5 +1,5 @@
 import './utils/cryptoPolyfill';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
 
@@ -60,6 +60,15 @@ export default function App() {
   const [notifPendientes, setNotifPendientes] = useState([]);
   const [toast, setToast] = useState(null);
   const loginManualRef = useRef(false);
+
+  const tabScreenOptions = useCallback(({ route }) => ({
+    tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border, height: TAB_BAR_HEIGHT },
+    tabBarActiveTintColor: colors.gold,
+    tabBarInactiveTintColor: colors.subdued,
+    headerStyle: { backgroundColor: colors.bg },
+    headerTintColor: colors.text,
+    tabBarIcon: TabIcon(iconoTab(route.name), route.name === 'Correr' && Boolean(carreraActiva)),
+  }), [carreraActiva]);
 
   useEffect(() => {
     const sub = Notifications.addNotificationReceivedListener(notif => {
@@ -261,16 +270,7 @@ export default function App() {
         </View>
       </Modal>
 
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border, height: TAB_BAR_HEIGHT },
-          tabBarActiveTintColor: colors.gold,
-          tabBarInactiveTintColor: colors.subdued,
-          headerStyle: { backgroundColor: colors.bg },
-          headerTintColor: colors.text,
-          tabBarIcon: TabIcon(iconoTab(route.name), route.name === 'Correr' && Boolean(carreraActiva)),
-        })}
-      >
+      <Tab.Navigator screenOptions={tabScreenOptions}>
         <Tab.Screen name="Ranking" component={RankingScreen} />
         <Tab.Screen name="Correr" component={CorrerScreen} />
         <Tab.Screen name="Mapa" component={MapaScreen} />

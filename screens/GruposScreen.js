@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   TextInput, Alert, Modal, Image, Share, ImageBackground
@@ -21,6 +21,7 @@ export default function GruposScreen() {
   const [offsetPublicos, setOffsetPublicos] = useState(0);
   const [hayMasPublicos, setHayMasPublicos] = useState(false);
   const [cargandoMas, setCargandoMas] = useState(false);
+  const cargandoMasRef = useRef(false);
   const [ciudadActualId, setCiudadActualId] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [errorRed, setErrorRed] = useState(false);
@@ -146,7 +147,8 @@ export default function GruposScreen() {
   };
 
   const cargarMasPublicos = async () => {
-    if (!hayMasPublicos || cargandoMas) return;
+    if (!hayMasPublicos || cargandoMasRef.current) return;
+    cargandoMasRef.current = true;
     setCargandoMas(true);
     try {
       const miosIds = new Set(misGrupos.map(g => g.id));
@@ -156,6 +158,7 @@ export default function GruposScreen() {
       setOffsetPublicos(prev => prev + nuevos.length);
       setHayMasPublicos(nuevoHayMas);
     } finally {
+      cargandoMasRef.current = false;
       setCargandoMas(false);
     }
   };

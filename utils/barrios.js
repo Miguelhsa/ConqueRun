@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../firebaseConfig';
-import { collection, collectionGroup, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
+import { collection, collectionGroup, getDocs, limit, query, where } from 'firebase/firestore';
 import { obtenerTerritoriosSeed } from './territoriosSeed';
 
 const COLECCION_TERRITORIOS = 'territorios';
@@ -194,6 +194,7 @@ export const obtenerTerritorios = async (ciudadId = null) => {
   const seed = obtenerTerritoriosSeed(ciudadId)
     .map(territorio => normalizarTerritorio(territorio.id, territorio, 'seed_espana'))
     .filter(esTerritorioValido);
+  if (seed.length > 0) await escribirCache(ciudadId, seed);
   return seed;
 };
 
@@ -209,19 +210,22 @@ export const aplicarSegmentoCompetitivo = async (territorios, segmentoCompetitiv
     const chunks = [];
     for (let i = 0; i < territorios.length; i += 30) chunks.push(territorios.slice(i, i + 30));
 
-    for (const chunk of chunks) {
-      const ids = chunk.map(t => t.territorioId ?? t.id).filter(Boolean);
-      if (ids.length === 0) continue;
-      const snap = await getDocs(query(
-        collectionGroup(db, 'segmentos'),
-        where('segmentoCompetitivo', '==', segmentoCompetitivo),
-        where('territorioId', 'in', ids)
-      ));
+    const snapshots = await Promise.all(
+      chunks
+        .map(chunk => chunk.map(t => t.territorioId ?? t.id).filter(Boolean))
+        .filter(ids => ids.length > 0)
+        .map(ids => getDocs(query(
+          collectionGroup(db, 'segmentos'),
+          where('segmentoCompetitivo', '==', segmentoCompetitivo),
+          where('territorioId', 'in', ids)
+        )))
+    );
+    snapshots.forEach(snap =>
       snap.docs.forEach(d => {
         const data = d.data();
         if (data.territorioId) porTerritorioId.set(data.territorioId, data);
-      });
-    }
+      })
+    );
 
     return territorios.map(territorio => {
       const data = porTerritorioId.get(territorio.territorioId ?? territorio.id);
@@ -245,59 +249,13 @@ export const aplicarSegmentoCompetitivo = async (territorios, segmentoCompetitiv
       };
     });
   } catch (e) {
-    console.warn('[barrios] Lectura agrupada de segmentos no disponible; usando fallback por documento.', {
+    console.warn('[barrios] Lectura de segmentos no disponible; mostrando propietarios base.', {
       segmentoCompetitivo,
       code: e?.code,
       message: e?.message,
     });
+    return territorios;
   }
-
-  const resultados = await Promise.all(territorios.map(territorio =>
-    getDoc(doc(db, territorio.coleccion ?? COLECCION_TERRITORIOS, territorio.id, 'segmentos', segmentoCompetitivo))
-      .then(snap => ({ snap }))
-      .catch(error => ({ error, territorio }))
-  ));
-
-  const errores = resultados.filter(r => r.error);
-  if (errores.length > 0) {
-    console.warn('[barrios] No se pudieron leer segmentos territoriales; usando propietarios base como fallback.', {
-      segmentoCompetitivo,
-      errores: errores.slice(0, 3).map(r => ({
-        id: r.territorio?.id,
-        code: r.error?.code,
-        message: r.error?.message,
-      })),
-    });
-    return territorios.map(territorio => ({
-      ...territorio,
-      segmentoCompetitivo,
-      segmentoFallback: true,
-      top10: [],
-    }));
-  }
-
-  return territorios.map((territorio, index) => {
-    const snap = resultados[index].snap;
-    if (!snap?.exists()) {
-      return {
-        ...territorio,
-        segmentoCompetitivo,
-        dueno: null,
-        duenoPuntos: 0,
-        top10: [],
-      };
-    }
-    const data = snap.data();
-    return {
-      ...territorio,
-      ...data,
-      id: territorio.id,
-      barrioId: territorio.barrioId,
-      territorioId: territorio.territorioId,
-      coleccion: territorio.coleccion,
-      segmentoCompetitivo,
-    };
-  });
 };
 
 export const obtenerBarriosSegmentados = async (ciudadId = null, segmentoCompetitivo = null) => {

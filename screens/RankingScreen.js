@@ -141,7 +141,7 @@ export default function RankingScreen() {
 
   const esmiGrupo = (grupo) => grupo.miembros?.includes(auth.currentUser?.uid);
 
-  const renderIndividual = ({ item }) => {
+  const renderIndividual = useCallback(({ item }) => {
     const esTuyo = item.uid === auth.currentUser?.uid;
     const reportarUsuario = () => {
       Alert.alert('Reportar usuario', '¿Quieres reportar este perfil?', [
@@ -215,9 +215,9 @@ export default function RankingScreen() {
         </View>
       </TouchableOpacity>
     );
-  };
+  }, []);
 
-  const renderGrupo = ({ item }) => {
+  const renderGrupo = useCallback(({ item }) => {
     const mio = esmiGrupo(item);
     const tieneFoto = fotoAprobada(item.foto, item.fotoEstado);
     return (
@@ -248,7 +248,7 @@ export default function RankingScreen() {
         </View>
       </View>
     );
-  };
+  }, []);
 
   if (cargando) return <PantallaCargando />;
 

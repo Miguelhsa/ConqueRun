@@ -26,12 +26,10 @@ export default function LoginScreen({ onLogin }) {
   const [esRegistro, setEsRegistro] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [cargandoSocial, setCargandoSocial] = useState(null);
-  const [anioNacimiento, setAnioNacimiento] = useState('');
   const [aceptaTerminos, setAceptaTerminos] = useState(false);
 
   const cambiarModo = (nuevoModo) => {
     setEsRegistro(nuevoModo);
-    setAnioNacimiento('');
     setAceptaTerminos(false);
   };
 
@@ -39,20 +37,6 @@ export default function LoginScreen({ onLogin }) {
     if (cargando) return;
 
     if (esRegistro) {
-      const anio = parseInt(anioNacimiento, 10);
-      const anioActual = new Date().getFullYear();
-
-      if (!anio || anio < 1900 || anio > anioActual) {
-        Alert.alert('Año no válido', 'Introduce tu año de nacimiento con 4 dígitos (por ejemplo: 1995).');
-        return;
-      }
-      if (anioActual - anio < 13) {
-        Alert.alert(
-          'Edad mínima requerida',
-          'ConqueRun es una aplicación para mayores de 13 años. No podemos crear tu cuenta.'
-        );
-        return;
-      }
       if (password.length < 8) {
         Alert.alert('Contraseña débil', 'La contraseña debe tener al menos 8 caracteres.');
         return;
@@ -171,17 +155,6 @@ export default function LoginScreen({ onLogin }) {
 
         {esRegistro && (
           <>
-            <TextInput
-              style={styles.input}
-              placeholder="Año de nacimiento (ej: 1995)"
-              placeholderTextColor="#7f8796"
-              value={anioNacimiento}
-              onChangeText={v => setAnioNacimiento(v.replace(/\D/g, '').slice(0, 4))}
-              keyboardType="number-pad"
-              maxLength={4}
-              editable={!cargando}
-            />
-
             <TouchableOpacity
               style={styles.checkboxFila}
               onPress={() => setAceptaTerminos(v => !v)}
