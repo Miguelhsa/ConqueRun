@@ -14,12 +14,15 @@ import {
   validarCarrera,
 } from '../utils/grupos';
 import { normalizarCarrera, esCarreraPuntuable } from '../utils/carreras';
+import { guardarCarreraPendiente, obtenerCarrerasPendientes, eliminarCarreraPendiente, marcarIntentoFallido } from '../utils/carrerasPendientes';
+import { registrarError, registrarEvento } from '../utils/monitoring';
 import DetalleCarreraScreen from './DetalleCarreraScreen';
 import { LOGROS } from '../utils/logros';
 import { pedirResenaSiProcede } from '../utils/reviews';
 import { calcularAvisoProximoSegmento, calcularSegmentos30d, calcularSegmentosDesdePerfilYRitmo, SEGMENTOS_RITMO } from '../utils/segmentos';
 import { obtenerCiudadCercana, CIUDAD_FALLBACK } from '../utils/ciudades';
 import { colors, radius } from '../utils/theme';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { formatTiempo, formatRitmo } from '../utils/formatters';
 import {
   GPS_ACCURACY_MAX_METROS,
@@ -61,6 +64,7 @@ export default function CorrerScreen() {
   const [stravaModalVisible, setStravaModalVisible] = useState(false);
   const [stravaConectado, setStravaConectado] = useState(false);
   const [importandoStrava, setImportandoStrava] = useState(false);
+  const [carrerasPendientesCount, setCarrerasPendientesCount] = useState(0);
   const timerRef = useRef(null);
   const foregroundWatchRef = useRef(null);
   const barriosRef = useRef([]);
@@ -87,6 +91,7 @@ export default function CorrerScreen() {
     comprobarCarreraPendiente().catch(console.error);
     cargarUbicacionInicial().catch(console.error);
     cargarCarrerasRecientes().catch(console.error);
+    enviarCarrerasPendientes().catch(console.error);
   }, []);
 
   const cargarCarrerasRecientes = async () => {
@@ -276,6 +281,33 @@ export default function CorrerScreen() {
     setTrackingSegundoPlano(false);
     setPausada(false);
     setCorriendo(false);
+  };
+
+  const enviarCarrerasPendientes = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const pendientes = await obtenerCarrerasPendientes();
+    const propias = pendientes.filter(c => c.uid === uid);
+    if (propias.length === 0) return;
+    setCarrerasPendientesCount(propias.length);
+    const registrarCarrera = httpsCallable(getFunctions(), 'registrarCarreraConqurun');
+    for (const carrera of propias) {
+      try {
+        await registrarCarrera(carrera.payload);
+        await eliminarCarreraPendiente(carrera.id);
+        setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
+        invalidarCacheTerritorios(carrera.payload.ciudadId).catch(() => {});
+        cargarCarrerasRecientes().catch(() => {});
+      } catch (e) {
+        if (e.code === 'functions/failed-precondition' || e.code === 'functions/invalid-argument' || e.code === 'functions/resource-exhausted') {
+          await eliminarCarreraPendiente(carrera.id);
+          setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
+        } else {
+          await marcarIntentoFallido(carrera.id);
+          break;
+        }
+      }
+    }
   };
 
   const comprobarCarreraPendiente = async () => {
@@ -559,6 +591,13 @@ export default function CorrerScreen() {
       await limpiarTrackingCarrera();
       invalidarCacheTerritorios(ciudadRef.current?.id).catch(() => {});
       cargarCarrerasRecientes().catch(console.error);
+      registrarEvento('carrera_completada', {
+        distancia_m: Math.round(distanciaFinal),
+        duracion_s: segundosFinales,
+        puntos: puntosGuardados + bonusLogros,
+        territorios_conquistados: nuevosTerritorios.length,
+        con_grupo: Boolean(grupoActivo),
+      });
       setResumenCarrera({
         distancia: distanciaFinal,
         duracion: segundosFinales,
@@ -579,8 +618,32 @@ export default function CorrerScreen() {
         Alert.alert('Carrera no válida', e.message ?? 'La carrera no cumple las condiciones para guardar.');
       } else if (e.code === 'functions/invalid-argument') {
         Alert.alert('Datos incorrectos', e.message ?? 'Los datos de la carrera no son válidos.');
+      } else if (e.code === 'functions/unauthenticated') {
+        Alert.alert('Sesión expirada', 'Inicia sesión de nuevo para guardar la carrera.');
+      } else if (e.code === 'functions/resource-exhausted') {
+        Alert.alert('Espera un momento', 'Acaba de registrarse una carrera. Espera unos segundos e inténtalo de nuevo.');
       } else {
-        Alert.alert('Error', 'No se pudo guardar la carrera. Revisa tu conexión e inténtalo de nuevo.');
+        const uid = auth.currentUser?.uid;
+        if (uid) {
+          await guardarCarreraPendiente(uid, {
+            ruta: rutaParaGuardar,
+            distancia: Math.round(distanciaFinal),
+            duracion: segundosFinales,
+            grupoActivoId: grupoActivo?.id ?? null,
+            ciudadId: ciudadRef.current.id,
+          });
+          registrarEvento('carrera_guardada_sin_red', { distancia_m: Math.round(distanciaFinal) });
+          registrarError(e, 'pararCarrera: error de red');
+          await limpiarTrackingCarrera();
+          setCarrerasPendientesCount(prev => prev + 1);
+          Alert.alert(
+            'Sin conexión',
+            'Tu carrera se ha guardado. Se enviará automáticamente cuando tengas conexión.',
+            [{ text: 'Entendido' }]
+          );
+        } else {
+          Alert.alert('Error', 'No se pudo guardar la carrera. Revisa tu conexión e inténtalo de nuevo.');
+        }
       }
     }
   };
@@ -949,6 +1012,20 @@ export default function CorrerScreen() {
           <DetalleCarreraScreen carrera={carreraDetalle} onClose={() => setCarreraDetalle(null)} />
         )}
       </ScrollView>
+
+      {carrerasPendientesCount > 0 && (
+        <View style={styles.bannerPendiente}>
+          <MaterialCommunityIcons name="cloud-upload-outline" size={16} color={colors.gold} />
+          <Text style={styles.bannerPendienteTexto}>
+            {carrerasPendientesCount === 1
+              ? '1 carrera pendiente de enviar'
+              : `${carrerasPendientesCount} carreras pendientes de enviar`}
+          </Text>
+          <TouchableOpacity onPress={() => enviarCarrerasPendientes().catch(console.error)}>
+            <Text style={styles.bannerPendienteBoton}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.panelInicio}>
         <TouchableOpacity
@@ -1883,7 +1960,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1,
     alignItems: 'center', justifyContent: 'center', zIndex: 10,
   },
-  botonInfoPuntosTexto: { color: colors.muted, fontSize: 16, fontWeight: 'bold' },
+  botonInfoPuntosTexto: { color: '#FF4F2E', fontSize: 16, fontWeight: 'bold' },
   infoPuntosOverlay: { flex: 1, backgroundColor: '#000000aa', justifyContent: 'flex-end' },
   infoPuntosCard: {
     backgroundColor: colors.surface,
@@ -1911,4 +1988,25 @@ const styles = StyleSheet.create({
     padding: 14, alignItems: 'center',
   },
   infoPuntosCerrarTexto: { color: colors.bg, fontWeight: '900', fontSize: 15 },
+
+  bannerPendiente: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(198,244,50,0.08)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(198,244,50,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  bannerPendienteTexto: {
+    flex: 1,
+    color: colors.subdued,
+    fontSize: 12,
+  },
+  bannerPendienteBoton: {
+    color: colors.gold,
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });

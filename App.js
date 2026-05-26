@@ -8,7 +8,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 if (!__DEV__) {
   console.log = () => {};
   console.warn = () => {};
-  console.error = () => {};
+  console.error = (msg, ...args) => registrarError(msg instanceof Error ? msg : new Error(String(msg)));
   console.info = () => {};
   console.debug = () => {};
 }
@@ -29,6 +29,8 @@ import { colors } from './utils/theme';
 import { calcularDistanciaFiltrada, obtenerMetaTracking, obtenerRutaTracking } from './utils/trackingCarrera';
 import { formatTiempo } from './utils/formatters';
 import ToastNotificacion from './components/ToastNotificacion';
+import ErrorBoundary from './components/ErrorBoundary';
+import { registrarError, identificarUsuario } from './utils/monitoring';
 import BiometricUnlockScreen from './screens/BiometricUnlockScreen';
 import CiudadScreen from './screens/CiudadScreen';
 import LoginScreen from './screens/LoginScreen';
@@ -90,6 +92,7 @@ export default function App() {
         setBiometriaBloqueada(false);
 
         if (user) {
+          identificarUsuario(user.uid);
           if (!loginManualRef.current) {
             setBiometriaBloqueada(await debeUsarBiometria());
           }
@@ -228,6 +231,7 @@ export default function App() {
   }
 
   return (
+    <ErrorBoundary>
     <NavigationContainer>
       <View style={styles.appShell}>
 
@@ -287,6 +291,7 @@ export default function App() {
       <ToastNotificacion toast={toast} onOcultar={() => setToast(null)} />
       </View>
     </NavigationContainer>
+    </ErrorBoundary>
   );
 }
 

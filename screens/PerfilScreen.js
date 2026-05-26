@@ -359,12 +359,6 @@ export default function PerfilScreen() {
           : {}),
       }, { merge: true });
 
-      obtenerMisGrupos().then(misGrupos => {
-        for (const grupo of misGrupos) {
-          updateDoc(doc(db, 'grupos', grupo.id), { [`nicknames.${uid}`]: nickname }).catch(() => {});
-        }
-      }).catch(() => {});
-
       if (fotoPendiente && fotoPendiente.startsWith('file://')) {
         setFotoPerfil(fotoUrl);
         setFotoPendiente(null);
@@ -929,6 +923,11 @@ export default function PerfilScreen() {
                 titulo: 'Defiende tu territorio',
                 texto: 'Si otro corredor pasa por un barrio tuyo y te supera en puntos, te lo arrebata. Vuelve a correr por ahí para recuperarlo.',
               },
+              {
+                emoji: '📉',
+                titulo: 'Los territorios se debilitan',
+                texto: 'Sin defenderlos, los barrios pierden un 10% de sus puntos cada semana. En un mes sin correr por allí, cualquier rival puede arrebatártelos más fácilmente.',
+              },
             ].map((item, i) => (
               <View key={i} style={styles.infoItem}>
                 <Text style={styles.infoEmoji}>{item.emoji}</Text>
@@ -1043,7 +1042,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1,
     alignItems: 'center', justifyContent: 'center', zIndex: 1,
   },
-  botonInfoTexto: { color: colors.muted, fontSize: 16, fontWeight: 'bold' },
+  botonInfoTexto: { color: '#FF4F2E', fontSize: 16, fontWeight: 'bold' },
   infoOverlay: {
     flex: 1, backgroundColor: '#000000aa',
     justifyContent: 'flex-end',
