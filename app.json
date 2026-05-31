@@ -62,9 +62,7 @@
     "ios": {
       "supportsTablet": true,
       "googleServicesFile": "./firebase-native/GoogleService-Info.plist",
-      "config": {
-        "googleMapsApiKey": "AIzaSyD-8fZ3pa4Omddju-fmJH2HhJeAxOPueRU"
-      },
+      "config": {},
       "entitlements": {
         "com.apple.developer.devicecheck.appattest-environment": "production",
         "com.apple.developer.applesignin": [
@@ -204,11 +202,7 @@
     "android": {
       "googleServicesFile": "./firebase-native/google-services.json",
       "playStoreUrl": "https://play.google.com/store/apps/details?id=com.conquerun.app",
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyDLx9lkmn7dtcDKAN6E3bvfbD0-WWWoULI"
-        }
-      },
+      "config": {},
       "permissions": [
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
