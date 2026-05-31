@@ -19,7 +19,8 @@ export default function HistorialScreen() {
 
   const cargarCarreras = async () => {
     try {
-      const uid = auth.currentUser.uid;
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
       const snap = await getDocs(query(
         collection(db, 'carreras'),
         where('uid', '==', uid),

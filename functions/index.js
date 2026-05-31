@@ -1052,46 +1052,56 @@ async function procesarConquistaGrupo(db, aportacionesGrupo, territorioCarreraCo
     const grupoGanadorSnap = await db.collection('grupos').doc(grupoActivoAportacion.grupoId).get();
     const miembrosGanadores = grupoGanadorSnap.data()?.miembros ?? [];
     const grupoGanadorNombre = grupoGanadorSnap.data()?.nombre ?? 'tu equipo';
-    const notifBatch = db.batch();
+
+    // Aggregate notifications per user: avoids multiple writes to same doc in batch
+    // (Admin SDK only applies the last write per doc per batch; arrayUnion would be lost)
+    const notifPorUsuario = new Map(); // uid → entrada[]
+    const addNotif = (miembroUid, entrada) => {
+      if (!notifPorUsuario.has(miembroUid)) notifPorUsuario.set(miembroUid, []);
+      notifPorUsuario.get(miembroUid).push(entrada);
+    };
+
+    const grupoOps = [];
 
     if (barriosGanadosGrupo > 0) {
-      notifBatch.set(db.collection('grupos').doc(grupoActivoAportacion.grupoId), {
-        barriosConquistados: FieldValue.increment(barriosGanadosGrupo),
-        actualizadoEn: FieldValue.serverTimestamp(),
-      }, { merge: true });
+      grupoOps.push({
+        ref: db.collection('grupos').doc(grupoActivoAportacion.grupoId),
+        data: { barriosConquistados: FieldValue.increment(barriosGanadosGrupo), actualizadoEn: FieldValue.serverTimestamp() },
+        options: { merge: true },
+      });
       for (const miembroUid of miembrosGanadores) {
         if (miembroUid === uid) continue;
         for (const nombre of nombresGanadosGrupo) {
-          notifBatch.set(
-            db.collection('usuarios').doc(miembroUid).collection('privado').doc('notificaciones'),
-            { notificacionesPendientes: FieldValue.arrayUnion({ tipo: 'territorio_ganado_grupo', nombre, grupoNombre: grupoGanadorNombre, fecha: ahoraMs }) },
-            { merge: true }
-          );
+          addNotif(miembroUid, { tipo: 'territorio_ganado_grupo', nombre, grupoNombre: grupoGanadorNombre, fecha: ahoraMs });
         }
       }
     }
 
     for (const [grupoId, { count, nombres }] of barriosPerdidosPorGrupo.entries()) {
-      notifBatch.set(db.collection('grupos').doc(grupoId), {
-        barriosConquistados: FieldValue.increment(-count),
-        actualizadoEn: FieldValue.serverTimestamp(),
-      }, { merge: true });
+      grupoOps.push({
+        ref: db.collection('grupos').doc(grupoId),
+        data: { barriosConquistados: FieldValue.increment(-count), actualizadoEn: FieldValue.serverTimestamp() },
+        options: { merge: true },
+      });
       const grupoPerdedorSnap = await db.collection('grupos').doc(grupoId).get();
       const miembrosPerdedores = grupoPerdedorSnap.data()?.miembros ?? [];
       const grupoPerdedorNombre = grupoPerdedorSnap.data()?.nombre ?? 'tu equipo';
       for (const miembroUid of miembrosPerdedores) {
         if (miembroUid === uid) continue;
         for (const nombre of nombres) {
-          notifBatch.set(
-            db.collection('usuarios').doc(miembroUid).collection('privado').doc('notificaciones'),
-            { notificacionesPendientes: FieldValue.arrayUnion({ tipo: 'territorio_perdido_grupo', nombre, grupoNombre: grupoPerdedorNombre, grupoGanadorNombre, fecha: ahoraMs }) },
-            { merge: true }
-          );
+          addNotif(miembroUid, { tipo: 'territorio_perdido_grupo', nombre, grupoNombre: grupoPerdedorNombre, grupoGanadorNombre, fecha: ahoraMs });
         }
       }
     }
 
-    await notifBatch.commit();
+    // One write per user (arrayUnion with all their entries at once)
+    const notifOps = [...notifPorUsuario.entries()].map(([miembroUid, entradas]) => ({
+      ref: db.collection('usuarios').doc(miembroUid).collection('privado').doc('notificaciones'),
+      data: { notificacionesPendientes: FieldValue.arrayUnion(...entradas) },
+      options: { merge: true },
+    }));
+
+    await commitEnChunks([...grupoOps, ...notifOps]);
   }
 }
 
@@ -2092,7 +2102,8 @@ exports.importarConquistasStrava = onCall({ secrets: [STRAVA_CLIENT_SECRET] }, a
       timestamp: startMs + ((tiempos[index] ?? 0) * 1000),
       segmentStart: index === 0,
     }));
-    const distancia = Math.round(activity.distance ?? (streams?.distance?.data?.at?.(-1) ?? calcularDistanciaRuta(ruta)));
+    const distanciaRaw = activity.distance ?? streams?.distance?.data?.at(-1) ?? calcularDistanciaRuta(ruta);
+    const distancia = Number.isFinite(distanciaRaw) ? Math.round(distanciaRaw) : 0;
     const duracion = Math.round(activity.moving_time ?? activity.elapsed_time ?? 0);
     const ritmoMedio = distancia > 0 ? Math.round(duracion / (distancia / 1000)) : 0;
     const puntos = calcularPuntosSv(distancia, ritmoMedio);

@@ -13,7 +13,7 @@ if (!__DEV__) {
   console.debug = () => {};
 }
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Linking, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, Linking, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Application from 'expo-application';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -28,6 +28,8 @@ import { prepararSolicitudResena } from './utils/reviews';
 import * as Notifications from 'expo-notifications';
 import { colors } from './utils/theme';
 import { obtenerMetaTracking } from './utils/trackingCarrera';
+import { enviarCarrerasPendientesBackground } from './utils/carrerasPendientes';
+import { guardarStravaUrl } from './utils/stravaDeepLink';
 import { formatTiempo } from './utils/formatters';
 import ToastNotificacion from './components/ToastNotificacion';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -121,6 +123,13 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
+  // Captura deep links de Strava en cold launch antes de que CorrerScreen monte
+  useEffect(() => {
+    Linking.getInitialURL().then(url => { if (url) guardarStravaUrl(url); }).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }) => guardarStravaUrl(url));
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       try {
@@ -156,6 +165,24 @@ export default function App() {
     return unsubscribe;
   }, []);
 
+  const reintentarCarrerasPendientes = useCallback(() => {
+    const uid = auth.currentUser?.uid;
+    if (uid) enviarCarrerasPendientesBackground(uid).catch(() => {});
+  }, []);
+
+  // Retry global de carreras pendientes: funciona aunque CorrerScreen no esté montada
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') return;
+      reintentarCarrerasPendientes();
+    });
+    return () => sub.remove();
+  }, [reintentarCarrerasPendientes]);
+
+  useEffect(() => {
+    if (!usuario || biometriaBloqueada || !tieneNickname || !tieneCiudad || (onboardingPendiente && !onboardingCompletado)) return;
+    reintentarCarrerasPendientes();
+  }, [usuario, biometriaBloqueada, tieneNickname, tieneCiudad, onboardingPendiente, onboardingCompletado, reintentarCarrerasPendientes]);
 
   useEffect(() => {
     if (!usuario || biometriaBloqueada || !tieneNickname || (onboardingPendiente && !onboardingCompletado)) {

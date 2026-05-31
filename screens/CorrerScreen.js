@@ -15,6 +15,7 @@ import {
 } from '../utils/grupos';
 import { normalizarCarrera, esCarreraPuntuable } from '../utils/carreras';
 import { guardarCarreraPendiente, obtenerCarrerasPendientes, eliminarCarreraPendiente, marcarIntentoFallido } from '../utils/carrerasPendientes';
+import { consumirStravaUrl } from '../utils/stravaDeepLink';
 import { registrarError, registrarEvento } from '../utils/monitoring';
 import DetalleCarreraScreen from './DetalleCarreraScreen';
 import { LOGROS } from '../utils/logros';
@@ -982,8 +983,14 @@ export default function CorrerScreen() {
   };
 
   useEffect(() => {
-    Linking.getInitialURL().then(procesarStravaCallbackUrl).catch(() => {});
+    // Cold launch: App.js capturó la URL antes de que montáramos; la consumimos aquí
+    const urlBuffer = consumirStravaUrl();
+    if (urlBuffer) procesarStravaCallbackUrl(urlBuffer);
+    // Foreground: Linking ya escucha en App.js también, pero procesamos aquí para
+    // tener acceso directo al estado de CorrerScreen (setStravaConectado, etc.)
+    // consumirStravaUrl limpia el buffer para que un remount no reprocese.
     const subscription = Linking.addEventListener('url', ({ url }) => {
+      consumirStravaUrl();
       procesarStravaCallbackUrl(url);
     });
     return () => subscription.remove();

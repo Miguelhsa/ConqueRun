@@ -105,7 +105,8 @@ export default function GruposScreen() {
 
   const subirFotoGrupo = async (uri, grupoId) => {
     const storage = getStorage();
-    const uid = auth.currentUser.uid;
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error('Sesión no iniciada');
     const storageRef = ref(storage, `gruposPendientes/${uid}/${grupoId}.jpg`);
     const response = await fetch(uri);
     const blob = await response.blob();
@@ -139,7 +140,7 @@ export default function GruposScreen() {
     } catch (e) {
       if (fotoPendienteUrl) {
         const storage = getStorage();
-        deleteObject(ref(storage, `gruposPendientes/${auth.currentUser.uid}/${grupoRef.id}.jpg`)).catch(() => {});
+        deleteObject(ref(storage, `gruposPendientes/${auth.currentUser?.uid}/${grupoRef.id}.jpg`)).catch(() => {});
       }
       Alert.alert('Error', 'No se pudo crear el grupo');
     } finally {
@@ -289,12 +290,12 @@ export default function GruposScreen() {
                   key={grupo.id}
                   grupo={grupo}
                   esMio
-                  uid={auth.currentUser.uid}
-                  onSalir={grupo.creador !== auth.currentUser.uid ? () => handleSalir(grupo.id, grupo.nombre) : null}
-                  onExpulsar={grupo.creador === auth.currentUser.uid
+                  uid={auth.currentUser?.uid}
+                  onSalir={grupo.creador !== auth.currentUser?.uid ? () => handleSalir(grupo.id, grupo.nombre) : null}
+                  onExpulsar={grupo.creador === auth.currentUser?.uid
                     ? (miembroUid, nick) => handleExpulsar(grupo.id, miembroUid, nick)
                     : null}
-                  onRegenerarCodigo={grupo.creador === auth.currentUser.uid
+                  onRegenerarCodigo={grupo.creador === auth.currentUser?.uid
                     ? () => handleRegenerarCodigo(grupo.id)
                     : null}
                   onReportar={() => crearReporte({ tipo: 'grupo', recursoId: grupo.id, motivo: 'contenido_inapropiado' })

@@ -26,9 +26,11 @@ export const registrarNotificaciones = async (uid) => {
 
   if (finalStatus !== 'granted') return null;
 
-  const token = (await Notifications.getExpoPushTokenAsync({
-    projectId: '43f83c91-be64-432c-989d-74b2ecb9ff12',
-  })).data;
+  const tokenResult = await Promise.race([
+    Notifications.getExpoPushTokenAsync({ projectId: '43f83c91-be64-432c-989d-74b2ecb9ff12' }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('PUSH_TOKEN_TIMEOUT')), 10000)),
+  ]);
+  const token = tokenResult.data;
 
   // Guardar en subcollección privada — otros usuarios no pueden leer el pushToken
   await setDoc(refPrivado(uid), { pushToken: token }, { merge: true });

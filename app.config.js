@@ -1,21 +1,19 @@
-const base = require('./app.json');
-
-module.exports = {
-  ...base.expo,
+module.exports = ({ config }) => ({
+  ...config,
   ios: {
-    ...base.expo.ios,
+    ...config.ios,
     config: {
-      ...base.expo.ios?.config,
+      ...config.ios?.config,
       googleMapsApiKey: process.env.GOOGLE_MAPS_IOS_KEY,
     },
   },
   android: {
-    ...base.expo.android,
+    ...config.android,
     config: {
-      ...base.expo.android?.config,
+      ...config.android?.config,
       googleMaps: {
         apiKey: process.env.GOOGLE_MAPS_ANDROID_KEY,
       },
     },
   },
-};
+});

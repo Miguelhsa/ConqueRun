@@ -88,7 +88,8 @@ const comprobarLimiteGrupos = async (uid) => {
 
 // Crear grupo — acepta fotoPendienteUrl y grupoRef opcionales para escritura atómica con foto
 export const crearGrupo = async ({ nombre, descripcion, esPublico }, { grupoRef, fotoPendienteUrl } = {}) => {
-  const uid = auth.currentUser.uid;
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Sesión no iniciada');
   const codigo = generarCodigo();
   const snap = await getDoc(doc(db, 'usuarios', uid));
   const data = snap.exists() ? snap.data() : {};
@@ -126,7 +127,9 @@ export const crearGrupo = async ({ nombre, descripcion, esPublico }, { grupoRef,
 
 // Unirse a grupo por código
 export const unirseACodigo = async (codigo) => {
-  await comprobarLimiteGrupos(auth.currentUser.uid);
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Sesión no iniciada');
+  await comprobarLimiteGrupos(uid);
   const unirse = httpsCallable(getFunctions(), 'unirseAGrupoConCodigo');
   const result = await unirse({ codigo });
   return result.data?.grupoId;
@@ -140,7 +143,8 @@ export const unirseAGrupo = async (grupoId) => {
 
 // Salir de un grupo (el creador no puede abandonarlo)
 export const salirDeGrupo = async (grupoId) => {
-  const uid = auth.currentUser.uid;
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Sesión no iniciada');
   const grupoSnap = await getDoc(doc(db, 'grupos', grupoId));
   if (!grupoSnap.exists()) throw new Error('Grupo no encontrado');
   if (grupoSnap.data().creador === uid) throw new Error('El creador no puede abandonar el grupo');
@@ -152,7 +156,8 @@ export const salirDeGrupo = async (grupoId) => {
 
 // Regenerar el código de invitación (solo el creador)
 export const regenerarCodigo = async (grupoId) => {
-  const uid = auth.currentUser.uid;
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Sesión no iniciada');
   const grupoSnap = await getDoc(doc(db, 'grupos', grupoId));
   if (!grupoSnap.exists()) throw new Error('Grupo no encontrado');
   if (grupoSnap.data().creador !== uid) throw new Error('Solo el creador puede regenerar el código');
@@ -163,7 +168,8 @@ export const regenerarCodigo = async (grupoId) => {
 
 // Expulsar a un miembro (solo el creador puede hacerlo, y no puede expulsarse a sí mismo)
 export const expulsarMiembro = async (grupoId, miembroUid) => {
-  const uid = auth.currentUser.uid;
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Sesión no iniciada');
   const grupoSnap = await getDoc(doc(db, 'grupos', grupoId));
   if (!grupoSnap.exists()) throw new Error('Grupo no encontrado');
   if (grupoSnap.data().creador !== uid) throw new Error('Solo el creador puede expulsar miembros');
@@ -176,7 +182,8 @@ export const expulsarMiembro = async (grupoId, miembroUid) => {
 
 // Obtener mis grupos
 export const obtenerMisGrupos = async () => {
-  const uid = auth.currentUser.uid;
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Sesión no iniciada');
   const q = query(collection(db, 'grupos'), where('miembros', 'array-contains', uid), limit(50));
   const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
