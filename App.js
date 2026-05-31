@@ -13,7 +13,8 @@ if (!__DEV__) {
   console.debug = () => {};
 }
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import * as Application from 'expo-application';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -26,7 +27,7 @@ import { registrarNotificaciones } from './utils/notificaciones';
 import { prepararSolicitudResena } from './utils/reviews';
 import * as Notifications from 'expo-notifications';
 import { colors } from './utils/theme';
-import { calcularDistanciaFiltrada, obtenerMetaTracking, obtenerRutaTracking } from './utils/trackingCarrera';
+import { obtenerMetaTracking } from './utils/trackingCarrera';
 import { formatTiempo } from './utils/formatters';
 import ToastNotificacion from './components/ToastNotificacion';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -45,6 +46,25 @@ import ModeracionScreen from './screens/ModeracionScreen';
 const Tab = createBottomTabNavigator();
 const TAB_BAR_HEIGHT = 84;
 
+const STORE_URL = Platform.OS === 'ios'
+  ? 'https://apps.apple.com/app/id6772089442'
+  : 'https://play.google.com/store/apps/details?id=com.conquerun.app';
+
+const versionPart = (valor) => {
+  const numero = Number.parseInt(String(valor ?? '0'), 10);
+  return Number.isFinite(numero) ? numero : 0;
+};
+
+const compararVersion = (a, b) => {
+  const pa = String(a).split('.').map(versionPart);
+  const pb = String(b).split('.').map(versionPart);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+};
+
 const SPLASH_MIN_MS = 2500;
 
 export default function App() {
@@ -58,6 +78,8 @@ export default function App() {
   const [cargandoSesion, setCargandoSesion] = useState(true);
   const splashInicioRef = useRef(Date.now());
 
+  const [comprobandoVersion, setComprobandoVersion] = useState(true);
+  const [actualizacionRequerida, setActualizacionRequerida] = useState(false);
   const [carreraActiva, setCarreraActiva] = useState(null);
   const [notifPendientes, setNotifPendientes] = useState([]);
   const [toast, setToast] = useState(null);
@@ -71,6 +93,25 @@ export default function App() {
     headerTintColor: colors.text,
     tabBarIcon: TabIcon(iconoTab(route.name), route.name === 'Correr' && Boolean(carreraActiva)),
   }), [carreraActiva]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'config', 'app'));
+        if (!snap.exists()) return;
+        const { versionMinima } = snap.data();
+        if (!versionMinima) return;
+        const versionActual = Application.nativeApplicationVersion ?? '0.0.0';
+        if (compararVersion(versionActual, versionMinima) < 0) {
+          setActualizacionRequerida(true);
+        }
+      } catch {
+        // Fail-open: si no hay red o Firestore no responde, no bloqueamos el arranque.
+      } finally {
+        setComprobandoVersion(false);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     const sub = Notifications.addNotificationReceivedListener(notif => {
@@ -123,17 +164,14 @@ export default function App() {
     }
 
     const actualizarCarreraActiva = async () => {
-      const [meta, ruta] = await Promise.all([
-        obtenerMetaTracking(),
-        obtenerRutaTracking(),
-      ]);
+      const meta = await obtenerMetaTracking();
 
       if (!meta) {
         setCarreraActiva(null);
         return;
       }
 
-      const distancia = meta.distanciaAcumulada ?? calcularDistanciaFiltrada(ruta);
+      const distancia = meta.distanciaAcumulada ?? 0;
       const ahoraParaTiempo = meta.pausada && meta.pausadaEn ? meta.pausadaEn : Date.now();
       const segundos = Math.max(0, Math.floor((ahoraParaTiempo - meta.iniciadaEn - (meta.tiempoPausadoMs ?? 0)) / 1000));
       setCarreraActiva({ distancia, segundos, pausada: Boolean(meta.pausada) });
@@ -197,12 +235,27 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!cargandoSesion) {
+    if (!cargandoSesion && !comprobandoVersion) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [cargandoSesion]);
+  }, [cargandoSesion, comprobandoVersion]);
 
-  if (cargandoSesion) return null;
+  if (cargandoSesion || comprobandoVersion) return null;
+
+  if (actualizacionRequerida) {
+    return (
+      <View style={styles.updateScreen}>
+        <MaterialCommunityIcons name="arrow-up-circle-outline" size={56} color="#C6F432" />
+        <Text style={styles.updateTitulo}>Actualización necesaria</Text>
+        <Text style={styles.updateTexto}>
+          Esta versión de ConqueRun ya no está soportada. Actualiza para seguir conquistando.
+        </Text>
+        <TouchableOpacity style={styles.updateBoton} onPress={() => Linking.openURL(STORE_URL)}>
+          <Text style={styles.updateBotonTexto}>Actualizar ahora</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (!usuario) {
     return <LoginScreen onLogin={() => {
@@ -220,10 +273,10 @@ export default function App() {
     }} />;
   }
   if (!tieneCiudad) {
-    return <CiudadScreen onGuardado={() => setTieneCiudad(true)} />;
+    return <CiudadScreen uid={usuario.uid} onGuardado={() => setTieneCiudad(true)} />;
   }
   if (onboardingPendiente && !onboardingCompletado) {
-    return <OnboardingScreen onCompletado={() => {
+    return <OnboardingScreen uid={usuario.uid} onCompletado={() => {
       setOnboardingCompletado(true);
       setOnboardingPendiente(false);
       if (usuario?.uid) prepararPostOnboarding(usuario.uid);
@@ -385,5 +438,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.3,
+  },
+  updateScreen: {
+    flex: 1,
+    backgroundColor: '#080b14',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    gap: 16,
+  },
+  updateTitulo: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#F2EFE8',
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  updateTexto: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+  updateBoton: {
+    marginTop: 8,
+    backgroundColor: '#C6F432',
+    borderRadius: 12,
+    paddingHorizontal: 36,
+    paddingVertical: 14,
+  },
+  updateBotonTexto: {
+    color: '#080b14',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
 });

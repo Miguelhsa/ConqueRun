@@ -44,7 +44,6 @@ export default function RankingScreen() {
       }
       await Promise.all([
         cargarRankingCiudad(ciudadUsuario, segmentoCompetitivo, listaBloqueados),
-        cargarMiResumen(ciudadUsuario.id, segmentoCompetitivo),
         cargarGrupos(ciudadUsuario.id),
       ]);
     } finally {
@@ -67,27 +66,15 @@ export default function RankingScreen() {
     setMiSegmentoEtiqueta(data.segmentoEtiqueta ?? null);
     setBloqueados(data.usuariosBloqueados ?? []);
     setCiudad(c);
-    return { ciudad: c, segmentoCompetitivo, bloqueados: data.usuariosBloqueados ?? [] };
-  };
-
-  const cargarMiResumen = async (ciudadId, segmentoCompetitivo) => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    const [snap, miEntrada] = await Promise.all([
-      getDoc(doc(db, 'usuarios', uid)),
-      ciudadId ? cargarMiEntradaRanking(ciudadId, uid, segmentoCompetitivo) : Promise.resolve(null),
-    ]);
-    if (!snap.exists()) return;
-    const data = snap.data();
-    const sinEntradaEnSegmento = !miEntrada && segmentoCompetitivo;
     setMiResumen({
-      barrios: sinEntradaEnSegmento ? 0 : (miEntrada?.barrios ?? data.barriosConquistadosTotal ?? 0),
-      puntos: sinEntradaEnSegmento ? 0 : (miEntrada?.puntos ?? data.puntosTotales ?? 0),
+      barrios: data.barriosConquistadosTotal ?? 0,
+      puntos: data.puntosTotales ?? 0,
       nickname: data.nickname ?? 'Tú',
       fotoPerfil: data.fotoPerfil ?? null,
       fotoPerfilEstado: data.fotoPerfilEstado ?? null,
       segmentoEtiqueta: data.segmentoEtiqueta ?? null,
     });
+    return { ciudad: c, segmentoCompetitivo, bloqueados: data.usuariosBloqueados ?? [] };
   };
 
   const cargarRankingCiudad = async (c, segmentoCompetitivo = miSegmentoCompetitivo, listaBloqueados = bloqueados) => {
@@ -104,6 +91,16 @@ export default function RankingScreen() {
       : lista;
     setRankingCiudad(listaFiltrada);
     setTotalCorredores(total);
+
+    if (uid && miEntrada) {
+      setMiResumen(prev => ({
+        ...prev,
+        barrios: miEntrada.barrios ?? prev?.barrios ?? 0,
+        puntos: miEntrada.puntos ?? prev?.puntos ?? 0,
+      }));
+    } else if (uid && segmentoCompetitivo) {
+      setMiResumen(prev => ({ ...prev, barrios: 0, puntos: 0 }));
+    }
 
     const estaEnTop = lista.some(item => item.uid === uid);
 

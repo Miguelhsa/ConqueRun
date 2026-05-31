@@ -22,10 +22,11 @@ import { pedirResenaSiProcede } from '../utils/reviews';
 import { calcularAvisoProximoSegmento, calcularSegmentos30d, calcularSegmentosDesdePerfilYRitmo, SEGMENTOS_RITMO } from '../utils/segmentos';
 import { obtenerCiudadCercana, CIUDAD_FALLBACK } from '../utils/ciudades';
 import { colors, radius } from '../utils/theme';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { formatTiempo, formatRitmo } from '../utils/formatters';
 import {
   GPS_ACCURACY_MAX_METROS,
+  GPS_TIMEOUT_SIN_SENYAL_MS,
   agregarPuntosTracking,
   calcularDistanciaFiltrada,
   limpiarTrackingCarrera,
@@ -64,12 +65,14 @@ export default function CorrerScreen() {
   const [stravaModalVisible, setStravaModalVisible] = useState(false);
   const [stravaConectado, setStravaConectado] = useState(false);
   const [importandoStrava, setImportandoStrava] = useState(false);
+  const [desconectandoStrava, setDesconectandoStrava] = useState(false);
   const [carrerasPendientesCount, setCarrerasPendientesCount] = useState(0);
   const timerRef = useRef(null);
   const foregroundWatchRef = useRef(null);
   const barriosRef = useRef([]);
   const indiceBarriosRef = useRef(null);
   const segmentoBarriosRef = useRef(null);
+  const barrioCargadoEnRef = useRef(0);
   const ciudadRef = useRef(CIUDAD_FALLBACK);
   const perfilRef = useRef({});
   const rutaRef = useRef([]);
@@ -97,8 +100,9 @@ export default function CorrerScreen() {
   const cargarCarrerasRecientes = async () => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const [userSnap, carrerasSnap] = await Promise.all([
+    const [userSnap, privadoSnap, carrerasSnap] = await Promise.all([
       getDoc(doc(db, 'usuarios', uid)),
+      getDoc(doc(db, 'usuarios', uid, 'privado', 'datos')),
       getDocs(query(
         collection(db, 'carreras'),
         where('uid', '==', uid),
@@ -108,6 +112,14 @@ export default function CorrerScreen() {
     ]);
     setStravaConectado(Boolean(userSnap.exists() && userSnap.data().stravaConectado));
     setCarrerasRecientes(carrerasSnap.docs.map(d => normalizarCarrera({ id: d.id, ...d.data() })));
+    const perfilData = {
+      ...(userSnap.exists() ? userSnap.data() : {}),
+      ...(privadoSnap.exists() ? privadoSnap.data() : {}),
+    };
+    if (!perfilData.segmentoCompetitivo) {
+      Object.assign(perfilData, calcularSegmentosDesdePerfilYRitmo(perfilData, perfilData.ritmo30d ?? null));
+    }
+    perfilRef.current = perfilData;
   };
 
   const clasificarTerritorio = (territorioCarrera, uid) => territorioCarrera.reduce((acc, barrio) => {
@@ -131,9 +143,14 @@ export default function CorrerScreen() {
     rivalesPendientes: [],
   });
 
+  const BARRIOS_CACHE_TTL_MS = 10 * 60 * 1000;
+
   const cargarCiudadYBarrios = async (punto) => {
     const segmentoActual = perfilRef.current?.segmentoCompetitivo ?? null;
-    if (barriosRef.current.length > 0 && segmentoBarriosRef.current === segmentoActual) return;
+    const cacheValido = barriosRef.current.length > 0
+      && segmentoBarriosRef.current === segmentoActual
+      && Date.now() - barrioCargadoEnRef.current < BARRIOS_CACHE_TTL_MS;
+    if (cacheValido) return;
 
     const ciudadCercana = await obtenerCiudadCercana(punto);
     setCiudadActual(ciudadCercana);
@@ -142,6 +159,7 @@ export default function CorrerScreen() {
     barriosRef.current = await obtenerBarriosSegmentados(ciudadCercana.id, perfil.segmentoCompetitivo);
     segmentoBarriosRef.current = perfil.segmentoCompetitivo ?? null;
     indiceBarriosRef.current = buildIndiceEspacial(barriosRef.current);
+    barrioCargadoEnRef.current = Date.now();
   };
 
   const sincronizarTracking = async () => {
@@ -169,10 +187,17 @@ export default function CorrerScreen() {
 
     if (!ultimoPunto) return { ruta: rutaTracking, distancia: distanciaActual, segundos: segundosActuales };
 
-    const nuevoGpsDebil = ultimoPunto.accuracy != null && ultimoPunto.accuracy > GPS_ACCURACY_MAX_METROS;
+    const tiempoSinPunto = Date.now() - ultimoPunto.timestamp;
+    const sinSenyal = tiempoSinPunto > GPS_TIMEOUT_SIN_SENYAL_MS;
+    const precisionMala = ultimoPunto.accuracy != null && ultimoPunto.accuracy > GPS_ACCURACY_MAX_METROS;
+    const nuevoGpsDebil = sinSenyal || precisionMala;
     if (nuevoGpsDebil !== gpsDebilRef.current) {
       gpsDebilRef.current = nuevoGpsDebil;
       setGpsDebil(nuevoGpsDebil);
+      if (nuevoGpsDebil && ritmoActualRef.current !== null) {
+        ritmoActualRef.current = null;
+        setRitmoActual(null);
+      }
     }
 
     await cargarCiudadYBarrios(ultimoPunto);
@@ -183,17 +208,19 @@ export default function CorrerScreen() {
       setBarrioActual(barrio);
     }
 
-    const recientes = rutaTracking.slice(-5).filter(p => p.speed != null && p.speed > 0.4);
-    if (recientes.length > 0) {
-      const speedMedia = recientes.reduce((sum, p) => sum + p.speed, 0) / recientes.length;
-      const nuevoRitmo = Math.round(1000 / speedMedia);
-      if (nuevoRitmo !== ritmoActualRef.current) {
-        ritmoActualRef.current = nuevoRitmo;
-        setRitmoActual(nuevoRitmo);
+    if (!nuevoGpsDebil) {
+      const recientes = rutaTracking.slice(-5).filter(p => p.speed != null && p.speed > 0.4);
+      if (recientes.length > 0) {
+        const speedMedia = recientes.reduce((sum, p) => sum + p.speed, 0) / recientes.length;
+        const nuevoRitmo = Math.round(1000 / speedMedia);
+        if (nuevoRitmo !== ritmoActualRef.current) {
+          ritmoActualRef.current = nuevoRitmo;
+          setRitmoActual(nuevoRitmo);
+        }
+      } else if (ritmoActualRef.current !== null) {
+        ritmoActualRef.current = null;
+        setRitmoActual(null);
       }
-    } else if (ritmoActualRef.current !== null) {
-      ritmoActualRef.current = null;
-      setRitmoActual(null);
     }
 
     return { ruta: rutaTracking, distancia: distanciaActual, segundos: segundosActuales };
@@ -217,6 +244,11 @@ export default function CorrerScreen() {
       promise,
       new Promise((_, reject) => setTimeout(() => reject(new Error('GPS_TIMEOUT')), ms)),
     ]);
+
+    try {
+      const ultima = await Location.getLastKnownPositionAsync({ maxAge: 30000, requiredAccuracy: 100 });
+      if (ultima) return ultima;
+    } catch {}
 
     try {
       return await conTimeout(
@@ -299,7 +331,7 @@ export default function CorrerScreen() {
         invalidarCacheTerritorios(carrera.payload.ciudadId).catch(() => {});
         cargarCarrerasRecientes().catch(() => {});
       } catch (e) {
-        if (e.code === 'functions/failed-precondition' || e.code === 'functions/invalid-argument' || e.code === 'functions/resource-exhausted') {
+        if (e.code === 'functions/failed-precondition' || e.code === 'functions/invalid-argument') {
           await eliminarCarreraPendiente(carrera.id);
           setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
         } else {
@@ -344,19 +376,21 @@ export default function CorrerScreen() {
     }
 
     try {
-      const [userSnap, privadoSnap] = await Promise.all([
-        getDoc(doc(db, 'usuarios', uid)),
-        getDoc(doc(db, 'usuarios', uid, 'privado', 'datos')),
-      ]);
-      perfilRef.current = {
-        ...(userSnap.exists() ? userSnap.data() : {}),
-        ...(privadoSnap.exists() ? privadoSnap.data() : {}),
-      };
-      if (!perfilRef.current.segmentoCompetitivo) {
+      if (Object.keys(perfilRef.current).length === 0) {
+        const [userSnap, privadoSnap] = await Promise.all([
+          getDoc(doc(db, 'usuarios', uid)),
+          getDoc(doc(db, 'usuarios', uid, 'privado', 'datos')),
+        ]);
         perfilRef.current = {
-          ...perfilRef.current,
-          ...calcularSegmentosDesdePerfilYRitmo(perfilRef.current, perfilRef.current.ritmo30d ?? null),
+          ...(userSnap.exists() ? userSnap.data() : {}),
+          ...(privadoSnap.exists() ? privadoSnap.data() : {}),
         };
+        if (!perfilRef.current.segmentoCompetitivo) {
+          perfilRef.current = {
+            ...perfilRef.current,
+            ...calcularSegmentosDesdePerfilYRitmo(perfilRef.current, perfilRef.current.ritmo30d ?? null),
+          };
+        }
       }
       const consentimientoUbicacion = Boolean(perfilRef.current.consentimientoUbicacionCarrera);
 
@@ -380,30 +414,50 @@ export default function CorrerScreen() {
         }, { merge: true });
       }
 
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu ubicación');
+        if (!canAskAgain) {
+          Alert.alert(
+            'Permiso de ubicación bloqueado',
+            'Has denegado el acceso a la ubicación. Para correr, actívalo en Ajustes.',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Abrir Ajustes', onPress: () => Linking.openSettings() },
+            ]
+          );
+        } else {
+          Alert.alert('Permiso denegado', 'Necesitamos acceso a tu ubicación para grabar la carrera.');
+        }
         return;
       }
 
       let permiteSegundoPlano = false;
-      const aceptaSegundoPlano = await new Promise(resolve => {
-        Alert.alert(
-          'Ubicación en segundo plano',
-          'Para grabar la carrera completa cuando bloqueas el móvil o cambias de aplicación, ConqueRun necesita acceder a tu ubicación incluso cuando la app esté cerrada o no estés usándola.\n\nSin este permiso la ruta puede tener huecos.',
-          [
-            { text: 'Solo mientras uso la app', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Permitir siempre', onPress: () => resolve(true) },
-          ],
-        );
-      });
-      if (aceptaSegundoPlano) {
-        try {
-          const background = await Location.requestBackgroundPermissionsAsync();
-          permiteSegundoPlano = background.status === 'granted';
-        } catch {
-          // El dispositivo no soporta permisos en segundo plano — seguimos en primer plano
+      try {
+        const bgPermiso = await Location.getBackgroundPermissionsAsync();
+        if (bgPermiso.status === 'granted') {
+          permiteSegundoPlano = true;
+        } else {
+          const aceptaSegundoPlano = await new Promise(resolve => {
+            Alert.alert(
+              'Ubicación en segundo plano',
+              'Para grabar la carrera completa cuando bloqueas el móvil o cambias de aplicación, ConqueRun necesita acceder a tu ubicación incluso cuando la app esté cerrada o no estés usándola.\n\nSin este permiso la ruta puede tener huecos.',
+              [
+                { text: 'Solo mientras uso la app', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Permitir siempre', onPress: () => resolve(true) },
+              ],
+            );
+          });
+          if (aceptaSegundoPlano) {
+            try {
+              const background = await Location.requestBackgroundPermissionsAsync();
+              permiteSegundoPlano = background.status === 'granted';
+            } catch {
+              // El dispositivo no soporta permisos en segundo plano — seguimos en primer plano
+            }
+          }
         }
+      } catch {
+        // getBackgroundPermissionsAsync no disponible, mantener permiteSegundoPlano = false
       }
 
       setDistancia(0);
@@ -462,13 +516,16 @@ export default function CorrerScreen() {
 
   const pararCarrera = async () => {
     const uid = auth.currentUser?.uid;
+    const carreraId = uid
+      ? `${uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      : null;
     setCorriendo(false);
     setTrackingSegundoPlano(false);
     setPausada(false);
     clearInterval(timerRef.current);
     foregroundWatchRef.current?.remove();
     foregroundWatchRef.current = null;
-    await pararTrackingCarrera();
+    await pararTrackingCarrera().catch(e => registrarError(e, 'pararTrackingCarrera'));
     const trackingFinal = await sincronizarTracking();
     const rutaFinal = trackingFinal.ruta;
     const distanciaFinal = trackingFinal.distancia;
@@ -493,62 +550,84 @@ export default function CorrerScreen() {
       return;
     }
 
-    await cargarCiudadYBarrios(rutaFinal[0]);
+    const rutaFiltrada = (() => {
+      const filtrada = [rutaFinal[0]];
+      for (let i = 1; i < rutaFinal.length; i++) {
+        const p = rutaFinal[i];
+        if (p.segmentStart || p.gapStart || p.accuracy == null || p.accuracy <= 50) filtrada.push(p);
+      }
+      return filtrada.length >= 2 ? filtrada : rutaFinal;
+    })();
+    const rutaParaGuardar = simplificarRutaParaGuardar(rutaFiltrada);
+    let grupoActivo = null;
+    let pendingId = null;
 
-    let misGrupos = [];
     try {
-      misGrupos = await obtenerMisGrupos();
-    } catch (e) {
-      misGrupos = [];
-    }
-    const grupoActivo = await seleccionarGrupoFinCarrera(misGrupos);
-    const gruposCarrera = grupoActivo ? [grupoActivo] : [];
+      await cargarCiudadYBarrios(rutaFinal[0]);
 
-    const puntos = calcularPuntos(distanciaFinal, ritmoMedio || 360);
-    const segmentoAnterior = perfilRef.current.segmentoCompetitivo ?? null;
-    const notificacionSegmentoAnterior = perfilRef.current.notificacionSegmentoClave ?? null;
-    const segmentos = await calcularSegmentos30d({
-      uid,
-      perfil: perfilRef.current,
-      carreraActual: {
-        distancia: Math.round(distanciaFinal),
-        duracion: segundosFinales,
-      },
-    });
-    const cambioSegmento = segmentoAnterior && segmentos.segmentoCompetitivo !== segmentoAnterior;
-    const avisoProximoSegmento = cambioSegmento
-      ? null
-      : calcularAvisoProximoSegmento(segmentos.ritmo30d, segmentos.segmentoRitmo);
-    const claveNotificacionSegmento = cambioSegmento
-      ? `cambio_${segmentos.segmentoCompetitivo}`
-      : avisoProximoSegmento?.clave ?? null;
-    const debeNotificarSegmento = Boolean(
-      claveNotificacionSegmento &&
-      claveNotificacionSegmento !== notificacionSegmentoAnterior
-    );
+      let misGrupos = [];
+      try {
+        misGrupos = await obtenerMisGrupos();
+      } catch (e) {
+        misGrupos = [];
+      }
+      grupoActivo = await seleccionarGrupoFinCarrera(misGrupos);
 
-    if (segmentos.segmentoCompetitivo !== perfilRef.current.segmentoCompetitivo) {
-      perfilRef.current = { ...perfilRef.current, ...segmentos };
-      barriosRef.current = await obtenerBarriosSegmentados(ciudadRef.current.id, segmentos.segmentoCompetitivo);
-      segmentoBarriosRef.current = segmentos.segmentoCompetitivo;
-      indiceBarriosRef.current = buildIndiceEspacial(barriosRef.current);
-    }
-    const territorioCarrera = calcularResumenTerritorial(
-      rutaFinal,
-      barriosRef.current,
-      puntos,
-      distanciaFinal
-    );
-    const rutaParaGuardar = simplificarRutaParaGuardar(rutaFinal);
-    try {
-      const registrarCarrera = httpsCallable(getFunctions(), 'registrarCarreraConqurun');
-      const { data } = await registrarCarrera({
+      // Guardar en pendientes antes de llamar al CF: si la app peta aquí la carrera
+      // está en AsyncStorage y se reenvía automáticamente al volver.
+      const payload = {
+        carreraId,
         ruta: rutaParaGuardar,
         distancia: Math.round(distanciaFinal),
         duracion: segundosFinales,
         grupoActivoId: grupoActivo?.id ?? null,
         ciudadId: ciudadRef.current.id,
+      };
+      if (uid) {
+        pendingId = await guardarCarreraPendiente(uid, payload);
+        if (pendingId) {
+          await limpiarTrackingCarrera();
+          setCarrerasPendientesCount(prev => prev + 1);
+        }
+      }
+
+      const puntos = calcularPuntos(distanciaFinal, ritmoMedio || 360);
+      const segmentoAnterior = perfilRef.current.segmentoCompetitivo ?? null;
+      const notificacionSegmentoAnterior = perfilRef.current.notificacionSegmentoClave ?? null;
+      const segmentos = await calcularSegmentos30d({
+        uid,
+        perfil: perfilRef.current,
+        carreraActual: {
+          distancia: Math.round(distanciaFinal),
+          duracion: segundosFinales,
+        },
       });
+      const cambioSegmento = segmentoAnterior && segmentos.segmentoCompetitivo !== segmentoAnterior;
+      const avisoProximoSegmento = cambioSegmento
+        ? null
+        : calcularAvisoProximoSegmento(segmentos.ritmo30d, segmentos.segmentoRitmo);
+      const claveNotificacionSegmento = cambioSegmento
+        ? `cambio_${segmentos.segmentoCompetitivo}`
+        : avisoProximoSegmento?.clave ?? null;
+      const debeNotificarSegmento = Boolean(
+        claveNotificacionSegmento &&
+        claveNotificacionSegmento !== notificacionSegmentoAnterior
+      );
+
+      if (segmentos.segmentoCompetitivo !== perfilRef.current.segmentoCompetitivo) {
+        perfilRef.current = { ...perfilRef.current, ...segmentos };
+        barriosRef.current = await obtenerBarriosSegmentados(ciudadRef.current.id, segmentos.segmentoCompetitivo);
+        segmentoBarriosRef.current = segmentos.segmentoCompetitivo;
+        indiceBarriosRef.current = buildIndiceEspacial(barriosRef.current);
+      }
+      const territorioCarrera = calcularResumenTerritorial(
+        rutaFinal,
+        barriosRef.current,
+        puntos,
+        distanciaFinal
+      );
+      const registrarCarrera = httpsCallable(getFunctions(), 'registrarCarreraConqurun');
+      const { data } = await registrarCarrera(payload);
       const nuevosTerritorios = data.conquistas ?? [];
       const territorioConfirmado = data.territorioCarrera ?? territorioCarrera;
       const territorio = clasificarTerritorio(territorioConfirmado, uid);
@@ -588,7 +667,13 @@ export default function CorrerScreen() {
         rivalesPendientes: territorio.rivalesPendientes.filter(b => !nombresConquistados.has(b.nombre)),
       };
 
-      await limpiarTrackingCarrera();
+      // CF completado correctamente: eliminar de pendientes y mostrar resumen
+      if (pendingId) {
+        await eliminarCarreraPendiente(pendingId);
+        setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
+      } else {
+        await limpiarTrackingCarrera();
+      }
       invalidarCacheTerritorios(ciudadRef.current?.id).catch(() => {});
       cargarCarrerasRecientes().catch(console.error);
       registrarEvento('carrera_completada', {
@@ -615,34 +700,54 @@ export default function CorrerScreen() {
       setBarrioActual(null);
     } catch (e) {
       if (e.code === 'functions/failed-precondition') {
+        // Carrera inválida: eliminar de pendientes y descartar
+        if (pendingId) {
+          await eliminarCarreraPendiente(pendingId).catch(() => {});
+          setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
+        } else {
+          await limpiarTrackingCarrera().catch(() => {});
+        }
         Alert.alert('Carrera no válida', e.message ?? 'La carrera no cumple las condiciones para guardar.');
       } else if (e.code === 'functions/invalid-argument') {
+        if (pendingId) {
+          await eliminarCarreraPendiente(pendingId).catch(() => {});
+          setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
+        } else {
+          await limpiarTrackingCarrera().catch(() => {});
+        }
         Alert.alert('Datos incorrectos', e.message ?? 'Los datos de la carrera no son válidos.');
-      } else if (e.code === 'functions/unauthenticated') {
-        Alert.alert('Sesión expirada', 'Inicia sesión de nuevo para guardar la carrera.');
-      } else if (e.code === 'functions/resource-exhausted') {
-        Alert.alert('Espera un momento', 'Acaba de registrarse una carrera. Espera unos segundos e inténtalo de nuevo.');
       } else {
-        const uid = auth.currentUser?.uid;
-        if (uid) {
-          await guardarCarreraPendiente(uid, {
+        // Error de red u otro: si ya está en pendientes, no hace falta guardar de nuevo
+        let savedId = null;
+        if (uid && !pendingId) {
+          savedId = await guardarCarreraPendiente(uid, {
+            carreraId,
             ruta: rutaParaGuardar,
             distancia: Math.round(distanciaFinal),
             duracion: segundosFinales,
             grupoActivoId: grupoActivo?.id ?? null,
             ciudadId: ciudadRef.current.id,
           });
-          registrarEvento('carrera_guardada_sin_red', { distancia_m: Math.round(distanciaFinal) });
-          registrarError(e, 'pararCarrera: error de red');
-          await limpiarTrackingCarrera();
-          setCarrerasPendientesCount(prev => prev + 1);
-          Alert.alert(
-            'Sin conexión',
-            'Tu carrera se ha guardado. Se enviará automáticamente cuando tengas conexión.',
-            [{ text: 'Entendido' }]
-          );
-        } else {
+          if (savedId) {
+            await limpiarTrackingCarrera();
+            setCarrerasPendientesCount(prev => prev + 1);
+          }
+        } else if (!uid) {
+          await limpiarTrackingCarrera().catch(() => {});
           Alert.alert('Error', 'No se pudo guardar la carrera. Revisa tu conexión e inténtalo de nuevo.');
+          return;
+        }
+        registrarError(e, 'pararCarrera');
+        const carreraGuardada = Boolean(pendingId || savedId);
+        if (!carreraGuardada) {
+          Alert.alert('Error al guardar', 'No se pudo guardar la carrera localmente. Comprueba el almacenamiento del dispositivo e inténtalo de nuevo.');
+          return;
+        }
+        if (e.code === 'functions/unauthenticated') {
+          Alert.alert('Sesión expirada', 'Tu carrera se ha guardado. Inicia sesión de nuevo para que se envíe automáticamente.');
+        } else {
+          registrarEvento('carrera_guardada_sin_red', { distancia_m: Math.round(distanciaFinal) });
+          Alert.alert('Sin conexión', 'Tu carrera se ha guardado. Se enviará automáticamente cuando tengas conexión.', [{ text: 'Entendido' }]);
         }
       }
     }
@@ -742,26 +847,24 @@ export default function CorrerScreen() {
     return `${base}${separador}/strava`;
   };
 
-  const getStravaAuthUrl = () => {
-    const uid = auth.currentUser?.uid ?? '';
-    const state = JSON.stringify({ returnUrl: construirUrlRetornoStrava(), uid });
-    return (
-      'https://www.strava.com/oauth/mobile/authorize' +
-      `?client_id=${STRAVA_CLIENT_ID}` +
-      '&response_type=code' +
-      `&redirect_uri=${encodeURIComponent(STRAVA_REDIRECT_URI)}` +
-      '&approval_prompt=force' +
-      '&scope=read,activity:read' +
-      `&state=${encodeURIComponent(state)}`
-    );
-  };
-
-  const abrirAutorizacionStrava = () => {
-    esperandoStravaRef.current = true;
-    Linking.openURL(getStravaAuthUrl()).catch(() => {
+  const abrirAutorizacionStrava = async () => {
+    try {
+      esperandoStravaRef.current = true;
+      const generarNonce = httpsCallable(getFunctions(), 'generarNonceStrava');
+      const { data } = await generarNonce({});
+      const state = JSON.stringify({ returnUrl: construirUrlRetornoStrava(), nonce: data.nonce });
+      const url = 'https://www.strava.com/oauth/mobile/authorize' +
+        `?client_id=${STRAVA_CLIENT_ID}` +
+        '&response_type=code' +
+        `&redirect_uri=${encodeURIComponent(STRAVA_REDIRECT_URI)}` +
+        '&approval_prompt=force' +
+        '&scope=read,activity:read' +
+        `&state=${encodeURIComponent(state)}`;
+      await Linking.openURL(url);
+    } catch (e) {
       esperandoStravaRef.current = false;
       Alert.alert('Strava', 'No se pudo abrir la autorización de Strava.');
-    });
+    }
   };
 
   const importarConquistasStrava = async () => {
@@ -827,6 +930,33 @@ export default function CorrerScreen() {
     importarConquistasStrava().catch(console.error);
   };
 
+  const handleDesconectarStrava = () => {
+    Alert.alert(
+      'Desconectar Strava',
+      '¿Quieres revocar el acceso de ConqueRun a tu cuenta de Strava? Las carreras ya importadas no se eliminarán.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Desconectar',
+          style: 'destructive',
+          onPress: async () => {
+            setDesconectandoStrava(true);
+            try {
+              const fn = httpsCallable(getFunctions(), 'desconectarStrava');
+              await fn();
+              setStravaConectado(false);
+            } catch (e) {
+              Alert.alert('Error', 'No se pudo desconectar Strava. Inténtalo de nuevo.');
+              registrarError(e, 'desconectarStrava');
+            } finally {
+              setDesconectandoStrava(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const procesarStravaCallbackUrl = (url) => {
     const textoUrl = String(url ?? '');
     if (
@@ -862,6 +992,7 @@ export default function CorrerScreen() {
   useEffect(() => {
     const handleAppState = async (nextState) => {
       if (nextState !== 'active') return;
+      enviarCarrerasPendientes().catch(console.error);
       if (!esperandoStravaRef.current) return;
       esperandoStravaRef.current = false;
       const uid = auth.currentUser?.uid;
@@ -981,14 +1112,29 @@ export default function CorrerScreen() {
         <TouchableOpacity
           style={[styles.stravaImportarCard, importandoStrava && styles.stravaImportarCardDisabled]}
           onPress={iniciarImportacionStrava}
-          disabled={importandoStrava}
+          disabled={importandoStrava || desconectandoStrava}
           activeOpacity={0.85}
         >
-          <Text style={styles.stravaImportarTitulo}>
-            {importandoStrava ? 'Importando desde Strava...' : 'Importar conquistas de Strava'}
-          </Text>
+          <View style={styles.stravaImportarCabecera}>
+            <FontAwesome6 name="strava" size={16} color={colors.strava} />
+            <Text style={styles.stravaImportarTitulo}>
+              {importandoStrava ? 'Importando desde Strava...' : 'Importar conquistas de Strava'}
+            </Text>
+          </View>
           <Text style={styles.stravaImportarTexto}>Carreras recientes con GPS válido</Text>
         </TouchableOpacity>
+        {stravaConectado && (
+          <TouchableOpacity
+            style={styles.stravaDesconectarBoton}
+            onPress={handleDesconectarStrava}
+            disabled={desconectandoStrava || importandoStrava}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.stravaDesconectarTexto}>
+              {desconectandoStrava ? 'Desconectando...' : 'Desconectar Strava'}
+            </Text>
+          </TouchableOpacity>
+        )}
         {carrerasRecientes.length === 0 ? (
           <Text style={styles.historialVacio}>Aún no has corrido. ¡A por el primer kilómetro!</Text>
         ) : (
@@ -998,7 +1144,15 @@ export default function CorrerScreen() {
               <TouchableOpacity key={carrera.id} style={[styles.carreraCard, !puntuable && styles.carreraCardAtenuada]} onPress={() => setCarreraDetalle(carrera)} activeOpacity={0.8}>
                 <View style={styles.carreraFila}>
                   <Text style={styles.carreraFecha}>{formatFecha(carrera.fecha)}</Text>
-                  <Text style={styles.carreraPuntos}>{(carrera.puntosPersonales ?? carrera.puntos ?? 0).toLocaleString()} pts</Text>
+                  <View style={styles.carreraFilaDerecha}>
+                    {carrera.source === 'strava' && (
+                      <View style={styles.stravaBadge}>
+                        <FontAwesome6 name="strava" size={11} color={colors.strava} />
+                        <Text style={styles.stravaBadgeTexto}>Strava</Text>
+                      </View>
+                    )}
+                    <Text style={styles.carreraPuntos}>{(carrera.puntosPersonales ?? carrera.puntos ?? 0).toLocaleString()} pts</Text>
+                  </View>
                 </View>
                 <View style={styles.carreraFila}>
                   <Text style={styles.carreraMetrica}>{(carrera.distancia / 1000).toFixed(2)} km</Text>
@@ -1100,7 +1254,11 @@ function StravaImportModal({ visible, importando, onAbrirStrava, onCancelar }) {
               <Text style={styles.stravaModalTexto}>
                 Autoriza ConqueRun en Strava y volverás automáticamente a la app. Solo importaremos carreras con GPS válido para conquistar.
               </Text>
+              <Text style={styles.stravaModalConsejo}>
+                💡 ¿Usas Garmin, Suunto o Polar? Sincronízalos con Strava y tus carreras se importarán automáticamente.
+              </Text>
               <TouchableOpacity style={styles.stravaAutorizarBoton} onPress={onAbrirStrava} activeOpacity={0.85}>
+                <FontAwesome6 name="strava" size={20} color={colors.text} />
                 <Text style={styles.stravaAutorizarTexto}>Conectar con Strava</Text>
               </TouchableOpacity>
               <View style={styles.stravaAcciones}>
@@ -1297,16 +1455,18 @@ function VistaCorrer({ barrio, uid, distancia, segundos, ritmoActual, gpsDebil, 
 
   const esPropio = barrio?.dueno === uid;
   const esLibre = barrio && !barrio.dueno;
-  const barrioLabel = !barrio
-    ? (gpsDebil ? '⚠ GPS débil' : 'Buscando zona...')
+  const barrioLabel = gpsDebil
+    ? '⚠ GPS débil'
+    : !barrio
+    ? 'Buscando zona...'
     : esPropio
     ? `🛡 Defendiendo ${barrio.nombre}`
     : esLibre
     ? `📍 ${barrio.nombre} — zona libre`
     : `⚔ Conquistando ${barrio.nombre}`;
-  const barrioColor = !barrio ? colors.muted : esPropio ? colors.gold : esLibre ? colors.sport : colors.conquest;
-  const barrioBg = !barrio ? colors.surfaceAlt : esPropio ? '#C6F43218' : esLibre ? '#2dd4bf18' : '#e6394618';
-  const barrioBorder = !barrio ? colors.border : esPropio ? '#C6F43240' : esLibre ? '#2dd4bf40' : '#e6394640';
+  const barrioColor = gpsDebil ? colors.conquest : !barrio ? colors.muted : esPropio ? colors.gold : esLibre ? colors.sport : colors.conquest;
+  const barrioBg = gpsDebil ? '#e6394618' : !barrio ? colors.surfaceAlt : esPropio ? '#C6F43218' : esLibre ? '#2dd4bf18' : '#e6394618';
+  const barrioBorder = gpsDebil ? '#e6394640' : !barrio ? colors.border : esPropio ? '#C6F43240' : esLibre ? '#2dd4bf40' : '#e6394640';
 
   return (
     <View style={styles.vistaCorrer}>
@@ -1504,9 +1664,12 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
+  stravaImportarCabecera: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   stravaImportarTitulo: { color: colors.strava, fontSize: 14, fontWeight: '900' },
   stravaImportarTexto: { color: colors.muted, fontSize: 12, marginTop: 3 },
   stravaImportarCardDisabled: { opacity: 0.65 },
+  stravaDesconectarBoton: { alignSelf: 'flex-end', paddingVertical: 4, paddingHorizontal: 2, marginTop: 4 },
+  stravaDesconectarTexto: { color: colors.muted, fontSize: 11, textDecorationLine: 'underline' },
   stravaOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
@@ -1523,11 +1686,15 @@ const styles = StyleSheet.create({
   },
   stravaModalTitulo: { color: colors.text, fontSize: 20, fontWeight: '900' },
   stravaModalTexto: { color: colors.muted, fontSize: 13, lineHeight: 18 },
+  stravaModalConsejo: { color: colors.subdued, fontSize: 12, lineHeight: 17, marginTop: 10, fontStyle: 'italic' },
   stravaAutorizarBoton: {
+    flexDirection: 'row',
+    gap: 8,
     backgroundColor: colors.strava,
     borderRadius: radius.md,
     paddingVertical: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   stravaAutorizarTexto: { color: colors.text, fontSize: 15, fontWeight: '900' },
   stravaInput: {
@@ -1569,8 +1736,21 @@ const styles = StyleSheet.create({
   },
   carreraCardAtenuada: { opacity: 0.5 },
   carreraFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  carreraFilaDerecha: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   carreraFecha: { color: colors.text, fontSize: 13, fontWeight: 'bold' },
   carreraPuntos: { color: colors.gold, fontSize: 13, fontWeight: 'bold' },
+  stravaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(252,82,0,0.12)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(252,82,0,0.25)',
+  },
+  stravaBadgeTexto: { color: colors.strava, fontSize: 10, fontWeight: '700' },
   carreraMetrica: { color: colors.muted, fontSize: 12 },
   panel: {
     backgroundColor: colors.surface,

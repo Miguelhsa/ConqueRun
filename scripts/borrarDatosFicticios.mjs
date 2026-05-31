@@ -61,6 +61,22 @@ const territoriosSnap = await db.collection('territorios')
   .get();
 
 if (!territoriosSnap.empty) {
+  // Borrar segmentos ficticios de cada territorio afectado
+  let segmentosBorrados = 0;
+  for (const terrDoc of territoriosSnap.docs) {
+    const segSnap = await terrDoc.ref.collection('segmentos').where('_ficticio', '==', true).get();
+    if (!segSnap.empty) {
+      for (const chunk of chunked(segSnap.docs, BATCH_SIZE)) {
+        const batch = db.batch();
+        chunk.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+      }
+      segmentosBorrados += segSnap.size;
+    }
+  }
+  if (segmentosBorrados > 0) console.log(`   🗑️  segmentos ficticios: ${segmentosBorrados} eliminados`);
+
+  // Restaurar doc raíz
   for (const chunk of chunked(territoriosSnap.docs, BATCH_SIZE)) {
     const batch = db.batch();
     chunk.forEach(d => {

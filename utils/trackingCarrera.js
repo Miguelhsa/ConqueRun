@@ -6,6 +6,7 @@ import { getDistancia } from './barrios';
 export const CARRERA_LOCATION_TASK = 'conqurun-carrera-location-task';
 export const GPS_ACCURACY_MAX_METROS = 50;
 export const GPS_VELOCIDAD_MAX_MS = 7;
+export const GPS_TIMEOUT_SIN_SENYAL_MS = 30000;
 
 const RUTA_KEY = 'conqurun:carrera:ruta';
 const META_KEY = 'conqurun:carrera:meta';
@@ -17,6 +18,7 @@ const normalizarPunto = (location) => ({
   accuracy: location.coords.accuracy ?? null,
   timestamp: location.timestamp ?? Date.now(),
   segmentStart: Boolean(location.segmentStart),
+  gapStart: Boolean(location.gapStart),
 });
 
 const leerJson = async (key, fallback) => {
@@ -43,7 +45,7 @@ export const tramoTieneVelocidadAceptable = (anterior, actual) => {
 };
 
 export const puntoCuentaParaDistancia = (anterior, actual) => {
-  if (!actual || actual.segmentStart) return false;
+  if (!actual || actual.segmentStart || actual.gapStart) return false;
   if (!puntoTienePrecisionAceptable(actual)) return false;
   if (anterior && !puntoTienePrecisionAceptable(anterior)) return false;
   return tramoTieneVelocidadAceptable(anterior, actual);
@@ -104,7 +106,7 @@ export const simplificarRutaParaGuardar = (
   mantener[puntos.length - 1] = true;
 
   puntos.forEach((punto, index) => {
-    if (punto.segmentStart) mantener[index] = true;
+    if (punto.segmentStart || punto.gapStart) mantener[index] = true;
   });
 
   const tramos = [[0, puntos.length - 1]];
@@ -157,10 +159,17 @@ export const agregarPuntosTracking = async (locations = []) => {
       && ultimo.timestamp === punto.timestamp;
 
     if (!repetido) {
-      if (ultimo && puntoCuentaParaDistancia(ultimo, punto)) {
-        distanciaAcumulada += getDistancia(ultimo, punto);
+      const hayHueco = ultimo
+        && !punto.segmentStart
+        && !punto.gapStart
+        && (punto.timestamp - ultimo.timestamp) > GPS_TIMEOUT_SIN_SENYAL_MS;
+
+      const puntoFinal = hayHueco ? { ...punto, gapStart: true } : punto;
+
+      if (ultimo && puntoCuentaParaDistancia(ultimo, puntoFinal)) {
+        distanciaAcumulada += getDistancia(ultimo, puntoFinal);
       }
-      rutaNueva.push(punto);
+      rutaNueva.push(puntoFinal);
     }
   });
 

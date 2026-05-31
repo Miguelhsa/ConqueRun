@@ -359,18 +359,37 @@ const configDisputa = [
   { duenoId: 'dummy_runner_4', duenoPuntos: 158, misMarcas: 6 },
 ];
 
-// Ranking: 9 corredores dummy
-const competidores = [
-  { uid: 'dummy_runner_1', nickname: 'LaraVelez',    puntos: 1240, carreras: 31, totalMetros: 312000, pais: { nombre: 'España',   bandera: '🇪🇸' } },
-  { uid: 'dummy_runner_2', nickname: 'MarcTorres',   puntos:  980, carreras: 25, totalMetros: 248000, pais: { nombre: 'España',   bandera: '🇪🇸' } },
-  { uid: 'dummy_runner_3', nickname: 'SofíaRuiz',    puntos:  870, carreras: 22, totalMetros: 198000, pais: { nombre: 'España',   bandera: '🇪🇸' } },
-  { uid: 'dummy_runner_4', nickname: 'CarlosNúñez',  puntos:  710, carreras: 18, totalMetros: 167000, pais: { nombre: 'España',   bandera: '🇪🇸' } },
-  { uid: 'dummy_runner_5', nickname: 'AnaFernández', puntos:  590, carreras: 15, totalMetros: 143000, pais: { nombre: 'México',   bandera: '🇲🇽' } },
-  { uid: 'dummy_runner_6', nickname: 'JavierLópez',  puntos:  480, carreras: 13, totalMetros: 121000, pais: { nombre: 'España',   bandera: '🇪🇸' } },
-  { uid: 'dummy_runner_7', nickname: 'IsabelMolina', puntos:  410, carreras: 11, totalMetros:  98000, pais: { nombre: 'España',   bandera: '🇪🇸' } },
-  { uid: 'dummy_runner_8', nickname: 'PedroAlba',    puntos:  370, carreras:  9, totalMetros:  84000, pais: { nombre: 'Colombia', bandera: '🇨🇴' } },
-  { uid: 'dummy_runner_9', nickname: 'NuriaOrtega',  puntos:  350, carreras:  8, totalMetros:  76000, pais: { nombre: 'España',   bandera: '🇪🇸' } },
+// Ranking: 9 corredores dummy — nombres del mismo género que el usuario real
+const PERFILES_HOMBRE = [
+  { nickname: 'MarcTorres',    pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'CarlosNúñez',   pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'JavierLópez',   pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'PedroAlba',     pais: { nombre: 'Colombia',  bandera: '🇨🇴' } },
+  { nickname: 'DiegoMora',     pais: { nombre: 'México',    bandera: '🇲🇽' } },
+  { nickname: 'AlbertoVega',   pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'SergioRueda',   pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'RubénCastro',   pais: { nombre: 'Argentina', bandera: '🇦🇷' } },
+  { nickname: 'FernandoGil',   pais: { nombre: 'España',    bandera: '🇪🇸' } },
 ];
+const PERFILES_MUJER = [
+  { nickname: 'LaraVelez',     pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'SofíaRuiz',     pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'AnaFernández',  pais: { nombre: 'México',    bandera: '🇲🇽' } },
+  { nickname: 'IsabelMolina',  pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'NuriaOrtega',   pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'MaríaHidalgo',  pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'CristinaOlmo',  pais: { nombre: 'Colombia',  bandera: '🇨🇴' } },
+  { nickname: 'LucíaBlanco',   pais: { nombre: 'España',    bandera: '🇪🇸' } },
+  { nickname: 'PatriciaReyes', pais: { nombre: 'Argentina', bandera: '🇦🇷' } },
+];
+const perfilesDummy = segmentoGenero === 'mujer' ? PERFILES_MUJER : PERFILES_HOMBRE;
+const competidores = IDS_DUMMY_RANKING.map((dummyUid, i) => ({
+  uid: dummyUid,
+  ...perfilesDummy[i],
+  puntos:      [1240, 980, 870, 710, 590, 480, 410, 370, 350][i],
+  carreras:    [31,   25,  22,  18,  15,  13,  11,   9,   8 ][i],
+  totalMetros: [312000, 248000, 198000, 167000, 143000, 121000, 98000, 84000, 76000][i],
+}));
 
 const barriosPorCompetidor = Object.fromEntries(competidores.map(c => [c.uid, 0]));
 configDisputa.forEach(c => { barriosPorCompetidor[c.duenoId] = (barriosPorCompetidor[c.duenoId] ?? 0) + 1; });
@@ -490,7 +509,7 @@ batch.set(db.collection('grupos').doc(GRUPO_USUARIO_ID), {
   miembros: [uid, 'dummy_runner_1'],
   nicknames: {
     [uid]: userDataActual.nickname ?? 'Corredor anónimo',
-    dummy_runner_1: 'LaraVelez',
+    dummy_runner_1: competidores[0].nickname,
   },
   ciudadId: CIUDAD_ID,
   ciudadNombre: CIUDAD_NOMBRE,
@@ -511,8 +530,8 @@ batch.set(db.collection('grupos').doc(GRUPO_RIVAL_ID), {
   creador: 'dummy_runner_2',
   miembros: ['dummy_runner_2', 'dummy_runner_4'],
   nicknames: {
-    dummy_runner_2: 'MarcTorres',
-    dummy_runner_4: 'CarlosNúñez',
+    dummy_runner_2: competidores[1].nickname,
+    dummy_runner_4: competidores[3].nickname,
   },
   ciudadId: CIUDAD_ID,
   ciudadNombre: CIUDAD_NOMBRE,

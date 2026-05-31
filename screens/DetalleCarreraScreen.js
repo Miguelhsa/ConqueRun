@@ -1,8 +1,24 @@
-import { Modal, View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { Linking, Modal, View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { RouteLine, TerritoryMap } from '../components/map/MapAdapter';
 import { colors, radius } from '../utils/theme';
 import { formatTiempo, formatRitmo } from '../utils/formatters';
 import { esCarreraPuntuable, esCarreraStravaVerificada, ESTADOS_VERIFICACION } from '../utils/carreras';
+
+const partirRuta = (puntos) => {
+  const segmentos = [];
+  let actual = [];
+  for (const punto of puntos) {
+    if ((punto.segmentStart || punto.gapStart) && actual.length > 0) {
+      if (actual.length >= 2) segmentos.push(actual);
+      actual = [punto];
+    } else {
+      actual.push(punto);
+    }
+  }
+  if (actual.length >= 2) segmentos.push(actual);
+  return segmentos.length > 0 ? segmentos : [puntos];
+};
 
 const computarRegion = (ruta) => {
   if (!ruta?.length) return null;
@@ -59,7 +75,9 @@ export default function DetalleCarreraScreen({ carrera, onClose }) {
       <View style={styles.container}>
         {region && ruta.length > 1 ? (
           <TerritoryMap style={styles.mapa} initialRegion={region} scrollEnabled={false} zoomEnabled={false}>
-            <RouteLine coordinates={ruta} strokeColor={colors.gold} strokeWidth={4} />
+            {partirRuta(ruta).map((segmento, i) => (
+              <RouteLine key={i} coordinates={segmento} strokeColor={colors.gold} strokeWidth={4} />
+            ))}
           </TerritoryMap>
         ) : (
           <View style={styles.mapaVacio}>
@@ -86,6 +104,17 @@ export default function DetalleCarreraScreen({ carrera, onClose }) {
             <Metrica label="Puntos" valor={puntos.toLocaleString()} destacado />
             <Metrica label="Conquistas" valor={totalConquistas.toLocaleString()} destacado={totalConquistas > 0} />
           </View>
+
+          {carrera.stravaActivityUrl && (
+            <TouchableOpacity
+              style={styles.stravaLink}
+              onPress={() => Linking.openURL(carrera.stravaActivityUrl)}
+              activeOpacity={0.75}
+            >
+              <FontAwesome6 name="strava" size={16} color={colors.strava} />
+              <Text style={styles.stravaLinkTexto}>View on Strava</Text>
+            </TouchableOpacity>
+          )}
 
           {territorio.length > 0 && (
             <View style={styles.seccion}>
@@ -230,4 +259,23 @@ const styles = StyleSheet.create({
   },
   grupoNombre: { color: colors.text, fontSize: 14 },
   grupoPuntos: { color: colors.gold, fontSize: 14, fontWeight: 'bold' },
+  stravaLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(252,82,0,0.10)',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(252,82,0,0.30)',
+  },
+  stravaLinkTexto: {
+    color: colors.strava,
+    fontSize: 13,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
 });

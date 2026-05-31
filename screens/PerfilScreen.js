@@ -341,7 +341,6 @@ export default function PerfilScreen() {
       }
 
       await setDoc(doc(db, 'usuarios', uid), {
-        nickname,
         ...(ciudadSeleccionada?.id && ciudadSeleccionada.id !== ciudadActualId
           ? {
               ciudadActualId: ciudadSeleccionada.id,
@@ -502,13 +501,9 @@ export default function PerfilScreen() {
 
           <Text style={styles.inputLabel}>Nickname</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, styles.inputReadOnly]}
             value={nickname}
-            onChangeText={v => { setNickname(v); setEditando(true); }}
-            placeholder="Tu nickname"
-            placeholderTextColor={colors.subdued}
-            autoCapitalize="none"
-            maxLength={20}
+            editable={false}
           />
 
           <Text style={styles.inputLabel}>País a conquistar</Text>
@@ -1164,6 +1159,9 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: colors.bg, borderColor: colors.border, borderWidth: 1,
     borderRadius: 8, padding: 12, color: colors.text, fontSize: 15, marginBottom: 14,
+  },
+  inputReadOnly: {
+    opacity: 0.5,
   },
   ciudadSelector: {
     backgroundColor: colors.bg,

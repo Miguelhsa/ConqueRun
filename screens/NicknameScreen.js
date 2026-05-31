@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, Keyboard } from 'react-native';
 import { db, auth } from '../firebaseConfig';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { contieneTextoProhibido } from '../utils/moderacion';
 import { PAISES } from '../utils/paises';
 import { colors, radius } from '../utils/theme';
@@ -93,26 +93,35 @@ export default function NicknameScreen({ onGuardado }) {
     }
     setGuardando(true);
     try {
-      await Promise.all([
-        setDoc(doc(db, 'usuarios', usuario.uid), {
+      const nicknameKey = nicknameLimpio.toLowerCase();
+      await runTransaction(db, async (tx) => {
+        const nicknameRef = doc(db, 'nicknames', nicknameKey);
+        const nicknameSnap = await tx.get(nicknameRef);
+        if (nicknameSnap.exists() && nicknameSnap.data()?.uid !== usuario.uid) {
+          throw Object.assign(new Error('NICKNAME_TAKEN'), { code: 'NICKNAME_TAKEN' });
+        }
+        tx.set(nicknameRef, { uid: usuario.uid });
+        tx.set(doc(db, 'usuarios', usuario.uid), {
           nickname: nicknameLimpio,
           pais: nacionalidad,
           genero,
           onboardingPendiente: true,
           onboardingCompletado: false,
           actualizadoEn: serverTimestamp(),
-        }, { merge: true }),
-        setDoc(doc(db, 'usuarios', usuario.uid, 'privado', 'datos'), {
+        }, { merge: true });
+        tx.set(doc(db, 'usuarios', usuario.uid, 'privado', 'datos'), {
           fechaNacimiento,
           fechaNacimientoGuardadaEn: serverTimestamp(),
-        }, { merge: true }),
-      ]);
+        }, { merge: true });
+      });
       onGuardado();
     } catch (e) {
       console.error('[NicknameScreen] guardar perfil inicial:', e);
-      const mensaje = e.code === 'permission-denied'
-        ? 'No se pudo guardar por permisos de base de datos. Revisa que las reglas publicadas acepten género y fecha de nacimiento.'
-        : 'No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.';
+      const mensaje = e.code === 'NICKNAME_TAKEN'
+        ? 'Ese nickname ya está en uso. Elige otro.'
+        : e.code === 'permission-denied'
+          ? 'No se pudo guardar por permisos de base de datos.'
+          : 'No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.';
       Alert.alert('Error', mensaje);
     } finally {
       setGuardando(false);
@@ -171,7 +180,7 @@ export default function NicknameScreen({ onGuardado }) {
       <Text style={styles.label}>Nacionalidad</Text>
       <TouchableOpacity
         style={[styles.selectorBoton, nacionalidad && styles.selectorBotonActivo]}
-        onPress={() => { setMostrarNacionalidades(v => !v); setBusquedaPais(''); }}
+        onPress={() => { Keyboard.dismiss(); setMostrarNacionalidades(v => !v); setBusquedaPais(''); }}
       >
         <Text style={[styles.selectorTexto, nacionalidad && styles.selectorTextoActivo]}>
           {nacionalidad ? `${nacionalidad.bandera}  ${nacionalidad.nombre}` : 'Selecciona tu nacionalidad'}

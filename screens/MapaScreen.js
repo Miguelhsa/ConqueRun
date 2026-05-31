@@ -338,7 +338,10 @@ export default function MapaScreen() {
                   anchor={{ x: 0.5, y: 0.5 }}
                 >
                   <View style={[styles.etiqueta, seleccionado && styles.etiquetaSeleccionada]}>
-                    <Text style={styles.etiquetaTexto}>{getNombreTerritorio(barrio)}</Text>
+                    <Text style={[styles.etiquetaTexto, { color: estilo.color }]}>{getNombreTerritorio(barrio)}</Text>
+                    {mostrarEtiquetas && modoMapa === 'individual' && barrio.dueno && barrio.duenoNombre && (
+                      <Text style={[styles.etiquetaDuenoTexto, { color: estilo.color }]}>{barrio.duenoNombre}</Text>
+                    )}
                     {seleccionado && grupoNombre && (
                       <Text style={[styles.etiquetaEquipoTexto, grupoColor && { color: grupoColor }]}>{grupoNombre}</Text>
                     )}
@@ -716,6 +719,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   etiquetaTexto: { color: colors.text, fontSize: 10, fontWeight: 'bold' },
+  etiquetaDuenoTexto: { color: colors.muted, fontSize: 9, fontWeight: '600', marginTop: 1 },
   etiquetaEquipoTexto: { color: colors.gold, fontSize: 9, fontWeight: '800', marginTop: 1 },
   infoPanel: {
     position: 'absolute',

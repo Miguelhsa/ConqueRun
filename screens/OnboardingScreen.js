@@ -4,8 +4,7 @@ import {
   ScrollView, Dimensions,
 } from 'react-native';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { auth, db } from '../firebaseConfig';
-import { registrarNotificaciones } from '../utils/notificaciones';
+import { db } from '../firebaseConfig';
 import { colors, radius } from '../utils/theme';
 
 const { width } = Dimensions.get('window');
@@ -35,7 +34,7 @@ const PASOS = [
   },
 ];
 
-export default function OnboardingScreen({ onCompletado }) {
+export default function OnboardingScreen({ uid, onCompletado }) {
   const [paso, setPaso] = useState(0);
   const [guardando, setGuardando] = useState(false);
   const scrollRef = useRef(null);
@@ -53,12 +52,11 @@ export default function OnboardingScreen({ onCompletado }) {
     }
     setGuardando(true);
     try {
-      await setDoc(doc(db, 'usuarios', auth.currentUser.uid), {
+      await setDoc(doc(db, 'usuarios', uid), {
         onboardingCompletado: true,
         onboardingPendiente: false,
         onboardingCompletadoEn: serverTimestamp(),
       }, { merge: true });
-      registrarNotificaciones(auth.currentUser.uid).catch(() => {});
       onCompletado();
     } catch (e) {
       Alert.alert('Error', 'No se pudo guardar. Inténtalo de nuevo.');

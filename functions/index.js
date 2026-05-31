@@ -51,8 +51,8 @@ async function commitEnChunks(ops, chunkSize = 450) {
     const batch = db.batch();
     ops.slice(i, i + chunkSize).forEach((op) => {
       if (op.type === 'delete') batch.delete(op.ref);
-      if (op.type === 'update') batch.update(op.ref, op.data);
-      if (op.type === 'set') batch.set(op.ref, op.data, op.options ?? {});
+      else if (op.type === 'update') batch.update(op.ref, op.data);
+      else batch.set(op.ref, op.data, op.options ?? {});
     });
     await batch.commit();
   }
@@ -149,8 +149,7 @@ async function descontarTerritorioPerdido(event) {
 
   const usuario = usuarioSnap.data() ?? {};
   const ranking = rankingSnap?.data?.() ?? null;
-  const territorioEnPerfilActivo = usuario.ciudadActualId === ciudadId &&
-    usuario.segmentoCompetitivo === segmentoId;
+  const territorioEnPerfilActivo = usuario.ciudadActualId === ciudadId;
   const territorioEnRankingSegmento = ranking &&
     (ranking.segmentoCompetitivo ?? segmentoId) === segmentoId;
 
@@ -390,6 +389,17 @@ exports.eliminarCuenta = onCall(async (request) => {
     }
   });
 
+  // Calculado antes del commit: tras el commit el creador ya habrá cambiado
+  const grupoIdsConFoto = new Set(
+    gruposSnap.docs
+      .filter(d => {
+        const data = d.data();
+        const miembrosRestantes = (data.miembros ?? []).filter(m => m !== uid);
+        return miembrosRestantes.length > 0 && !!data.foto;
+      })
+      .map(d => d.id)
+  );
+
   gruposSnap.docs.forEach((docSnap) => {
     const data = docSnap.data();
     const miembrosRestantes = (data.miembros ?? []).filter(miembroUid => miembroUid !== uid);
@@ -434,11 +444,16 @@ exports.eliminarCuenta = onCall(async (request) => {
   await commitEnChunks(ops);
 
   const bucket = getStorage().bucket();
+  const [archivosPendientes] = await bucket.getFiles({ prefix: `gruposPendientes/${uid}/` }).catch(() => [[]]);
+
   await Promise.all([
     bucket.file(`fotos/${uid}.jpg`).delete().catch(() => {}),
-    bucket.getFiles({ prefix: `gruposPendientes/${uid}/` })
-      .then(([files]) => Promise.all(files.map(f => f.delete().catch(() => {}))))
-      .catch(() => {}),
+    ...archivosPendientes
+      .filter(f => {
+        const grupoId = f.name.split('/').pop().replace('.jpg', '');
+        return !grupoIdsConFoto.has(grupoId);
+      })
+      .map(f => f.delete().catch(() => {})),
   ]);
 
   await getAuth().deleteUser(uid);
@@ -459,9 +474,10 @@ exports.unirseAGrupoConCodigo = onCall(async (request) => {
 
   const db = getFirestore();
   const { FieldValue } = require('firebase-admin/firestore');
-  const [usuarioSnap, gruposSnap] = await Promise.all([
+  const [usuarioSnap, gruposSnap, gruposUsuarioSnap] = await Promise.all([
     db.collection('usuarios').doc(uid).get(),
     db.collection('grupos').where('codigo', '==', codigo).limit(1).get(),
+    db.collection('grupos').where('miembros', 'array-contains', uid).limit(50).get(),
   ]);
 
   if (gruposSnap.empty) {
@@ -469,6 +485,9 @@ exports.unirseAGrupoConCodigo = onCall(async (request) => {
   }
   if (!usuarioSnap.exists) {
     throw new HttpsError('failed-precondition', 'Perfil de usuario no encontrado.');
+  }
+  if (gruposUsuarioSnap.size >= 50) {
+    throw new HttpsError('failed-precondition', 'Has alcanzado el límite de 50 grupos.');
   }
 
   const usuario = usuarioSnap.data();
@@ -486,6 +505,57 @@ exports.unirseAGrupoConCodigo = onCall(async (request) => {
   return { grupoId: grupoDoc.id };
 });
 
+exports.unirseAGrupoPublico = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión para unirte a un grupo.');
+  }
+  verificarAppCheckCallable(request, 'unirseAGrupoPublico');
+
+  const grupoId = String(request.data?.grupoId ?? '').trim();
+  if (!grupoId) {
+    throw new HttpsError('invalid-argument', 'Falta el ID del grupo.');
+  }
+
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+  const [usuarioSnap, grupoSnap, gruposUsuarioSnap] = await Promise.all([
+    db.collection('usuarios').doc(uid).get(),
+    db.collection('grupos').doc(grupoId).get(),
+    db.collection('grupos').where('miembros', 'array-contains', uid).limit(50).get(),
+  ]);
+
+  if (!usuarioSnap.exists) {
+    throw new HttpsError('failed-precondition', 'Perfil de usuario no encontrado.');
+  }
+  if (!grupoSnap.exists) {
+    throw new HttpsError('not-found', 'Grupo no encontrado.');
+  }
+
+  const usuario = usuarioSnap.data();
+  const grupo = grupoSnap.data();
+
+  if (grupo.esPublico !== true) {
+    throw new HttpsError('permission-denied', 'Este grupo no es público.');
+  }
+  if (grupo.ciudadId && usuario.ciudadActualId && usuario.ciudadActualId !== grupo.ciudadId) {
+    throw new HttpsError('permission-denied', `Este grupo es de ${grupo.ciudadNombre}.`);
+  }
+  if ((grupo.miembros ?? []).includes(uid)) {
+    throw new HttpsError('already-exists', 'Ya eres miembro de este grupo.');
+  }
+  if (gruposUsuarioSnap.size >= 50) {
+    throw new HttpsError('failed-precondition', 'Has alcanzado el límite de 50 grupos.');
+  }
+
+  await grupoSnap.ref.update({
+    miembros: FieldValue.arrayUnion(uid),
+    [`nicknames.${uid}`]: usuario.nickname ?? 'Corredor',
+  });
+
+  return { grupoId };
+});
+
 // ─── Validación server-side de carreras (Críticos 1, 2, 4) ───────────────────
 
 function haversineMetros(lat1, lon1, lat2, lon2) {
@@ -498,13 +568,22 @@ function haversineMetros(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+const GPS_VELOCIDAD_MAX_MS_SV = 7;
+
 function calcularDistanciaRuta(ruta) {
   let total = 0;
   for (let i = 1; i < ruta.length; i++) {
-    total += haversineMetros(
+    if (ruta[i].segmentStart) continue;
+    const dist = haversineMetros(
       ruta[i - 1].latitude, ruta[i - 1].longitude,
       ruta[i].latitude, ruta[i].longitude
     );
+    const dt = ruta[i].timestamp && ruta[i - 1].timestamp
+      ? (ruta[i].timestamp - ruta[i - 1].timestamp) / 1000
+      : null;
+    if (ruta[i].gapStart) continue;
+    if (dt != null && dt > 0 && dist / dt > GPS_VELOCIDAD_MAX_MS_SV) continue;
+    total += dist;
   }
   return total;
 }
@@ -645,6 +724,7 @@ function normalizarRutaEntradaSv(ruta) {
       longitude,
       ...(Number.isFinite(Number(punto?.timestamp)) ? { timestamp: Number(punto.timestamp) } : {}),
       ...(punto?.segmentStart ? { segmentStart: true } : {}),
+      ...(punto?.gapStart ? { gapStart: true } : {}),
       ...(Number.isFinite(Number(punto?.accuracy)) ? { accuracy: Number(punto.accuracy) } : {}),
       ...(Number.isFinite(Number(punto?.speed)) ? { speed: Number(punto.speed) } : {}),
     };
@@ -690,7 +770,11 @@ function calcularBarrioSv(punto, barrios) {
       mejor = barrio;
     }
   }
-  return mejor;
+  if (!mejor) return null;
+  // Rechaza el territorio si el punto GPS está fuera de su radio + 500m de margen.
+  // Impide que una ruta en otra ciudad puntúe asignando el territorio "más cercano" aunque esté a cientos de km.
+  const maxDist = (mejor.radio ?? 800) + 500;
+  return mejorDist <= maxDist ? mejor : null;
 }
 
 function puntoMedioSv(a, b) {
@@ -709,6 +793,7 @@ function calcularResumenTerritorialSv(ruta, barrios, puntosPersonales, distancia
   for (let i = 1; i < ruta.length; i++) {
     const anterior = ruta[i - 1];
     const actual = ruta[i];
+    if (actual.segmentStart || actual.gapStart) continue;
     const distanciaTramo = getDistanciaSv(anterior, actual);
     if (!distanciaTramo || !isFinite(distanciaTramo)) continue;
 
@@ -736,9 +821,10 @@ function calcularResumenTerritorialSv(ruta, barrios, puntosPersonales, distancia
     });
   }
 
+  const distanciaDistribuida = [...acumulado.values()].reduce((s, i) => s + i.distanciaMetros, 0);
   return [...acumulado.values()]
     .map(item => {
-      const proporcion = distanciaTotal > 0 ? item.distanciaMetros / distanciaTotal : 0;
+      const proporcion = distanciaDistribuida > 0 ? item.distanciaMetros / distanciaDistribuida : 0;
       return {
         ...item,
         distanciaMetros: Math.round(item.distanciaMetros),
@@ -948,8 +1034,11 @@ async function procesarConquistaGrupo(db, aportacionesGrupo, territorioCarreraCo
     });
 
     if (conquistoGrupo) {
-      barriosGanadosGrupo++;
-      nombresGanadosGrupo.push(barrio.nombre ?? barrio.barrioId);
+      const cambioDedueno = anteriorGrupoId !== grupoActivoAportacion.grupoId;
+      if (cambioDedueno) {
+        barriosGanadosGrupo++;
+        nombresGanadosGrupo.push(barrio.nombre ?? barrio.barrioId);
+      }
       if (anteriorGrupoId && anteriorGrupoId !== grupoActivoAportacion.grupoId) {
         const prev = barriosPerdidosPorGrupo.get(anteriorGrupoId) ?? { count: 0, nombres: [] };
         prev.count++;
@@ -1007,7 +1096,7 @@ async function procesarConquistaGrupo(db, aportacionesGrupo, territorioCarreraCo
 }
 
 async function actualizarTop10Territorios(db, territorioCarreraConMarcas, usuarioRef, segmentos, uid, FieldValue) {
-  for (const barrio of territorioCarreraConMarcas) {
+  await Promise.all(territorioCarreraConMarcas.map(async (barrio) => {
     const barrioSegmentoRef = db.collection(barrio.coleccion).doc(barrio.barrioId)
       .collection('segmentos').doc(segmentos.segmentoCompetitivo);
     const marcaRef = usuarioRef.collection('marcasTerritoriales')
@@ -1024,8 +1113,8 @@ async function actualizarTop10Territorios(db, territorioCarreraConMarcas, usuari
         top10Uids: top10Uids(newTop10),
         actualizadoEn: FieldValue.serverTimestamp(),
       }, { merge: true });
-    });
-  }
+    }).catch(err => console.error('[top10] territorio', barrio.barrioId, err?.message));
+  }));
 }
 
 exports.registrarCarreraConqurun = onCall(
@@ -1039,6 +1128,212 @@ exports.registrarCarreraConqurun = onCall(
   const db = getFirestore();
   const { FieldValue, Timestamp } = require('firebase-admin/firestore');
   const { ruta, distancia, duracion, ritmoMedio } = validarInputCarrera(request.data);
+
+  // Idempotency: if the client sends a carreraId and it already exists, return the
+  // saved data without writing anything — covers the case where the CF succeeded but
+  // the network response was lost and the client retries from carrerasPendientes.
+  const carreraIdCliente = String(request.data?.carreraId ?? '').trim();
+  const carreraIdValido = /^[a-zA-Z0-9_]{20,100}$/.test(carreraIdCliente) ? carreraIdCliente : null;
+  if (carreraIdValido) {
+    const existente = await db.collection('carreras').doc(carreraIdValido).get();
+    if (existente.exists && existente.data()?.uid === uid) {
+      const d = existente.data();
+
+      if (d.secondaryStatus === 'pending') {
+        const usuarioIdempSnap = await db.collection('usuarios').doc(uid).get();
+        const segComp = d.segmentoCompetitivo ?? null;
+        const ciudadIdStored = d.ciudadId ?? null;
+        const territorioStored = d.territorioCarrera ?? [];
+        const aportacionesStored = d.aportacionesGrupo ?? [];
+        const usuarioRefRetry = db.collection('usuarios').doc(uid);
+        const nicknameRetry = usuarioIdempSnap.data()?.nickname ?? 'Corredor anónimo';
+        const ahoraRetry = d.fecha?.toMillis?.() ?? Date.now();
+
+        const marcaRefsConBarrio = territorioStored
+          .filter(b => segComp)
+          .map(b => ({
+            barrio: b,
+            ref: usuarioRefRetry.collection('marcasTerritoriales').doc(`${b.barrioId}_${segComp}`),
+          }));
+
+        const grupoIds = [...new Set(aportacionesStored.map(a => a.grupoId))];
+        const grupoMarcaEntries = aportacionesStored.flatMap(aportacion =>
+          territorioStored.map(barrio => ({
+            aportacion, barrio,
+            ref: db.collection('grupoMarcas').doc(aportacion.grupoId)
+              .collection('marcasTerritoriales').doc(barrio.barrioId),
+          }))
+        );
+
+        // Lecturas paralelas: marcas usuario, aportacionesGrupo, grupos (ledger) y grupoMarcas
+        const [marcaSnaps, aportSnaps, grupoSnaps, grupoMarcaSnaps] = await Promise.all([
+          Promise.all(marcaRefsConBarrio.map(({ ref }) => ref.get())),
+          Promise.all(aportacionesStored.map(a => db.collection('aportacionesGrupo').doc(a.id).get())),
+          Promise.all(grupoIds.map(id => db.collection('grupos').doc(id).get())),
+          grupoMarcaEntries.length > 0
+            ? Promise.all(grupoMarcaEntries.map(e => e.ref.get()))
+            : Promise.resolve([]),
+        ]);
+
+        const grupoCarrerasMap = new Map(
+          grupoIds.map((id, i) => [id, grupoSnaps[i].data()?.carrerasAplicadas ?? []])
+        );
+
+        const retryOps = [];
+
+        // 1. marcasTerritoriales — ledger bloquea doble increment
+        for (let i = 0; i < marcaRefsConBarrio.length; i++) {
+          const { barrio, ref } = marcaRefsConBarrio[i];
+          if ((marcaSnaps[i].data()?.carrerasAplicadas ?? []).includes(carreraIdValido)) continue;
+          const incr = (barrio.puntos ?? 0) + (barrio.puntosBonusLogros ?? 0);
+          if (incr <= 0) continue;
+          retryOps.push({
+            ref,
+            data: { territorioId: barrio.barrioId, puntos: FieldValue.increment(incr),
+              carreras: FieldValue.increment(1),
+              coleccion: barrio.coleccion, ciudadId: ciudadIdStored,
+              segmentoCompetitivo: segComp,
+              carrerasAplicadas: FieldValue.arrayUnion(carreraIdValido),
+              actualizadoEn: FieldValue.serverTimestamp() },
+            options: { merge: true },
+          });
+        }
+
+        // 2. segmentPayloads — set con merge es idempotente
+        for (const barrio of territorioStored) {
+          if (!barrio.coleccion || !segComp) continue;
+          if (barrio.puntosAcumuladosUsuario > (barrio.duenoPuntos ?? 0)) {
+            retryOps.push({
+              ref: db.collection(barrio.coleccion).doc(barrio.barrioId)
+                .collection('segmentos').doc(segComp),
+              data: {
+                dueno: uid,
+                duenoNombre: nicknameRetry,
+                duenoPuntos: barrio.puntosAcumuladosUsuario,
+                conquistadoEn: FieldValue.serverTimestamp(),
+                territorioId: barrio.barrioId,
+                ciudadId: ciudadIdStored,
+                ciudadNombre: d.ciudadNombre ?? null,
+                paisCodigo: d.paisCodigo ?? null,
+                segmentoCompetitivo: segComp,
+                segmentoRitmo: d.segmentoRitmo ?? null,
+                segmentoGenero: d.segmentoGenero ?? null,
+                segmentoEdad: d.segmentoEdad ?? null,
+                segmentoEtiqueta: d.segmentoEtiqueta ?? null,
+              },
+              options: { merge: true },
+            });
+          }
+        }
+
+        // 3. Notificaciones desplazados — arrayUnion idempotente; fecha fija del doc para no duplicar
+        for (const barrio of territorioStored) {
+          if (barrio.dueno && barrio.dueno !== uid &&
+              barrio.puntosAcumuladosUsuario > (barrio.duenoPuntos ?? 0)) {
+            retryOps.push({
+              ref: db.collection('usuarios').doc(barrio.dueno)
+                .collection('privado').doc('notificaciones'),
+              data: { notificacionesPendientes: FieldValue.arrayUnion({
+                tipo: 'territorio_perdido', nombre: barrio.nombre, fecha: ahoraRetry,
+              }) },
+              options: { merge: true },
+            });
+          }
+        }
+
+        // 4. Grupos — guardas independientes por tipo de operación
+        for (let ai = 0; ai < aportacionesStored.length; ai++) {
+          const aportacion = aportacionesStored[ai];
+
+          // Aportación: guard por existencia del documento
+          if (!aportSnaps[ai].exists) {
+            retryOps.push({
+              ref: db.collection('aportacionesGrupo').doc(aportacion.id),
+              data: { ...aportacion, distancia: d.distancia, fecha: FieldValue.serverTimestamp() },
+            });
+          }
+
+          // grupoMarcas: guard por carrerasAplicadas en cada marca (independiente de aportación)
+          for (let bi = 0; bi < territorioStored.length; bi++) {
+            const entryIdx = ai * territorioStored.length + bi;
+            if ((grupoMarcaSnaps[entryIdx]?.data()?.carrerasAplicadas ?? []).includes(carreraIdValido)) continue;
+            retryOps.push({
+              ref: grupoMarcaEntries[entryIdx].ref,
+              data: { puntos: FieldValue.increment(territorioStored[bi].puntos ?? 0),
+                carreras: FieldValue.increment(1),
+                ciudadId: ciudadIdStored,
+                carrerasAplicadas: FieldValue.arrayUnion(carreraIdValido),
+                actualizadoEn: FieldValue.serverTimestamp() },
+              options: { merge: true },
+            });
+          }
+
+          // Grupo: guard por carrerasAplicadas en el doc de grupo (independiente de aportación y grupoMarcas)
+          if (!(grupoCarrerasMap.get(aportacion.grupoId) ?? []).includes(carreraIdValido)) {
+            retryOps.push({
+              ref: db.collection('grupos').doc(aportacion.grupoId),
+              data: { puntosTotales: FieldValue.increment(aportacion.puntosGrupo),
+                carrerasTotales: FieldValue.increment(1),
+                distanciaTotal: FieldValue.increment(d.distancia ?? 0),
+                duracionTotal: FieldValue.increment(d.duracion ?? 0),
+                carrerasAplicadas: FieldValue.arrayUnion(carreraIdValido),
+                actualizadoEn: FieldValue.serverTimestamp() },
+              options: { merge: true },
+            });
+          }
+        }
+
+        if (retryOps.length > 0) await commitEnChunks(retryOps);
+
+        const segmentosRetry = {
+          segmentoCompetitivo: d.segmentoCompetitivo ?? null,
+          segmentoRitmo: d.segmentoRitmo ?? null,
+          segmentoGenero: d.segmentoGenero ?? null,
+          segmentoEdad: d.segmentoEdad ?? null,
+          segmentoEtiqueta: d.segmentoEtiqueta ?? null,
+          ritmo30d: d.ritmo30d ?? null,
+        };
+        await procesarConquistaGrupo(db, aportacionesStored, territorioStored, segmentosRetry, uid, ahoraRetry, FieldValue);
+        await actualizarTop10Territorios(db, territorioStored, usuarioRefRetry, segmentosRetry, uid, FieldValue);
+        await db.collection('carreras').doc(carreraIdValido).update({ secondaryStatus: 'complete' });
+      }
+
+      return {
+        ok: true,
+        carreraId: carreraIdValido,
+        puntos: d.puntosPersonales ?? d.puntos ?? 0,
+        bonusLogros: d.bonusLogros ?? 0,
+        distancia: d.distancia ?? 0,
+        duracion: d.duracion ?? 0,
+        ritmoMedio: d.ritmoMedio ?? 0,
+        conquistas: d.conquistasCarrera ?? [],
+        territorioCarrera: d.territorioCarrera ?? [],
+        aportacionesGrupo: d.aportacionesGrupo ?? [],
+        nuevosLogros: d.nuevosLogros ?? [],
+        segmentos: {
+          segmentoCompetitivo: d.segmentoCompetitivo ?? null,
+          segmentoRitmo: d.segmentoRitmo ?? null,
+          segmentoGenero: d.segmentoGenero ?? null,
+          segmentoEdad: d.segmentoEdad ?? null,
+          segmentoEtiqueta: d.segmentoEtiqueta ?? null,
+          ritmo30d: d.ritmo30d ?? null,
+        },
+        ciudad: { id: d.ciudadId ?? null, nombre: d.ciudadNombre ?? null, paisCodigo: d.paisCodigo ?? null },
+        carreraResumen: {
+          id: carreraIdValido,
+          fecha: typeof d.fecha?.toMillis === 'function' ? d.fecha.toMillis() : (d.fecha ?? Date.now()),
+          distancia: d.distancia ?? 0,
+          duracion: d.duracion ?? 0,
+          ritmoMedio: d.ritmoMedio ?? 0,
+          puntos: d.puntosPersonales ?? d.puntos ?? 0,
+          puntosPersonales: d.puntosPersonales ?? d.puntos ?? 0,
+          bonusLogros: d.bonusLogros ?? 0,
+          source: d.source ?? 'conqurun',
+          verificationStatus: d.verificationStatus ?? 'self_recorded',
+        },
+      };
+    }
+  }
 
   const usuarioRef = db.collection('usuarios').doc(uid);
   const [usuarioSnap, privadoDatosSnap] = await Promise.all([
@@ -1124,6 +1419,7 @@ exports.registrarCarreraConqurun = onCall(
   const nuevosTerritoriosPorKey = new Map(conquistadosBase.map(b => [territorioKey(b), b]));
   conquistadosBase.forEach(barrio => mezclarSegmentPayload(barrio, {
     dueno: uid,
+    duenoNombre: perfil.nickname ?? 'Corredor anónimo',
     duenoPuntos: barrio.puntosAcumuladosUsuario,
     conquistadoEn: FieldValue.serverTimestamp(),
   }));
@@ -1131,12 +1427,13 @@ exports.registrarCarreraConqurun = onCall(
     .filter(b => b.dueno === uid && b.puntosAcumuladosUsuario > (b.duenoPuntos ?? 0))
     .forEach(barrio => mezclarSegmentPayload(barrio, {
       dueno: uid,
+      duenoNombre: perfil.nickname ?? 'Corredor anónimo',
       duenoPuntos: barrio.puntosAcumuladosUsuario,
       conquistadoEn: FieldValue.serverTimestamp(),
     }));
 
   const ahoraMs = Date.now();
-  const carreraId = `${uid}_${ahoraMs}_${crypto.randomBytes(6).toString('hex')}`;
+  const carreraId = carreraIdValido ?? `${uid}_${ahoraMs}_${crypto.randomBytes(6).toString('hex')}`;
   const nuevaRacha = calcularRachaIncrementalSv(perfil.ultimasCarreras ?? [], perfil.racha ?? 0, ahoraMs);
   const totalMetrosDespues = (perfil.distanciaTotal ?? 0) + distancia;
   const historicoBarriosPrevio = Math.max(
@@ -1165,6 +1462,7 @@ exports.registrarCarreraConqurun = onCall(
     if (topBarrio.dueno === uid || conquistaConBonus || segmentPayloads.has(territorioKey(topBarrio))) {
       mezclarSegmentPayload(topBarrio, {
         dueno: uid,
+        duenoNombre: perfil.nickname ?? 'Corredor anónimo',
         duenoPuntos: topBarrio.puntosAcumuladosUsuario,
         conquistadoEn: FieldValue.serverTimestamp(),
       });
@@ -1212,53 +1510,11 @@ exports.registrarCarreraConqurun = onCall(
     }
   }
 
-  const batch = db.batch();
-  batch.set(db.collection('carreras').doc(carreraId), {
-    uid,
-    ruta: simplificarRutaSv(ruta),
-    distancia,
-    duracion,
-    ritmoMedio,
-    puntos,
-    puntosPersonales: puntos,
-    bonusLogros,
-    aportacionesGrupo,
-    grupoActivoId: grupoActivo?.id ?? null,
-    grupoActivoNombre: grupoActivo?.nombre ?? null,
-    gruposAportados: aportacionesGrupo.map(a => a.grupoId),
-    territorioCarrera: territorioCarreraConMarcas,
-    barriosConquistados: nuevosTerritorios.length,
-    conquistasCarrera,
-    ciudadId: ciudad.id,
-    ciudadNombre: ciudad.nombre,
-    paisCodigo: ciudad.paisCodigo,
-    ...segmentos,
-    fecha: FieldValue.serverTimestamp(),
-    source: 'conqurun',
-    externalProvider: null,
-    externalActivityId: null,
-    verificationStatus: 'self_recorded',
-    importedAt: null,
-    stravaActivityUrl: null,
-  });
-
-  for (const barrio of territorioCarreraConMarcas) {
-    const incrementoMarca = barrio.puntos + (barrio.puntosBonusLogros ?? 0);
-    batch.set(
-      usuarioRef.collection('marcasTerritoriales').doc(`${barrio.barrioId}_${segmentos.segmentoCompetitivo}`),
-      {
-        territorioId: barrio.barrioId,
-        puntos: FieldValue.increment(incrementoMarca),
-        coleccion: barrio.coleccion,
-        ciudadId: ciudad.id,
-        segmentoCompetitivo: segmentos.segmentoCompetitivo,
-        actualizadoEn: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-  }
-
-  const topLogros = desbloqueados.map(l => l.id).slice(0, 3);
+  const topLogros = desbloqueados
+    .slice()
+    .sort((a, b) => b.bonus - a.bonus)
+    .slice(0, 3)
+    .map(l => l.id);
   const nuevoTotalBarrios = (perfil.barriosConquistadosTotal ?? 0) + nuevosTerritorios.length;
   const nuevoMax = Math.max(nuevoTotalBarrios, perfil.maxBarriosSimultaneos ?? 0);
   const historicoBarriosInicial = perfil.barriosConquistadosHistorico == null;
@@ -1267,94 +1523,200 @@ exports.registrarCarreraConqurun = onCall(
     ? nuevoHistoricoBarrios
     : FieldValue.increment(nuevosTerritorios.length);
 
-  batch.set(usuarioRef, {
-    puntosTotales: FieldValue.increment(puntosTotalesCarrera),
-    distanciaTotal: FieldValue.increment(distancia),
-    duracionTotal: FieldValue.increment(duracion),
-    carrerasTotal: FieldValue.increment(1),
-    ...(nuevosTerritorios.length > 0 && { barriosConquistadosTotal: FieldValue.increment(nuevosTerritorios.length) }),
-    ...((historicoBarriosInicial || nuevosTerritorios.length > 0) && {
-      barriosConquistadosHistorico: actualizacionHistoricoBarrios,
-    }),
-    ...(nuevoMax > (perfil.maxBarriosSimultaneos ?? 0) && { maxBarriosSimultaneos: nuevoMax }),
-    ...(nuevosLogros.length > 0 && { logros: desbloqueados.map(l => l.id) }),
-    racha: nuevaRacha,
-    ciudadActualId: ciudad.id,
-    ciudadActualNombre: ciudad.nombre,
-    paisCodigo: ciudad.paisCodigo,
-    ...segmentos,
-    ultimasCarreras,
-    actualizadoEn: FieldValue.serverTimestamp(),
-  }, { merge: true });
+  // ─── Fase 1: transacción atómica e idempotente ──────────────────────────
+  // Escribe carrera doc + perfil + ranking + ultimaCarreraId en una sola
+  // transacción. La transacción lee carreraRef primero: si ya existe, aborta
+  // sin tocar nada. Una vez que esta transacción hace commit, cualquier retry
+  // del cliente ve ultimaCarreraId === carreraId y sale por el cortocircuito
+  // de arriba, por lo que las ops de Fase 2 nunca se duplican.
+  // ─────────────────────────────────────────────────────────────────────────
+  const carreraRef = db.collection('carreras').doc(carreraId);
+  const rankingRef = db.collection('rankingsCiudad').doc(`${ciudad.id}_${uid}`);
+  let yaRegistrada = false;
 
-  batch.set(db.collection('rankingsCiudad').doc(`${ciudad.id}_${uid}`), {
-    ciudadId: ciudad.id,
-    uid,
-    puntos: FieldValue.increment(puntosTotalesCarrera),
-    carreras: FieldValue.increment(1),
-    totalMetros: FieldValue.increment(distancia),
-    stravaVerificadas: FieldValue.increment(0),
-    nickname: perfil.nickname ?? 'Corredor anónimo',
-    fotoPerfil: perfil.fotoPerfil ?? null,
-    fotoPerfilEstado: perfil.fotoPerfilEstado ?? null,
-    pais: perfil.pais ?? null,
-    genero: perfil.genero ?? null,
-    grupoEdad: segmentos.segmentoEdad,
-    ritmo30d: segmentos.ritmo30d,
-    segmentoRitmo: segmentos.segmentoRitmo,
-    segmentoGenero: segmentos.segmentoGenero,
-    segmentoEdad: segmentos.segmentoEdad,
-    segmentoCompetitivo: segmentos.segmentoCompetitivo,
-    segmentoEtiqueta: segmentos.segmentoEtiqueta,
-    topLogros,
-    barrios: FieldValue.increment(nuevosTerritorios.length),
-    actualizadoEn: FieldValue.serverTimestamp(),
-  }, { merge: true });
+  await db.runTransaction(async (tx) => {
+    const [carreraSnap, usuarioTxSnap] = await Promise.all([
+      tx.get(carreraRef),
+      tx.get(usuarioRef),
+    ]);
+    if (carreraSnap.exists) { yaRegistrada = true; return; }
+
+    // Límite 30 s dentro de la transacción: bloquea dos carreras concurrentes
+    // con IDs distintos que pasen el check pre-transacción simultáneamente
+    const ultimaFechaTx = usuarioTxSnap.data()?.ultimasCarreras?.[0]?.fecha ?? 0;
+    if (typeof ultimaFechaTx === 'number' && Date.now() - ultimaFechaTx < 30_000) {
+      throw new HttpsError('resource-exhausted', 'Espera unos segundos antes de registrar otra carrera.');
+    }
+
+    tx.set(carreraRef, {
+      uid,
+      ruta: simplificarRutaSv(ruta),
+      distancia,
+      duracion,
+      ritmoMedio,
+      puntos,
+      puntosPersonales: puntos,
+      bonusLogros,
+      puntosTotales: puntosTotalesCarrera,
+      nuevosLogros: nuevosLogros.map(l => l.id),
+      aportacionesGrupo,
+      grupoActivoId: grupoActivo?.id ?? null,
+      grupoActivoNombre: grupoActivo?.nombre ?? null,
+      gruposAportados: aportacionesGrupo.map(a => a.grupoId),
+      territorioCarrera: territorioCarreraConMarcas,
+      barriosConquistados: nuevosTerritorios.length,
+      conquistasCarrera,
+      ciudadId: ciudad.id,
+      ciudadNombre: ciudad.nombre,
+      paisCodigo: ciudad.paisCodigo,
+      ...segmentos,
+      fecha: FieldValue.serverTimestamp(),
+      source: 'conqurun',
+      externalProvider: null,
+      externalActivityId: null,
+      verificationStatus: 'self_recorded',
+      importedAt: null,
+      stravaActivityUrl: null,
+      secondaryStatus: 'pending',
+    });
+
+    tx.set(usuarioRef, {
+      puntosTotales: FieldValue.increment(puntosTotalesCarrera),
+      distanciaTotal: FieldValue.increment(distancia),
+      duracionTotal: FieldValue.increment(duracion),
+      carrerasTotal: FieldValue.increment(1),
+      ...(nuevosTerritorios.length > 0 && { barriosConquistadosTotal: FieldValue.increment(nuevosTerritorios.length) }),
+      ...((historicoBarriosInicial || nuevosTerritorios.length > 0) && {
+        barriosConquistadosHistorico: actualizacionHistoricoBarrios,
+      }),
+      ...(nuevoMax > (perfil.maxBarriosSimultaneos ?? 0) && { maxBarriosSimultaneos: nuevoMax }),
+      ...(nuevosLogros.length > 0 && { logros: desbloqueados.map(l => l.id) }),
+      racha: nuevaRacha,
+      ciudadActualId: ciudad.id,
+      ciudadActualNombre: ciudad.nombre,
+      paisCodigo: ciudad.paisCodigo,
+      ...segmentos,
+      ultimasCarreras,
+      ultimaCarreraId: carreraId,
+      actualizadoEn: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    tx.set(rankingRef, {
+      ciudadId: ciudad.id,
+      uid,
+      puntos: FieldValue.increment(puntosTotalesCarrera),
+      carreras: FieldValue.increment(1),
+      totalMetros: FieldValue.increment(distancia),
+      stravaVerificadas: FieldValue.increment(0),
+      nickname: perfil.nickname ?? 'Corredor anónimo',
+      fotoPerfil: perfil.fotoPerfil ?? null,
+      fotoPerfilEstado: perfil.fotoPerfilEstado ?? null,
+      pais: perfil.pais ?? null,
+      genero: perfil.genero ?? null,
+      grupoEdad: segmentos.segmentoEdad,
+      ritmo30d: segmentos.ritmo30d,
+      segmentoRitmo: segmentos.segmentoRitmo,
+      segmentoGenero: segmentos.segmentoGenero,
+      segmentoEdad: segmentos.segmentoEdad,
+      segmentoCompetitivo: segmentos.segmentoCompetitivo,
+      segmentoEtiqueta: segmentos.segmentoEtiqueta,
+      topLogros,
+      barrios: FieldValue.increment(nuevosTerritorios.length),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+
+  if (yaRegistrada) {
+    // carreraRef ya existía pero el cortocircuito de arriba no lo capturó
+    // (p.ej. ultimaCarreraId aún no sincronizado). Devolvemos éxito sin
+    // reescribir nada para evitar duplicar contadores.
+    console.warn('[registrarCarrera] transacción abortó: carrera ya registrada', { carreraId, uid });
+    return { ok: true, carreraId, carreraResumen, puntos, bonusLogros, distancia, duracion, ritmoMedio,
+      conquistas: conquistasCarrera, territorioCarrera: territorioCarreraConMarcas,
+      aportacionesGrupo, nuevosLogros: nuevosLogros.map(l => l.id), segmentos, ciudad };
+  }
+
+  // ─── Fase 2: operaciones secundarias (at-most-once) ──────────────────────
+  // Fase 1 ya hizo commit con ultimaCarreraId. Cualquier retry del cliente
+  // sale por el cortocircuito antes de llegar aquí, así que estas ops nunca
+  // se duplican aunque algún chunk de Fase 2 falle parcialmente.
+  // Si Fase 2 falla, territorio/grupo quedan desincronizados hasta la
+  // siguiente carrera del usuario, pero los contadores personales son correctos.
+  // ─────────────────────────────────────────────────────────────────────────
+  const secondaryOps = [];
+
+  for (const barrio of territorioCarreraConMarcas) {
+    const incrementoMarca = barrio.puntos + (barrio.puntosBonusLogros ?? 0);
+    secondaryOps.push({
+      ref: usuarioRef.collection('marcasTerritoriales').doc(`${barrio.barrioId}_${segmentos.segmentoCompetitivo}`),
+      data: {
+        territorioId: barrio.barrioId,
+        puntos: FieldValue.increment(incrementoMarca),
+        carreras: FieldValue.increment(1),
+        coleccion: barrio.coleccion,
+        ciudadId: ciudad.id,
+        segmentoCompetitivo: segmentos.segmentoCompetitivo,
+        carrerasAplicadas: FieldValue.arrayUnion(carreraId),
+        actualizadoEn: FieldValue.serverTimestamp(),
+      },
+      options: { merge: true },
+    });
+  }
 
   for (const barrio of nuevosTerritorios) {
     if (barrio.dueno && barrio.dueno !== uid) {
-      batch.set(db.collection('usuarios').doc(barrio.dueno).collection('privado').doc('notificaciones'), {
-        notificacionesPendientes: FieldValue.arrayUnion({
-          tipo: 'territorio_perdido',
-          nombre: barrio.nombre,
-          fecha: ahoraMs,
-        }),
-      }, { merge: true });
+      secondaryOps.push({
+        ref: db.collection('usuarios').doc(barrio.dueno).collection('privado').doc('notificaciones'),
+        data: {
+          notificacionesPendientes: FieldValue.arrayUnion({
+            tipo: 'territorio_perdido',
+            nombre: barrio.nombre,
+            fecha: ahoraMs,
+          }),
+        },
+        options: { merge: true },
+      });
     }
   }
 
   for (const aportacion of aportacionesGrupo) {
-    batch.set(db.collection('aportacionesGrupo').doc(aportacion.id), {
-      ...aportacion,
-      distancia,
-      fecha: FieldValue.serverTimestamp(),
+    secondaryOps.push({
+      ref: db.collection('aportacionesGrupo').doc(aportacion.id),
+      data: { ...aportacion, distancia, fecha: FieldValue.serverTimestamp() },
     });
     const grupoUpdate = {
       puntosTotales: FieldValue.increment(aportacion.puntosGrupo),
       carrerasTotales: FieldValue.increment(1),
       distanciaTotal: FieldValue.increment(distancia),
       duracionTotal: FieldValue.increment(duracion),
+      carrerasAplicadas: FieldValue.arrayUnion(carreraId),
       actualizadoEn: FieldValue.serverTimestamp(),
     };
     for (const barrio of territorioCarreraConMarcas) {
-      batch.set(
-        db.collection('grupoMarcas').doc(aportacion.grupoId)
+      secondaryOps.push({
+        ref: db.collection('grupoMarcas').doc(aportacion.grupoId)
           .collection('marcasTerritoriales').doc(barrio.barrioId),
-        { puntos: FieldValue.increment(barrio.puntos), ciudadId: ciudad.id, actualizadoEn: FieldValue.serverTimestamp() },
-        { merge: true }
-      );
+        data: { puntos: FieldValue.increment(barrio.puntos), carreras: FieldValue.increment(1), ciudadId: ciudad.id, carrerasAplicadas: FieldValue.arrayUnion(carreraId), actualizadoEn: FieldValue.serverTimestamp() },
+        options: { merge: true },
+      });
     }
-    batch.set(db.collection('grupos').doc(aportacion.grupoId), grupoUpdate, { merge: true });
+    secondaryOps.push({
+      ref: db.collection('grupos').doc(aportacion.grupoId),
+      data: grupoUpdate,
+      options: { merge: true },
+    });
   }
 
   for (const { ref, data } of segmentPayloads.values()) {
-    batch.set(ref, data, { merge: true });
+    secondaryOps.push({ ref, data, options: { merge: true } });
   }
 
-  await batch.commit();
+  await commitEnChunks(secondaryOps);
 
   await procesarConquistaGrupo(db, aportacionesGrupo, territorioCarreraConMarcas, segmentos, uid, ahoraMs, FieldValue);
   await actualizarTop10Territorios(db, territorioCarreraConMarcas, usuarioRef, segmentos, uid, FieldValue);
+
+  await carreraRef.update({ secondaryStatus: 'complete' });
 
   return {
     ok: true,
@@ -1487,6 +1849,18 @@ exports.marcarNotificacionesPendientesLeidas = onCall(async (request) => {
   return { ok: true, limpiadas: Array.isArray(pendientes) ? pendientes.length : 0 };
 });
 
+exports.generarNonceStrava = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
+  verificarAppCheckCallable(request, 'generarNonceStrava');
+
+  const db = getFirestore();
+  const nonce = require('crypto').randomBytes(24).toString('hex');
+  const expiraEn = Date.now() + 10 * 60 * 1000;
+  await db.collection('stravaOAuthNonces').doc(nonce).set({ uid, expiraEn });
+  return { nonce };
+});
+
 exports.stravaOAuthCallback = onRequest({ secrets: [STRAVA_CLIENT_SECRET] }, async (req, res) => {
   const code = String(req.query.code ?? '').trim();
   let error = String(req.query.error ?? '').trim();
@@ -1497,7 +1871,18 @@ exports.stravaOAuthCallback = onRequest({ secrets: [STRAVA_CLIENT_SECRET] }, asy
   try {
     const stateData = state ? JSON.parse(state) : {};
     returnUrl = String(stateData.returnUrl ?? '').trim() || null;
-    uid = String(stateData.uid ?? '').trim() || null;
+    const nonce = String(stateData.nonce ?? '').trim() || null;
+    if (nonce) {
+      const db = getFirestore();
+      const nonceRef = db.collection('stravaOAuthNonces').doc(nonce);
+      const nonceSnap = await nonceRef.get();
+      if (nonceSnap.exists && nonceSnap.data().expiraEn > Date.now()) {
+        uid = nonceSnap.data().uid ?? null;
+      } else {
+        error = error || 'invalid_state';
+      }
+      await nonceRef.delete();
+    }
   } catch (e) {}
 
   // Intercambiar el código server-side para que el token quede guardado
@@ -1852,6 +2237,7 @@ exports.importarConquistasStrava = onCall({ secrets: [STRAVA_CLIENT_SECRET] }, a
           segmentoCompetitivo: segmentos.segmentoCompetitivo,
           segmentoEtiqueta: segmentos.segmentoEtiqueta,
           dueno: uid,
+          duenoNombre: perfil.nickname ?? 'Corredor anónimo',
           duenoPuntos: barrio.puntosAcumuladosUsuario,
           conquistadoEn: FieldValue.serverTimestamp(),
         },
@@ -1943,8 +2329,47 @@ exports.importarConquistasStrava = onCall({ secrets: [STRAVA_CLIENT_SECRET] }, a
   };
 });
 
-exports.validarCarrera = onDocumentCreated('carreras/{carreraId}', async (event) => {
-  const data = event.data.data();
+exports.desconectarStrava = onCall(async (request) => {
+  verificarAppCheckCallable(request, 'desconectarStrava');
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
+
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+  const stravaRef = db.collection('usuarios').doc(uid).collection('privado').doc('strava');
+  const snap = await stravaRef.get();
+
+  if (snap.exists) {
+    const { accessToken } = snap.data() ?? {};
+    if (accessToken) {
+      fetch('https://www.strava.com/oauth/deauthorize', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).catch(() => {});
+    }
+    await stravaRef.delete();
+  }
+
+  await db.collection('usuarios').doc(uid).update({
+    stravaConectado: FieldValue.delete(),
+    stravaAthleteId: FieldValue.delete(),
+    stravaConectadoEn: FieldValue.delete(),
+  });
+
+  return { ok: true };
+});
+
+exports.validarCarrera = onDocumentWritten('carreras/{carreraId}', async (event) => {
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+
+  // Solo disparar cuando secondaryStatus transiciona a 'complete';
+  // así el trigger ve las marcas de territorio y grupo ya escritas (Fase 2 completa)
+  if (before?.secondaryStatus === after?.secondaryStatus) return;
+  if (after?.secondaryStatus !== 'complete') return;
+  if (after?.fraudulenta === true) return; // ya procesada
+
+  const data = after;
   const carreraId = event.params.carreraId;
   const {
     uid, ruta = [], distancia, duracion, puntos, ritmoMedio, source,
@@ -1969,10 +2394,10 @@ exports.validarCarrera = onDocumentCreated('carreras/{carreraId}', async (event)
   const puntosEsperados = calcularPuntosSv(distancia, ritmoMedio);
   if (Math.abs(puntosEsperados - puntos) > 1) motivos.push('puntos_incorrectos');
 
-  // 3. Distancia GPS consistente con la ruta (tolerancia 20%)
+  // 3. Distancia GPS consistente con la ruta (tolerancia 35%, igual que el callable)
   if (ruta.length >= 2) {
     const distanciaGps = calcularDistanciaRuta(ruta);
-    if (Math.abs(distanciaGps - distancia) / Math.max(distancia, 1) > 0.20) {
+    if (Math.abs(distanciaGps - distancia) / Math.max(distancia, 1) > 0.35) {
       motivos.push('distancia_gps_inconsistente');
     }
   }
@@ -1992,49 +2417,141 @@ exports.validarCarrera = onDocumentCreated('carreras/{carreraId}', async (event)
   }
 
   if (motivos.length > 0) {
-    // Leer doc de usuario para filtrar ultimasCarreras (M5)
-    const userSnap = await db.collection('usuarios').doc(uid).get();
+    const aportacionesGrupo = Array.isArray(data.aportacionesGrupo) ? data.aportacionesGrupo : [];
+    const puntosRevertir = data.puntosTotales ?? ((data.puntosPersonales ?? data.puntos ?? 0) + (data.bonusLogros ?? 0));
+    const nuevosLogrosCarrera = Array.isArray(data.nuevosLogros)
+      ? data.nuevosLogros.filter(id => typeof id === 'string' && id.length > 0)
+      : [];
+
+    // Si el fraude afecta al run completo (ritmo/puntos/GPS), revertir TODOS los territorios.
+    // Si solo hay territorios_no_alcanzados, revertir únicamente los que no coinciden con el GPS.
+    const fraudeGlobal = motivos.some(m => m !== 'territorios_no_alcanzados');
+    const territoriesToRevertConquest = fraudeGlobal ? territorioCarrera : territoriosFraudulentos;
+
+    // Leer user doc + snapshots de segmentos de territorio en paralelo
+    const segmentoRefs = territoriesToRevertConquest
+      .filter(t => segmentoCompetitivo && t.coleccion && t.barrioId)
+      .map(t => db.collection(t.coleccion).doc(t.barrioId).collection('segmentos').doc(segmentoCompetitivo));
+
+    const [userSnap, ...segmentoSnaps] = await Promise.all([
+      db.collection('usuarios').doc(uid).get(),
+      ...segmentoRefs.map(r => r.get()),
+    ]);
+
     const ultimasCarrerasSinFraude = (userSnap.data()?.ultimasCarreras ?? []).filter(c => c.id !== carreraId);
 
-    const batch = db.batch();
-    batch.update(event.data.ref, {
+    const carreraFraudUpdate = {
       fraudulenta: true,
       motivosFraude: motivos,
       verificadoEn: FieldValue.serverTimestamp(),
-    });
-    batch.update(db.collection('usuarios').doc(uid), {
-      puntosTotales: FieldValue.increment(-puntos),
+    };
+
+    const fraudOps = [];
+
+    // Revertir usuario
+    fraudOps.push({ type: 'update', ref: db.collection('usuarios').doc(uid), data: {
+      puntosTotales: FieldValue.increment(-puntosRevertir),
       carrerasTotal: FieldValue.increment(-1),
       distanciaTotal: FieldValue.increment(-Math.round(distancia)),
       duracionTotal: FieldValue.increment(-duracion),
       ...(barriosConquistadosCarrera > 0 && {
         barriosConquistadosHistorico: FieldValue.increment(-barriosConquistadosCarrera),
       }),
+      ...(nuevosLogrosCarrera.length > 0 && {
+        logros: FieldValue.arrayRemove(...nuevosLogrosCarrera),
+      }),
       ultimasCarreras: ultimasCarrerasSinFraude,
-    });
+    }});
 
-    // Revertir también el ranking de ciudad (M4) para que no quede con puntos inflados
+    // Revertir ranking de ciudad
     if (ciudadId) {
-      batch.set(db.collection('rankingsCiudad').doc(`${ciudadId}_${uid}`), {
-        puntos: FieldValue.increment(-puntos),
+      fraudOps.push({ ref: db.collection('rankingsCiudad').doc(`${ciudadId}_${uid}`), data: {
+        puntos: FieldValue.increment(-puntosRevertir),
         carreras: FieldValue.increment(-1),
         totalMetros: FieldValue.increment(-Math.round(distancia)),
-      }, { merge: true });
+      }, options: { merge: true }});
     }
 
-    // Revertir conquistas fraudulentas; el trigger descontarTerritorioSegmentadoPerdido
-    // decrementa barriosConquistadosTotal automáticamente cuando dueno cambia a null
-    for (const territorio of territoriosFraudulentos) {
-      if (!segmentoCompetitivo || !territorio.coleccion || !territorio.barrioId) continue;
-      const ref = db.collection(territorio.coleccion).doc(territorio.barrioId)
-        .collection('segmentos').doc(segmentoCompetitivo);
-      const snap = await ref.get();
-      if (snap.exists && snap.data().dueno === uid) {
-        batch.update(ref, { dueno: null, duenoPuntos: 0 });
+    // Revertir conquistas (dueno → null); descontarTerritorioSegmentadoPerdido decrementa
+    // barriosConquistadosTotal automáticamente cuando dueno cambia a null
+    for (let i = 0; i < segmentoRefs.length; i++) {
+      if (segmentoSnaps[i].exists && segmentoSnaps[i].data().dueno === uid) {
+        fraudOps.push({ type: 'update', ref: segmentoRefs[i], data: { dueno: null, duenoNombre: FieldValue.delete(), duenoPuntos: 0 } });
       }
     }
 
-    await batch.commit();
+    // Revertir marcasTerritoriales del usuario (secondaryStatus: complete garantiza que se aplicaron)
+    for (const barrio of territorioCarrera) {
+      if (!segmentoCompetitivo || !barrio.barrioId) continue;
+      const incr = (barrio.puntos ?? 0) + (barrio.puntosBonusLogros ?? 0);
+      if (incr <= 0) continue;
+      fraudOps.push({ type: 'update',
+        ref: db.collection('usuarios').doc(uid)
+          .collection('marcasTerritoriales').doc(`${barrio.barrioId}_${segmentoCompetitivo}`),
+        data: {
+          puntos: FieldValue.increment(-incr),
+          carreras: FieldValue.increment(-1),
+          carrerasAplicadas: FieldValue.arrayRemove(carreraId),
+        },
+      });
+    }
+
+    // Revertir aportaciones de grupo, stats del grupo y grupoMarcas
+    for (const aportacion of aportacionesGrupo) {
+      if (!aportacion.grupoId || !aportacion.id) continue;
+
+      fraudOps.push({ type: 'delete', ref: db.collection('aportacionesGrupo').doc(aportacion.id) });
+
+      fraudOps.push({ type: 'update', ref: db.collection('grupos').doc(aportacion.grupoId), data: {
+        puntosTotales: FieldValue.increment(-(aportacion.puntosGrupo ?? 0)),
+        carrerasTotales: FieldValue.increment(-1),
+        distanciaTotal: FieldValue.increment(-Math.round(distancia)),
+        duracionTotal: FieldValue.increment(-(duracion ?? 0)),
+        carrerasAplicadas: FieldValue.arrayRemove(carreraId),
+      }});
+
+      for (const barrio of territorioCarrera) {
+        if (!barrio.barrioId || (barrio.puntos ?? 0) <= 0) continue;
+        fraudOps.push({ type: 'update',
+          ref: db.collection('grupoMarcas').doc(aportacion.grupoId)
+            .collection('marcasTerritoriales').doc(barrio.barrioId),
+          data: {
+            puntos: FieldValue.increment(-(barrio.puntos ?? 0)),
+            carreras: FieldValue.increment(-1),
+            carrerasAplicadas: FieldValue.arrayRemove(carreraId),
+          },
+        });
+      }
+    }
+
+    await commitEnChunks(fraudOps);
+
+    // La Fase 2 ya pudo haber actualizado el top10 antes de que el trigger detectase fraude.
+    // Recalcular solo la entrada de este usuario mantiene el mapa coherente sin reordenar todo el territorio.
+    await Promise.all(territorioCarrera.map(async (barrio) => {
+      if (!segmentoCompetitivo || !barrio.coleccion || !barrio.barrioId) return;
+      const barrioSegmentoRef = db.collection(barrio.coleccion).doc(barrio.barrioId)
+        .collection('segmentos').doc(segmentoCompetitivo);
+      const marcaRef = db.collection('usuarios').doc(uid)
+        .collection('marcasTerritoriales').doc(`${barrio.barrioId}_${segmentoCompetitivo}`);
+
+      await db.runTransaction(async (tx) => {
+        const [marcaSnap, segmentoSnap] = await Promise.all([tx.get(marcaRef), tx.get(barrioSegmentoRef)]);
+        const puntosActuales = marcaSnap.exists ? (marcaSnap.data().puntos ?? 0) : 0;
+        const currentTop10 = segmentoSnap.data()?.top10 ?? [];
+        const sinUsuario = currentTop10.filter(e => e.uid !== uid);
+        const newTop10 = (puntosActuales > 0 ? [...sinUsuario, { uid, puntos: puntosActuales }] : sinUsuario)
+          .sort((a, b) => b.puntos - a.puntos)
+          .slice(0, 10);
+        tx.set(barrioSegmentoRef, {
+          top10: newTop10,
+          top10Uids: top10Uids(newTop10),
+          actualizadoEn: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }).catch(err => console.error('[validarCarrera] Error recalculando top10 tras fraude:', barrio.barrioId, err?.message));
+    }));
+
+    await event.data.ref.update(carreraFraudUpdate);
     console.warn(`[validarCarrera] Fraude: ${carreraId} uid:${uid} motivos:${motivos.join(',')}`);
 
     try {
@@ -2247,7 +2764,7 @@ exports.enviarNotificacionTerritorios = onDocumentWritten(
 const DECAY_RATE = 0.10;
 const DECAY_PUNTOS_MINIMO = 50;
 
-exports.aplicarDecayTerritorial = onSchedule({ schedule: 'every monday 03:00', timeoutSeconds: 300 }, async () => {
+exports.aplicarDecayTerritorial = onSchedule({ schedule: 'every monday 03:00', timeoutSeconds: 1800 }, async () => {
   const db = getFirestore();
   const { FieldValue } = require('firebase-admin/firestore');
 
@@ -2257,7 +2774,7 @@ exports.aplicarDecayTerritorial = onSchedule({ schedule: 'every monday 03:00', t
     return nuevos === puntos ? null : nuevos;
   };
 
-  const calcularOps = (snap) => {
+  const calcularOpsDesdeSnap = (snap) => {
     const ops = [];
     for (const docSnap of snap.docs) {
       const data = docSnap.data();
@@ -2274,23 +2791,35 @@ exports.aplicarDecayTerritorial = onSchedule({ schedule: 'every monday 03:00', t
     return ops;
   };
 
-  // Territorios y barrios base
-  let baseOps = [];
-  for (const coleccion of ['territorios', 'barrios']) {
-    const snap = await db.collection(coleccion).where('dueno', '!=', null).get();
-    baseOps = baseOps.concat(calcularOps(snap));
-  }
-  await commitEnChunks(baseOps);
+  const procesarEnPaginas = async (baseQuery) => {
+    let lastDoc = null;
+    let totalOps = 0;
+    while (true) {
+      let q = baseQuery.orderBy('dueno').limit(500);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      if (snap.empty) break;
+      const ops = calcularOpsDesdeSnap(snap);
+      if (ops.length > 0) {
+        await commitEnChunks(ops);
+        totalOps += ops.length;
+      }
+      if (snap.docs.length < 500) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+    }
+    return totalOps;
+  };
 
-  // Documentos de segmento — requiere índice collectionGroup en campo 'dueno'
-  let segOps = [];
+  let total = 0;
+  for (const coleccion of ['territorios', 'barrios']) {
+    total += await procesarEnPaginas(db.collection(coleccion).where('dueno', '!=', null));
+  }
+
   try {
-    const segSnap = await db.collectionGroup('segmentos').where('dueno', '!=', null).get();
-    segOps = calcularOps(segSnap);
-    await commitEnChunks(segOps);
+    total += await procesarEnPaginas(db.collectionGroup('segmentos').where('dueno', '!=', null));
   } catch (e) {
     console.warn('[decay] No se pudo aplicar decay a segmentos (puede faltar índice):', e.message);
   }
 
-  console.log(`[decay] Base: ${baseOps.length} docs, segmentos: ${segOps.length} docs`);
+  console.log(`[decay] Actualizaciones aplicadas: ${total}`);
 });

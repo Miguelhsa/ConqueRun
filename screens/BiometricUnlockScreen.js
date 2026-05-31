@@ -18,7 +18,7 @@ export default function BiometricUnlockScreen({ onUnlocked }) {
     try {
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Desbloquear ConqueRun',
-        fallbackLabel: 'Usar codigo',
+        fallbackLabel: 'Usar código',
         cancelLabel: 'Cancelar',
         disableDeviceFallback: false,
       });
@@ -41,8 +41,8 @@ export default function BiometricUnlockScreen({ onUnlocked }) {
     <View style={styles.container}>
       <View style={styles.panel}>
         <Text style={styles.marca}>ConqueRun</Text>
-        <Text style={styles.titulo}>Sesion guardada</Text>
-        <Text style={styles.texto}>Desbloquea con Face ID, Touch ID o el codigo del dispositivo.</Text>
+        <Text style={styles.titulo}>Sesión guardada</Text>
+        <Text style={styles.texto}>Desbloquea con Face ID, Touch ID o el código del dispositivo.</Text>
 
         <TouchableOpacity
           style={[styles.boton, autenticando && styles.botonDesactivado]}

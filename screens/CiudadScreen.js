@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../firebaseConfig';
+import { db } from '../firebaseConfig';
 import { obtenerCiudades } from '../utils/ciudades';
 import { colors, radius } from '../utils/theme';
 
-export default function CiudadScreen({ onGuardado }) {
+export default function CiudadScreen({ uid, onGuardado }) {
   const [ciudades, setCiudades] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -22,7 +22,7 @@ export default function CiudadScreen({ onGuardado }) {
     if (!seleccionada) return;
     setGuardando(true);
     try {
-      await setDoc(doc(db, 'usuarios', auth.currentUser.uid), {
+      await setDoc(doc(db, 'usuarios', uid), {
         ciudadActualId: seleccionada.id,
         ciudadActualNombre: seleccionada.nombre,
         paisCodigo: seleccionada.paisCodigo ?? null,

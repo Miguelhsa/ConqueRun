@@ -7,15 +7,13 @@ const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const guardarCarreraPendiente = async (uid, payload) => {
   try {
     const pendientes = await obtenerCarrerasPendientes();
-    const nueva = {
-      id: `${uid}_${Date.now()}`,
-      uid,
-      payload,
-      guardadoEn: Date.now(),
-      intentos: 0,
-    };
+    const id = `${uid}_${Date.now()}`;
+    const nueva = { id, uid, payload, guardadoEn: Date.now(), intentos: 0 };
     await AsyncStorage.setItem(KEY, JSON.stringify([...pendientes, nueva]));
-  } catch {}
+    return id;
+  } catch {
+    return null;
+  }
 };
 
 export const obtenerCarrerasPendientes = async () => {

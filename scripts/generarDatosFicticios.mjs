@@ -419,6 +419,9 @@ for (const grupo of ASIGNACIONES) {
   }
 }
 
+// Mapa de usuario por id para acceder al segmento
+const usuariosPorId = new Map(usuarios.map(u => [u.id, u]));
+
 for (const [barrioId, { dueno, pts }] of dueñosPorBarrio) {
   const barrioDoc = barriosPorId.get(barrioId);
   if (!barrioDoc) continue;
@@ -428,11 +431,34 @@ for (const [barrioId, { dueno, pts }] of dueñosPorBarrio) {
     conquistadoEn: FieldValue.serverTimestamp(),
     _ficticioAnterior: { dueno: barrioDoc.data().dueno ?? null, duenoPuntos: barrioDoc.data().duenoPuntos ?? 0 },
   });
+
+  // Crear subcollección segmentos para que el mapa muestre la propiedad correctamente
+  const usuarioDueno = usuariosPorId.get(dueno);
+  if (usuarioDueno) {
+    const seg = segmento(usuarioDueno.ritmo, usuarioDueno.genero, usuarioDueno.edad);
+    barrioBatch.set(
+      db.collection('territorios').doc(barrioId).collection('segmentos').doc(seg.segmentoCompetitivo),
+      {
+        territorioId: barrioId,
+        ciudadId: CIUDAD_ID,
+        ciudadNombre: CIUDAD_NOMBRE,
+        paisCodigo: 'ES',
+        ...seg,
+        dueno,
+        duenoNombre: usuarioDueno.nickname,
+        duenoPuntos: pts,
+        conquistadoEn: FieldValue.serverTimestamp(),
+        _ficticio: true,
+      },
+      { merge: true }
+    );
+  }
+
   asignados++;
 }
 
 await barrioBatch.commit();
-console.log(`   ✅ ${asignados} barrios con dueño asignado`);
+console.log(`   ✅ ${asignados} barrios con dueño asignado (root doc + segmentos)`);
 
 // Actualizar stats de tu usuario real
 console.log('\n   📊 Actualizando tu usuario real...');

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Image, ImageBackground, Platform, ActivityIndicator, Linking, ScrollView } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { auth } from '../firebaseConfig';
-import { createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
+import { auth, db } from '../firebaseConfig';
+import { createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { iniciarSesionGoogle, iniciarSesionApple, appleDisponible } from '../utils/socialAuth';
 import { colors, radius } from '../utils/theme';
 
@@ -50,7 +51,8 @@ export default function LoginScreen({ onLogin }) {
     setCargando(true);
     try {
       if (esRegistro) {
-        await createUserWithEmailAndPassword(auth, email.trim(), password);
+        const credencial = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        sendEmailVerification(credencial.user).catch(() => {});
       } else {
         await signInWithEmailAndPassword(auth, email.trim(), password);
       }
@@ -82,7 +84,16 @@ export default function LoginScreen({ onLogin }) {
     setCargandoSocial('google');
     try {
       const result = await iniciarSesionGoogle();
-      if (result) onLogin();
+      if (!result) return;
+      const snap = await getDoc(doc(db, 'usuarios', result.user.uid));
+      const tieneNickname = snap.exists() && !!snap.data()?.nickname;
+      if (!tieneNickname && !aceptaTerminos) {
+        await signOut(auth);
+        cambiarModo(true);
+        Alert.alert('Términos requeridos', 'Para crear una cuenta, acepta los Términos de Uso y la Política de Privacidad y vuelve a continuar con Google.');
+        return;
+      }
+      onLogin();
     } catch (error) {
       if (error.message === 'MODULO_NATIVO_NO_DISPONIBLE') {
         Alert.alert('No disponible en desarrollo', 'Google Sign-In requiere la app compilada (build de producción). Usa email/contraseña mientras desarrollas.');
@@ -99,7 +110,16 @@ export default function LoginScreen({ onLogin }) {
     setCargandoSocial('apple');
     try {
       const result = await iniciarSesionApple();
-      if (result) onLogin();
+      if (!result) return;
+      const snap = await getDoc(doc(db, 'usuarios', result.user.uid));
+      const tieneNickname = snap.exists() && !!snap.data()?.nickname;
+      if (!tieneNickname && !aceptaTerminos) {
+        await signOut(auth);
+        cambiarModo(true);
+        Alert.alert('Términos requeridos', 'Para crear una cuenta, acepta los Términos de Uso y la Política de Privacidad y vuelve a continuar con Apple.');
+        return;
+      }
+      onLogin();
     } catch (error) {
       if (error.code !== 'ERR_REQUEST_CANCELED') {
         Alert.alert('Error con Apple', `${error.code ?? ''}\n${error.message ?? 'sin mensaje'}`);
@@ -120,7 +140,7 @@ export default function LoginScreen({ onLogin }) {
 
       <View style={styles.marca}>
         <Image
-          source={require('../assets/splash-icon.png')}
+          source={require('../assets/logo.png')}
           style={styles.logoMarca}
           resizeMode="contain"
         />
@@ -291,8 +311,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoMarca: {
-    width: '80%',
-    height: 72,
+    alignSelf: 'center',
+    width: 260,
+    height: 63,
     marginBottom: 8,
   },
   subtitulo: {

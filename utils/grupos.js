@@ -1,23 +1,9 @@
 import { db, auth } from '../firebaseConfig';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
-  collection, doc, addDoc, getDoc, getDocs, setDoc,
+  collection, doc, getDoc, getDocs, setDoc,
   updateDoc, arrayUnion, arrayRemove, deleteField, query, where, limit, serverTimestamp,
-  increment, writeBatch
 } from 'firebase/firestore';
-
-const BATCH_LIMIT = 450;
-
-const ejecutarOps = async (ops) => {
-  for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
-    const chunk = ops.slice(i, i + BATCH_LIMIT);
-    const batch = writeBatch(db);
-    chunk.forEach(({ ref, data, merge }) =>
-      merge ? batch.set(ref, data, { merge: true }) : batch.set(ref, data)
-    );
-    await batch.commit();
-  }
-};
 
 const MAX_GRUPOS_POR_USUARIO = 50;
 const CHARS_CODIGO = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -36,15 +22,25 @@ export const generarCodigo = () => {
 export const RITMO_MINIMO_VALIDO = 180; // 3:00 min/km: umbral mínimo, alineado con la Cloud Function.
 export const RITMO_MAXIMO_VALIDO = 1200; // 20:00 min/km: caminar muy lento no debería puntuar como carrera.
 export const DISTANCIA_MINIMA_CARRERA = 200; // 200 m: evita guardar arranques accidentales.
+export const DISTANCIA_MAXIMA_CARRERA = 100000; // 100 km: alineado con el límite de la Cloud Function.
 export const DURACION_MINIMA_CARRERA = 60; // 60 s: evita pruebas demasiado cortas.
+export const DURACION_MAXIMA_CARRERA = 86400; // 24 h: alineado con el límite de la Cloud Function.
 
 export const validarCarrera = (distancia, duracion) => {
   if (distancia < DISTANCIA_MINIMA_CARRERA) {
     return { valida: false, motivo: 'Carrera demasiado corta: mínimo 200 m' };
   }
 
+  if (distancia > DISTANCIA_MAXIMA_CARRERA) {
+    return { valida: false, motivo: 'Distancia demasiado larga: máximo 100 km por carrera' };
+  }
+
   if (duracion < DURACION_MINIMA_CARRERA) {
     return { valida: false, motivo: 'Carrera demasiado corta: mínimo 1 minuto' };
+  }
+
+  if (duracion > DURACION_MAXIMA_CARRERA) {
+    return { valida: false, motivo: 'Duración demasiado larga: máximo 24 horas por carrera' };
   }
 
   const ritmoMedio = distancia > 0 ? duracion / (distancia / 1000) : 0;
@@ -74,59 +70,6 @@ export const calcularPuntos = (distancia, ritmoMedio) => {
   return Math.round(km * factorRitmo);
 };
 
-export const calcularAportacionesGrupo = (grupos, puntosPersonales, carreraId, uid) => (
-  grupos
-    .filter(grupo => Array.isArray(grupo.miembros))
-    .map(grupo => ({
-      id: `${carreraId}_${grupo.id}`,
-      carreraId,
-      grupoId: grupo.id,
-      grupoNombre: grupo.nombre,
-      uid,
-      puntosBase: puntosPersonales,
-      multiplicadorGrupo: 1,
-      puntosGrupo: puntosPersonales,
-      miembrosGrupoEnEseMomento: grupo.miembros.length,
-    }))
-);
-
-export const registrarAportacionesGrupo = async ({
-  carreraId,
-  uid,
-  puntosPersonales,
-  distancia,
-  duracion,
-  aportaciones: aportacionesCalculadas = null,
-}) => {
-  const grupos = aportacionesCalculadas ? [] : await obtenerMisGrupos();
-  const aportaciones = aportacionesCalculadas ?? calcularAportacionesGrupo(grupos, puntosPersonales, carreraId, uid);
-
-  if (aportaciones.length === 0) return [];
-
-  const ops = [];
-
-  for (const aportacion of aportaciones) {
-    ops.push({
-      ref: doc(db, 'aportacionesGrupo', aportacion.id),
-      data: { ...aportacion, distancia: Math.round(distancia), fecha: serverTimestamp() },
-      merge: false,
-    });
-    ops.push({
-      ref: doc(db, 'grupos', aportacion.grupoId),
-      data: {
-        puntosTotales: increment(aportacion.puntosGrupo),
-        carrerasTotales: increment(1),
-        distanciaTotal: increment(Math.round(distancia)),
-        duracionTotal: increment(Math.round(duracion)),
-        actualizadoEn: serverTimestamp(),
-      },
-      merge: true,
-    });
-  }
-
-  await ejecutarOps(ops);
-  return aportaciones;
-};
 
 // Generar un ref con ID para el grupo (permite subir foto antes de crear el doc)
 export const generarRefGrupo = () => doc(collection(db, 'grupos'));
@@ -174,6 +117,7 @@ export const crearGrupo = async ({ nombre, descripcion, esPublico }, { grupoRef,
     puntosTotales: 0,
     carrerasTotales: 0,
     distanciaTotal: 0,
+    duracionTotal: 0,
     creadoEn: serverTimestamp(),
   });
 
@@ -190,25 +134,8 @@ export const unirseACodigo = async (codigo) => {
 
 // Unirse a grupo público
 export const unirseAGrupo = async (grupoId) => {
-  const uid = auth.currentUser.uid;
-  const [userSnap, grupoSnap] = await Promise.all([
-    getDoc(doc(db, 'usuarios', uid)),
-    getDoc(doc(db, 'grupos', grupoId)),
-  ]);
-  const userData = userSnap.exists() ? userSnap.data() : {};
-  const grupoData = grupoSnap.exists() ? grupoSnap.data() : {};
-  const nickname = userData.nickname ?? 'Corredor';
-
-  if (grupoData.ciudadId && userData.ciudadActualId && userData.ciudadActualId !== grupoData.ciudadId) {
-    throw new Error(`Este grupo es de ${grupoData.ciudadNombre}. Solo puedes unirte a grupos de tu ciudad.`);
-  }
-  await comprobarLimiteGrupos(uid);
-
-  await updateDoc(doc(db, 'grupos', grupoId), {
-    miembros: arrayUnion(uid),
-    [`nicknames.${uid}`]: nickname,
-  });
-
+  const unirse = httpsCallable(getFunctions(), 'unirseAGrupoPublico');
+  await unirse({ grupoId });
 };
 
 // Salir de un grupo (el creador no puede abandonarlo)
@@ -258,13 +185,14 @@ export const obtenerMisGrupos = async () => {
 const PAGE_SIZE = 20;
 
 // Sin orderBy para evitar índices compuestos: filtra y ordena en cliente, pagina por offset.
+const MAX_GRUPOS_CARGA = 200;
+
 export const obtenerGruposPublicos = async (ciudadId, { offset = 0 } = {}) => {
   const q = ciudadId
-    ? query(collection(db, 'grupos'), where('ciudadId', '==', ciudadId), where('esPublico', '==', true))
-    : query(collection(db, 'grupos'), where('esPublico', '==', true));
+    ? query(collection(db, 'grupos'), where('ciudadId', '==', ciudadId), where('esPublico', '==', true), limit(MAX_GRUPOS_CARGA))
+    : query(collection(db, 'grupos'), where('esPublico', '==', true), limit(MAX_GRUPOS_CARGA));
   const snap = await getDocs(q);
   const todos = snap.docs
-    .filter(d => d.data().esPublico)
     .sort((a, b) => (b.data().puntosTotales ?? 0) - (a.data().puntosTotales ?? 0));
   const pagina = todos.slice(offset, offset + PAGE_SIZE);
   return {

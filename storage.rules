@@ -19,7 +19,7 @@ service firebase.storage {
     }
 
     match /gruposPendientes/{uid}/{fileName} {
-      allow read: if isOwner(uid);
+      allow read: if signedIn();
       allow write: if isOwner(uid) &&
         fileName.matches('^[A-Za-z0-9_-]+\\.jpg$') &&
         request.resource.size < 5 * 1024 * 1024 &&
@@ -28,10 +28,7 @@ service firebase.storage {
 
     match /grupos/{fileName} {
       allow read: if signedIn();
-      allow write: if signedIn() &&
-        fileName.matches('^[A-Za-z0-9_-]+\\.jpg$') &&
-        request.resource.size < 5 * 1024 * 1024 &&
-        request.resource.contentType.matches('image/.*');
+      // escrituras solo desde Cloud Function (Admin SDK); el cliente nunca escribe aquí directamente
     }
   }
 }

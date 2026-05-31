@@ -105,7 +105,8 @@ export default function GruposScreen() {
 
   const subirFotoGrupo = async (uri, grupoId) => {
     const storage = getStorage();
-    const storageRef = ref(storage, `grupos/${grupoId}.jpg`);
+    const uid = auth.currentUser.uid;
+    const storageRef = ref(storage, `gruposPendientes/${uid}/${grupoId}.jpg`);
     const response = await fetch(uri);
     const blob = await response.blob();
     await uploadBytes(storageRef, blob);
@@ -138,7 +139,7 @@ export default function GruposScreen() {
     } catch (e) {
       if (fotoPendienteUrl) {
         const storage = getStorage();
-        deleteObject(ref(storage, `grupos/${grupoRef.id}.jpg`)).catch(() => {});
+        deleteObject(ref(storage, `gruposPendientes/${auth.currentUser.uid}/${grupoRef.id}.jpg`)).catch(() => {});
       }
       Alert.alert('Error', 'No se pudo crear el grupo');
     } finally {
@@ -155,7 +156,7 @@ export default function GruposScreen() {
       const { grupos: mas, hayMas: nuevoHayMas } = await obtenerGruposPublicos(ciudadActualId, { offset: offsetPublicos });
       const nuevos = mas.filter(g => !miosIds.has(g.id));
       setGruposPublicos(prev => [...prev, ...nuevos]);
-      setOffsetPublicos(prev => prev + nuevos.length);
+      setOffsetPublicos(prev => prev + mas.length);
       setHayMasPublicos(nuevoHayMas);
     } finally {
       cargandoMasRef.current = false;
@@ -180,7 +181,7 @@ export default function GruposScreen() {
       await unirseAGrupo(grupoId);
       Alert.alert('¡Te has unido!', `Ahora eres parte de ${nombre}`, [{ text: 'OK', onPress: cargarDatos }]);
     } catch (e) {
-      Alert.alert('Error', 'No se pudo unir al grupo');
+      Alert.alert('Error', e.message || 'No se pudo unir al grupo');
     }
   };
 

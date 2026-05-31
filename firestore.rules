@@ -27,6 +27,14 @@ service cloud.firestore {
         nickname.matches('^[a-zA-Z0-9_áéíóúÁÉÍÓÚñÑüÜ]+$');
     }
 
+    // nicknameKey es la versión en minúsculas del nickname
+    function nicknameClave(clave) {
+      return clave is string &&
+        clave.size() >= 3 &&
+        clave.size() <= 20 &&
+        clave.matches('^[a-z0-9_áéíóúñü]+$');
+    }
+
     // Nombre de grupo: 1-40 chars, no vacío
     function nombreGrupoValido(nombre) {
       return nombre is string &&
@@ -49,7 +57,10 @@ service cloud.firestore {
         !request.resource.data.keys().hasAny(['esAdmin']) &&
         (
           !request.resource.data.keys().hasAny(['nickname']) ||
-          nicknameValido(request.resource.data.nickname)
+          (
+            nicknameValido(request.resource.data.nickname) &&
+            getAfter(/databases/$(database)/documents/nicknames/$(request.resource.data.nickname.lower())).data.uid == uid
+          )
         ) &&
         request.resource.data.keys().hasOnly([
           'nickname',
@@ -80,7 +91,11 @@ service cloud.firestore {
         !changedKeys().hasAny(['esAdmin']) &&
         (
           !changedKeys().hasAny(['nickname']) ||
-          nicknameValido(request.resource.data.nickname)
+          (
+            !('nickname' in resource.data) &&
+            nicknameValido(request.resource.data.nickname) &&
+            getAfter(/databases/$(database)/documents/nicknames/$(request.resource.data.nickname.lower())).data.uid == uid
+          )
         ) &&
         changedKeys().hasOnly([
           'nickname',
@@ -147,6 +162,7 @@ service cloud.firestore {
     }
 
     function validGrupoCreate() {
+      let userDoc = get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
       return signedIn() &&
         request.resource.data.creador == request.auth.uid &&
         request.resource.data.keys().hasOnly([
@@ -167,24 +183,44 @@ service cloud.firestore {
           'puntosTotales',
           'carrerasTotales',
           'distanciaTotal',
+          'duracionTotal',
           'creadoEn'
         ]) &&
         request.resource.data.miembros.size() == 1 &&
         request.resource.data.miembros.hasAll([request.auth.uid]) &&
         request.resource.data.puntosTotales == 0 &&
+        request.resource.data.carrerasTotales == 0 &&
+        request.resource.data.distanciaTotal == 0 &&
+        request.resource.data.duracionTotal == 0 &&
+        request.resource.data.esPublico is bool &&
+        request.resource.data.codigo.matches('^[A-Z0-9]{6}$') &&
+        request.resource.data.ciudadId == userDoc.ciudadActualId &&
+        request.resource.data.ciudadNombre == userDoc.ciudadActualNombre &&
+        request.resource.data.nicknames.keys().hasAll(request.resource.data.miembros) &&
+        request.resource.data.miembros.hasAll(request.resource.data.nicknames.keys()) &&
+        request.resource.data.nicknames[request.auth.uid] == userDoc.nickname &&
+        request.resource.data.fotoPendiente == null &&
+        request.resource.data.fotoMotivoRechazo == null &&
+        (request.resource.data.foto == null || request.resource.data.fotoEstado == 'aprobada') &&
+        (request.resource.data.foto != null || request.resource.data.fotoEstado == null) &&
         nombreGrupoValido(request.resource.data.nombre) &&
         descripcionGrupoValida(request.resource.data.descripcion);
     }
 
     function validGrupoMemberUpdate() {
+      let userDoc = get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
       return signedIn() &&
         resource.data.esPublico == true &&
-        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.ciudadActualId == resource.data.ciudadId &&
+        userDoc.ciudadActualId == resource.data.ciudadId &&
         changedKeys().hasOnly(['miembros', 'nicknames']) &&
+        !resource.data.miembros.hasAll([request.auth.uid]) &&
         request.resource.data.miembros.hasAll(resource.data.miembros) &&
         request.resource.data.miembros.hasAll([request.auth.uid]) &&
         request.resource.data.miembros.size() == resource.data.miembros.size() + 1 &&
-        request.resource.data.nicknames.diff(resource.data.nicknames).affectedKeys().hasOnly([request.auth.uid]);
+        request.resource.data.nicknames.diff(resource.data.nicknames).affectedKeys().hasOnly([request.auth.uid]) &&
+        request.resource.data.nicknames[request.auth.uid] == userDoc.nickname &&
+        request.resource.data.nicknames.keys().hasAll(request.resource.data.miembros) &&
+        request.resource.data.miembros.hasAll(request.resource.data.nicknames.keys());
     }
 
     function validGrupoLeave() {
@@ -195,7 +231,10 @@ service cloud.firestore {
         !request.resource.data.miembros.hasAll([request.auth.uid]) &&
         request.resource.data.miembros.size() == resource.data.miembros.size() - 1 &&
         resource.data.miembros.hasAll(request.resource.data.miembros) &&
-        request.resource.data.nicknames.diff(resource.data.nicknames).affectedKeys().hasOnly([request.auth.uid]);
+        request.resource.data.nicknames.diff(resource.data.nicknames).affectedKeys().hasOnly([request.auth.uid]) &&
+        !request.resource.data.nicknames.keys().hasAll([request.auth.uid]) &&
+        request.resource.data.nicknames.keys().hasAll(request.resource.data.miembros) &&
+        request.resource.data.miembros.hasAll(request.resource.data.nicknames.keys());
     }
 
     function validGrupoKick() {
@@ -205,7 +244,9 @@ service cloud.firestore {
         request.resource.data.miembros.size() == resource.data.miembros.size() - 1 &&
         resource.data.miembros.hasAll(request.resource.data.miembros) &&
         request.resource.data.miembros.hasAll([resource.data.creador]) &&
-        resource.data.nicknames.keys().hasAll(request.resource.data.nicknames.keys());
+        resource.data.nicknames.keys().hasAll(request.resource.data.nicknames.keys()) &&
+        request.resource.data.nicknames.keys().hasAll(request.resource.data.miembros) &&
+        request.resource.data.miembros.hasAll(request.resource.data.nicknames.keys());
     }
 
     function validGrupoOwnerUpdate() {
@@ -232,6 +273,14 @@ service cloud.firestore {
         (
           !changedKeys().hasAny(['descripcion']) ||
           descripcionGrupoValida(request.resource.data.descripcion)
+        ) &&
+        (
+          !changedKeys().hasAny(['esPublico']) ||
+          request.resource.data.esPublico is bool
+        ) &&
+        (
+          !changedKeys().hasAny(['codigo']) ||
+          request.resource.data.codigo.matches('^[A-Z0-9]{6}$')
         );
     }
 
@@ -341,9 +390,15 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    match /config/{id} {
+      allow get: if id == 'app';
+      allow list: if false;
+      allow create, update, delete: if isAdmin();
+    }
+
     match /grupos/{id} {
       allow read: if isAdmin() ||
-        resource.data.esPublico == true ||
+        (signedIn() && resource.data.esPublico == true) ||
         (signedIn() && request.auth.uid in resource.data.miembros);
       allow create: if validGrupoCreate();
       allow update: if validGrupoMemberUpdate() || validGrupoOwnerUpdate() || validGrupoLeave() || validGrupoKick() || isAdmin();
@@ -394,6 +449,10 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
+    match /stravaOAuthNonces/{nonce} {
+      allow read, write: if isAdmin();
+    }
+
     match /solicitudesEliminacion/{id} {
       allow create: if signedIn() &&
         request.resource.data.keys().hasOnly([
@@ -405,6 +464,22 @@ service cloud.firestore {
         request.resource.data.uid == request.auth.uid &&
         request.resource.data.estado == 'pendiente';
       allow read, update, delete: if isAdmin();
+    }
+
+    match /nicknames/{nicknameKey} {
+      allow get: if signedIn();
+      allow create: if signedIn() &&
+        nicknameClave(nicknameKey) &&
+        request.resource.data.keys().hasOnly(['uid']) &&
+        request.resource.data.uid == request.auth.uid &&
+        getAfter(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.nickname.lower() == nicknameKey;
+      allow update: if signedIn() &&
+        nicknameClave(nicknameKey) &&
+        resource.data.uid == request.auth.uid &&
+        request.resource.data.keys().hasOnly(['uid']) &&
+        request.resource.data.uid == request.auth.uid &&
+        getAfter(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.nickname.lower() == nicknameKey;
+      allow delete: if isAdmin();
     }
   }
 }
