@@ -980,7 +980,7 @@ function motivoIgnorarActividad(activity) {
   const ritmo = activity.distance > 0 ? activity.moving_time / (activity.distance / 1000) : 0;
   if (!ritmo || !isFinite(ritmo)) return 'ritmo_invalido';
   if (ritmo < 180) return 'ritmo_demasiado_rapido';
-  if (ritmo > 1200) return 'ritmo_demasiado_lento';
+  if (ritmo > 720) return 'ritmo_demasiado_lento';
   return null;
 }
 
@@ -993,7 +993,7 @@ function validarInputCarrera(data) {
   if (!Number.isFinite(duracion) || duracion < 60 || duracion > 86400)
     throw new HttpsError('invalid-argument', 'Duración de carrera no válida.');
   const ritmoMedio = Math.round(duracion / (distancia / 1000));
-  if (!ritmoMedio || ritmoMedio < 180 || ritmoMedio > 1200)
+  if (!ritmoMedio || ritmoMedio < 180 || ritmoMedio > 720)
     throw new HttpsError('failed-precondition', 'El ritmo no cumple las condiciones para puntuar.');
   const distanciaGps = calcularDistanciaRuta(ruta);
   if (distanciaGps > 0 && Math.abs(distanciaGps - distancia) / Math.max(distancia, 1) > 0.35)

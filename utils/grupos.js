@@ -20,7 +20,7 @@ export const generarCodigo = () => {
 };
 
 export const RITMO_MINIMO_VALIDO = 180; // 3:00 min/km: umbral mínimo, alineado con la Cloud Function.
-export const RITMO_MAXIMO_VALIDO = 1200; // 20:00 min/km: caminar muy lento no debería puntuar como carrera.
+export const RITMO_MAXIMO_VALIDO = 720; // 12:00 min/km: caminar normal no debería puntuar como carrera.
 export const DISTANCIA_MINIMA_CARRERA = 200; // 200 m: evita guardar arranques accidentales.
 export const DISTANCIA_MAXIMA_CARRERA = 100000; // 100 km: alineado con el límite de la Cloud Function.
 export const DURACION_MINIMA_CARRERA = 60; // 60 s: evita pruebas demasiado cortas.

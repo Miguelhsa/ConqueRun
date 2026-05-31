@@ -7,8 +7,8 @@ import { doc, getDoc } from 'firebase/firestore';
 import { iniciarSesionGoogle, iniciarSesionApple, appleDisponible } from '../utils/socialAuth';
 import { colors, radius } from '../utils/theme';
 
-const URL_TERMINOS = 'https://conquerrun-8d30e.web.app/terminos';
-const URL_PRIVACIDAD = 'https://conquerrun-8d30e.web.app/privacidad';
+const URL_TERMINOS = 'https://miguelhsa.github.io/ConqueRun/terminos.html';
+const URL_PRIVACIDAD = 'https://miguelhsa.github.io/ConqueRun/privacidad.html';
 
 const MENSAJES_ERROR = {
   'auth/user-not-found': 'No existe una cuenta con ese email.',
