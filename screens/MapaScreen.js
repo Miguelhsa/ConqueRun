@@ -6,7 +6,7 @@ import { TerritoryMap, TerritoryMarker, TerritoryPolygon } from '../components/m
 import * as Location from 'expo-location';
 import { auth, db } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
-import { obtenerBarriosSegmentados, invalidarCacheTerritorios } from '../utils/barrios';
+import { obtenerBarriosSegmentados, invalidarCacheTerritorios, getUltimaInvalidacionTerritorios } from '../utils/barrios';
 import { obtenerCiudadCercana, obtenerCiudades, CIUDAD_FALLBACK } from '../utils/ciudades';
 import {
   getEstiloTerritorio,
@@ -53,7 +53,8 @@ export default function MapaScreen() {
   const ultimaCargaRef = useRef(0);
 
   useFocusEffect(useCallback(() => {
-    if (Date.now() - ultimaCargaRef.current > 5 * 60 * 1000) {
+    const hayInvalidacion = getUltimaInvalidacionTerritorios() > ultimaCargaRef.current;
+    if (hayInvalidacion || Date.now() - ultimaCargaRef.current > 5 * 60 * 1000) {
       cargarDatos();
     }
   }, []));

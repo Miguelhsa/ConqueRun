@@ -196,6 +196,27 @@
         { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
         { "fieldPath": "dueno", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "segmentos",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "dueno", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "segmentos",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "duenoGrupo", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "segmentos",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "top10Uids", "arrayConfig": "CONTAINS" }
+      ]
     }
   ],
   "fieldOverrides": []

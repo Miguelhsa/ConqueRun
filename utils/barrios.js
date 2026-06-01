@@ -27,7 +27,11 @@ const escribirCache = async (ciudadId, data) => {
   } catch {}
 };
 
+let _ultimaInvalidacion = 0;
+export const getUltimaInvalidacionTerritorios = () => _ultimaInvalidacion;
+
 export const invalidarCacheTerritorios = async (ciudadId) => {
+  _ultimaInvalidacion = Date.now();
   try {
     await AsyncStorage.removeItem(cacheKey(ciudadId ?? 'global'));
   } catch {}

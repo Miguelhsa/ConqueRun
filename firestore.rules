@@ -91,6 +91,7 @@ service cloud.firestore {
         !changedKeys().hasAny(['esAdmin']) &&
         (
           !changedKeys().hasAny(['nickname']) ||
+          resource.data.nickname == request.resource.data.nickname ||
           (
             !('nickname' in resource.data) &&
             nicknameValido(request.resource.data.nickname) &&
@@ -124,11 +125,13 @@ service cloud.firestore {
         ]) &&
         (
           !changedKeys().hasAny(['pais']) ||
-          !('pais' in resource.data)
+          !('pais' in resource.data) ||
+          request.resource.data.pais == resource.data.pais
         ) &&
         (
           !changedKeys().hasAny(['genero']) ||
-          !('genero' in resource.data)
+          !('genero' in resource.data) ||
+          request.resource.data.genero == resource.data.genero
         ) &&
         (
           !changedKeys().hasAny(['fotoPerfilEstado']) ||
