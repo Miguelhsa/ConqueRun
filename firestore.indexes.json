@@ -196,28 +196,40 @@
         { "fieldPath": "segmentoCompetitivo", "order": "ASCENDING" },
         { "fieldPath": "dueno", "order": "ASCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "segmentos",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "dueno", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "segmentos",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "duenoGrupo", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "segmentos",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "top10Uids", "arrayConfig": "CONTAINS" }
-      ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "segmentos",
+      "fieldPath": "dueno",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
+      "collectionGroup": "segmentos",
+      "fieldPath": "duenoGrupo",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
+      "collectionGroup": "segmentos",
+      "fieldPath": "top10Uids",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION_GROUP" }
+      ]
+    }
+  ]
 }

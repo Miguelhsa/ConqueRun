@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { invalidarCacheTerritorios } from './barrios';
 
 const KEY = 'carrerasPendientes_v1';
 const MAX_INTENTOS = 5;
@@ -54,6 +55,7 @@ export const enviarCarrerasPendientesBackground = async (uid) => {
     for (const carrera of propias) {
       try {
         await registrarCarrera(carrera.payload);
+        invalidarCacheTerritorios(carrera.payload?.ciudadId).catch(() => {});
         await eliminarCarreraPendiente(carrera.id);
       } catch (e) {
         if (e.code === 'functions/failed-precondition' || e.code === 'functions/invalid-argument') {
