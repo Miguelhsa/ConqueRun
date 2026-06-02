@@ -57,10 +57,7 @@ service cloud.firestore {
         !request.resource.data.keys().hasAny(['esAdmin']) &&
         (
           !request.resource.data.keys().hasAny(['nickname']) ||
-          (
-            nicknameValido(request.resource.data.nickname) &&
-            getAfter(/databases/$(database)/documents/nicknames/$(request.resource.data.nickname.lower())).data.uid == uid
-          )
+          nicknameValido(request.resource.data.nickname)
         ) &&
         request.resource.data.keys().hasOnly([
           'nickname',
@@ -94,8 +91,7 @@ service cloud.firestore {
           resource.data.nickname == request.resource.data.nickname ||
           (
             !('nickname' in resource.data) &&
-            nicknameValido(request.resource.data.nickname) &&
-            getAfter(/databases/$(database)/documents/nicknames/$(request.resource.data.nickname.lower())).data.uid == uid
+            nicknameValido(request.resource.data.nickname)
           )
         ) &&
         changedKeys().hasOnly([
