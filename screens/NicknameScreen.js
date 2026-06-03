@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, Keyboard } from 'react-native';
-import { db, auth } from '../firebaseConfig';
-import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { auth } from '../firebaseConfig';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { contieneTextoProhibido } from '../utils/moderacion';
 import { PAISES } from '../utils/paises';
 import { colors, radius } from '../utils/theme';
@@ -93,34 +93,24 @@ export default function NicknameScreen({ onGuardado }) {
     }
     setGuardando(true);
     try {
-      const nicknameKey = nicknameLimpio.toLowerCase();
-      await runTransaction(db, async (tx) => {
-        const nicknameRef = doc(db, 'nicknames', nicknameKey);
-        const nicknameSnap = await tx.get(nicknameRef);
-        if (nicknameSnap.exists() && nicknameSnap.data()?.uid !== usuario.uid) {
-          throw Object.assign(new Error('NICKNAME_TAKEN'), { code: 'NICKNAME_TAKEN' });
-        }
-        tx.set(nicknameRef, { uid: usuario.uid });
-        tx.set(doc(db, 'usuarios', usuario.uid), {
-          nickname: nicknameLimpio,
-          pais: nacionalidad,
-          genero,
-          onboardingPendiente: true,
-          onboardingCompletado: false,
-          actualizadoEn: serverTimestamp(),
-        }, { merge: true });
-        tx.set(doc(db, 'usuarios', usuario.uid, 'privado', 'datos'), {
-          fechaNacimiento,
-          fechaNacimientoGuardadaEn: serverTimestamp(),
-        }, { merge: true });
+      const completarPerfilInicial = httpsCallable(getFunctions(), 'completarPerfilInicial');
+      await completarPerfilInicial({
+        nickname: nicknameLimpio,
+        pais: nacionalidad,
+        genero,
+        fechaNacimiento,
       });
       onGuardado();
     } catch (e) {
       console.error('[NicknameScreen] guardar perfil inicial:', e);
-      const mensaje = e.code === 'NICKNAME_TAKEN'
+      const mensaje = e.code === 'NICKNAME_TAKEN' || e.code === 'functions/already-exists'
         ? 'Ese nickname ya está en uso. Elige otro.'
-        : e.code === 'permission-denied'
-          ? 'No se pudo guardar por permisos de base de datos.'
+        : e.code === 'functions/invalid-argument' || e.code === 'functions/failed-precondition'
+          ? e.message ?? 'No se pudo guardar con esos datos.'
+        : e.code === 'functions/unauthenticated'
+          ? 'Sesión no disponible. Vuelve a iniciar sesión.'
+        : e.code === 'permission-denied' || e.code === 'functions/permission-denied'
+          ? 'No se pudo guardar por permisos de base de datos. Actualiza la app e inténtalo de nuevo.'
           : 'No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.';
       Alert.alert('Error', mensaje);
     } finally {

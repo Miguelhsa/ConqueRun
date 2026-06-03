@@ -45,6 +45,110 @@ const MOTIVO_LABELS = {
   otro: 'Otro',
 };
 
+const NICKNAME_REGEX = /^[a-zA-Z0-9_áéíóúÁÉÍÓÚñÑüÜ]+$/;
+const NICKNAME_KEY_REGEX = /^[a-z0-9_áéíóúñü]+$/;
+const PALABRAS_PROHIBIDAS = [
+  'puta',
+  'puto',
+  'mierda',
+  'joder',
+  'cabron',
+  'maricon',
+  'nazi',
+  'porno',
+  'xxx',
+];
+
+function normalizarTextoModeracion(texto = '') {
+  return texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/0/g, 'o').replace(/1/g, 'i').replace(/3/g, 'e')
+    .replace(/4/g, 'a').replace(/5/g, 's').replace(/8/g, 'b')
+    .replace(/[^a-z0-9\s]/g, '');
+}
+
+function contieneTextoProhibido(texto = '') {
+  const normalizado = normalizarTextoModeracion(texto);
+  return PALABRAS_PROHIBIDAS.some(palabra => normalizado.includes(palabra));
+}
+
+function validarNicknameInicial(raw) {
+  const nickname = String(raw ?? '').trim();
+  const nicknameKey = nickname.toLowerCase();
+  if (nickname.length < 3 || nickname.length > 20 || !NICKNAME_REGEX.test(nickname)) {
+    throw new HttpsError('invalid-argument', 'Nickname no valido.');
+  }
+  if (!NICKNAME_KEY_REGEX.test(nicknameKey)) {
+    throw new HttpsError('invalid-argument', 'Nickname no valido.');
+  }
+  if (contieneTextoProhibido(nickname)) {
+    throw new HttpsError('invalid-argument', 'Nickname no permitido.');
+  }
+  return { nickname, nicknameKey };
+}
+
+function validarPaisInicial(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new HttpsError('invalid-argument', 'Nacionalidad no valida.');
+  }
+  const nombre = String(raw.nombre ?? '').trim();
+  const bandera = raw.bandera == null ? null : String(raw.bandera).trim();
+  const codigo = raw.codigo == null ? null : String(raw.codigo).trim().toUpperCase();
+  if (nombre.length < 2 || nombre.length > 80) {
+    throw new HttpsError('invalid-argument', 'Nacionalidad no valida.');
+  }
+  if (bandera != null && bandera.length > 16) {
+    throw new HttpsError('invalid-argument', 'Nacionalidad no valida.');
+  }
+  if (codigo != null && !/^[A-Z]{2,3}$/.test(codigo)) {
+    throw new HttpsError('invalid-argument', 'Nacionalidad no valida.');
+  }
+  return {
+    nombre,
+    ...(bandera ? { bandera } : {}),
+    ...(codigo ? { codigo } : {}),
+  };
+}
+
+function validarGeneroInicial(raw) {
+  if (raw !== 'hombre' && raw !== 'mujer') {
+    throw new HttpsError('invalid-argument', 'Genero no valido.');
+  }
+  return raw;
+}
+
+function validarFechaNacimientoInicial(raw) {
+  const fechaNacimiento = String(raw ?? '').trim();
+  const match = fechaNacimiento.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) throw new HttpsError('invalid-argument', 'Fecha de nacimiento no valida.');
+
+  const anio = Number(match[1]);
+  const mes = Number(match[2]);
+  const dia = Number(match[3]);
+  const fecha = new Date(Date.UTC(anio, mes - 1, dia));
+  const ahora = new Date();
+  if (
+    fecha.getUTCFullYear() !== anio ||
+    fecha.getUTCMonth() !== mes - 1 ||
+    fecha.getUTCDate() !== dia ||
+    fecha > ahora ||
+    anio < 1900
+  ) {
+    throw new HttpsError('invalid-argument', 'Fecha de nacimiento no valida.');
+  }
+
+  let edad = ahora.getUTCFullYear() - anio;
+  const mesActual = ahora.getUTCMonth() + 1;
+  const diaActual = ahora.getUTCDate();
+  if (mesActual < mes || (mesActual === mes && diaActual < dia)) edad -= 1;
+  if (edad < 13) {
+    throw new HttpsError('failed-precondition', 'Debes tener al menos 13 anos.');
+  }
+  return fechaNacimiento;
+}
+
 async function commitEnChunks(ops, chunkSize = 450) {
   const db = getFirestore();
   for (let i = 0; i < ops.length; i += chunkSize) {
@@ -274,6 +378,76 @@ exports.sincronizarRankingPerfil = onDocumentWritten('usuarios/{uid}', async (ev
   }
 
   await batch.commit();
+});
+
+exports.completarPerfilInicial = onCall(async (request) => {
+  verificarAppCheckCallable(request, 'completarPerfilInicial');
+
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesion.');
+  }
+
+  const { nickname, nicknameKey } = validarNicknameInicial(request.data?.nickname);
+  const pais = validarPaisInicial(request.data?.pais);
+  const genero = validarGeneroInicial(request.data?.genero);
+  const fechaNacimiento = validarFechaNacimientoInicial(request.data?.fechaNacimiento);
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+
+  const usuarioRef = db.collection('usuarios').doc(uid);
+  const nicknameRef = db.collection('nicknames').doc(nicknameKey);
+  const privadoRef = usuarioRef.collection('privado').doc('datos');
+
+  return db.runTransaction(async (tx) => {
+    const [usuarioSnap, nicknameSnap, privadoSnap] = await Promise.all([
+      tx.get(usuarioRef),
+      tx.get(nicknameRef),
+      tx.get(privadoRef),
+    ]);
+
+    const usuario = usuarioSnap.exists ? usuarioSnap.data() : {};
+    const nicknameActual = typeof usuario.nickname === 'string' ? usuario.nickname : null;
+    const perfilYaTieneNickname = Boolean(nicknameActual);
+
+    if (nicknameSnap.exists && nicknameSnap.data()?.uid !== uid) {
+      throw new HttpsError('already-exists', 'Ese nickname ya esta en uso.');
+    }
+
+    if (perfilYaTieneNickname && nicknameActual.toLowerCase() !== nicknameKey) {
+      throw new HttpsError('failed-precondition', 'El perfil ya tiene nickname.');
+    }
+
+    if (!nicknameSnap.exists) {
+      tx.set(nicknameRef, { uid });
+    }
+
+    if (perfilYaTieneNickname) {
+      if (!privadoSnap.exists) {
+        tx.set(privadoRef, {
+          fechaNacimiento,
+          fechaNacimientoGuardadaEn: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+      return { ok: true, alreadyCompleted: true };
+    }
+
+    tx.set(usuarioRef, {
+      nickname,
+      pais,
+      genero,
+      onboardingPendiente: true,
+      onboardingCompletado: false,
+      actualizadoEn: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    tx.set(privadoRef, {
+      fechaNacimiento,
+      fechaNacimientoGuardadaEn: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return { ok: true };
+  });
 });
 
 exports.eliminarCuenta = onCall(async (request) => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ActivityIndicator, AppState, View, Text, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, ImageBackground, Linking } from 'react-native';
+import { ActivityIndicator, AppState, Platform, View, Text, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, ImageBackground, Linking } from 'react-native';
 import { RouteLine, TerritoryMap } from '../components/map/MapAdapter';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
@@ -29,7 +29,6 @@ import {
   GPS_ACCURACY_MAX_METROS,
   GPS_TIMEOUT_SIN_SENYAL_MS,
   agregarPuntosTracking,
-  calcularDistanciaFiltrada,
   limpiarTrackingCarrera,
   iniciarTrackingCarrera,
   iniciarTrackingPrimerPlano,
@@ -39,6 +38,7 @@ import {
   pararTrackingCarrera,
   prepararTrackingCarrera,
   reanudarTrackingCarrera,
+  resolverDistanciaTracking,
   simplificarRutaParaGuardar,
   trackingSegundoPlanoActivo,
 } from '../utils/trackingCarrera';
@@ -163,14 +163,14 @@ export default function CorrerScreen() {
     barrioCargadoEnRef.current = Date.now();
   };
 
-  const sincronizarTracking = async () => {
+  const sincronizarTracking = async ({ forzarRecalculo = false } = {}) => {
     const [rutaTracking, metaTracking] = await Promise.all([
       obtenerRutaTracking(),
       obtenerMetaTracking(),
     ]);
 
-    // Usar distancia acumulada incrementalmente (O(1)) — calcularDistanciaFiltrada es O(n)
-    const distanciaActual = metaTracking?.distanciaAcumulada ?? calcularDistanciaFiltrada(rutaTracking);
+    const distanciaInfo = resolverDistanciaTracking(rutaTracking, metaTracking, { forzarRecalculo });
+    const distanciaActual = distanciaInfo.distancia;
     const ahoraParaTiempo = metaTracking?.pausada && metaTracking.pausadaEn
       ? metaTracking.pausadaEn
       : Date.now();
@@ -186,7 +186,15 @@ export default function CorrerScreen() {
     setSegundos(segundosActuales);
     setPausada(Boolean(metaTracking?.pausada));
 
-    if (!ultimoPunto) return { ruta: rutaTracking, distancia: distanciaActual, segundos: segundosActuales };
+    if (!ultimoPunto) {
+      return {
+        ruta: rutaTracking,
+        distancia: distanciaActual,
+        segundos: segundosActuales,
+        meta: metaTracking,
+        ...distanciaInfo,
+      };
+    }
 
     const tiempoSinPunto = Date.now() - ultimoPunto.timestamp;
     const sinSenyal = tiempoSinPunto > GPS_TIMEOUT_SIN_SENYAL_MS;
@@ -224,7 +232,13 @@ export default function CorrerScreen() {
       }
     }
 
-    return { ruta: rutaTracking, distancia: distanciaActual, segundos: segundosActuales };
+    return {
+      ruta: rutaTracking,
+      distancia: distanciaActual,
+      segundos: segundosActuales,
+      meta: metaTracking,
+      ...distanciaInfo,
+    };
   };
 
   const calcularSegundosMeta = (meta) => {
@@ -283,9 +297,18 @@ export default function CorrerScreen() {
   const continuarCarreraPendiente = async () => {
     const metaTracking = await obtenerMetaTracking();
     const segundoPlanoActivo = await trackingSegundoPlanoActivo();
-    const usaSegundoPlano = Boolean(metaTracking?.segundoPlano && segundoPlanoActivo);
+    let usaSegundoPlano = Boolean(metaTracking?.segundoPlano && segundoPlanoActivo);
 
-    if (!usaSegundoPlano) {
+    if (metaTracking?.segundoPlano && !segundoPlanoActivo && !metaTracking?.pausada) {
+      try {
+        await iniciarTrackingCarrera();
+        usaSegundoPlano = true;
+      } catch {
+        usaSegundoPlano = false;
+      }
+    }
+
+    if (!usaSegundoPlano && !metaTracking?.pausada) {
       foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
         sincronizarTracking().catch(console.error);
       });
@@ -352,7 +375,7 @@ export default function CorrerScreen() {
     if (!metaTracking || rutaTracking.length === 0) return;
 
     await sincronizarTracking();
-    const distanciaPendiente = metaTracking.distanciaAcumulada ?? calcularDistanciaFiltrada(rutaTracking);
+    const { distancia: distanciaPendiente } = resolverDistanciaTracking(rutaTracking, metaTracking);
     const segundosPendientes = calcularSegundosMeta(metaTracking);
     Alert.alert(
       metaTracking.pausada ? 'Carrera pausada' : 'Carrera en curso',
@@ -465,22 +488,22 @@ export default function CorrerScreen() {
       setSegundos(0);
       barrioNombreRef.current = null;
       setBarrioActual(null);
-      setTrackingSegundoPlano(permiteSegundoPlano);
+      const usaServicioContinuo = permiteSegundoPlano || Platform.OS === 'android';
+      setTrackingSegundoPlano(usaServicioContinuo);
       setPausada(false);
       rutaRef.current = [];
       distanciaRef.current = 0;
       segundosRef.current = 0;
 
-      await prepararTrackingCarrera({ segundoPlano: permiteSegundoPlano });
+      await prepararTrackingCarrera({ segundoPlano: usaServicioContinuo });
       const loc = await obtenerPrimeraUbicacion();
       await agregarPuntosTracking([loc]);
 
-      if (permiteSegundoPlano) {
+      if (usaServicioContinuo) {
         try {
           await iniciarTrackingCarrera();
         } catch {
           // El tracking en segundo plano no está disponible, continuar en primer plano
-          permiteSegundoPlano = false;
           setTrackingSegundoPlano(false);
           foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
             sincronizarTracking().catch(console.error);
@@ -527,7 +550,7 @@ export default function CorrerScreen() {
     foregroundWatchRef.current?.remove();
     foregroundWatchRef.current = null;
     await pararTrackingCarrera().catch(e => registrarError(e, 'pararTrackingCarrera'));
-    const trackingFinal = await sincronizarTracking();
+    const trackingFinal = await sincronizarTracking({ forzarRecalculo: true });
     const rutaFinal = trackingFinal.ruta;
     const distanciaFinal = trackingFinal.distancia;
     const segundosFinales = trackingFinal.segundos;
@@ -544,6 +567,15 @@ export default function CorrerScreen() {
     const validacion = validarCarrera(distanciaFinal, segundosFinales);
 
     if (!validacion.valida) {
+      registrarEvento('carrera_descartada_cliente', {
+        motivo: validacion.motivo,
+        distancia_m: Math.round(distanciaFinal),
+        distancia_acumulada_m: Math.round(trackingFinal.distanciaAcumulada ?? 0),
+        distancia_recalculada_m: Math.round(trackingFinal.distanciaRecalculada ?? 0),
+        puntos_ruta: rutaFinal.length,
+        duracion_s: segundosFinales,
+        segundo_plano: Boolean(trackingFinal.meta?.segundoPlano),
+      });
       await descartarCarreraTerminada(
         'Carrera terminada',
         `No se guarda porque no cumple las condiciones: ${validacion.motivo}.`
@@ -1000,6 +1032,34 @@ export default function CorrerScreen() {
     const handleAppState = async (nextState) => {
       if (nextState !== 'active') return;
       enviarCarrerasPendientes().catch(console.error);
+
+      // Si hay carrera activa y el servicio continuo no está vivo al volver a primer plano,
+      // intentamos levantarlo de nuevo antes de caer al watcher normal.
+      try {
+        const meta = await obtenerMetaTracking();
+        const bgActivo = meta && !meta.pausada && meta.segundoPlano
+          ? await trackingSegundoPlanoActivo()
+          : false;
+        if (meta && !meta.pausada && !bgActivo && !foregroundWatchRef.current) {
+          let servicioReiniciado = false;
+          if (meta.segundoPlano) {
+            try {
+              await iniciarTrackingCarrera();
+              setTrackingSegundoPlano(true);
+              servicioReiniciado = true;
+            } catch {
+              setTrackingSegundoPlano(false);
+            }
+          }
+
+          if (!servicioReiniciado) {
+            foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
+              sincronizarTracking().catch(console.error);
+            });
+          }
+        }
+      } catch {}
+
       if (!esperandoStravaRef.current) return;
       esperandoStravaRef.current = false;
       const uid = auth.currentUser?.uid;
@@ -1486,6 +1546,11 @@ function VistaCorrer({ barrio, uid, distancia, segundos, ritmoActual, gpsDebil, 
         )}
       </View>
 
+      {/* Aviso si no hay tracking en segundo plano */}
+      {!trackingSegundoPlano && !pausada && (
+        <Text style={styles.avisoSegundoPlano}>⚠ Mantén la pantalla encendida — la ruta no graba con pantalla bloqueada</Text>
+      )}
+
       {/* Tarjetas grandes: km y tiempo */}
       <View style={styles.filaTarjetas}>
         <View style={styles.tarjetaStat}>
@@ -1767,6 +1832,7 @@ const styles = StyleSheet.create({
   },
   barrio: { color: colors.gold, fontSize: 13, textAlign: 'center', marginBottom: 12 },
   gpsDebilTexto: { color: colors.conquest, fontSize: 12, textAlign: 'center', marginBottom: 8 },
+  avisoSegundoPlano: { color: colors.conquest, fontSize: 11, textAlign: 'center', marginBottom: 8, paddingHorizontal: 12 },
   stats: {
     flexDirection: 'row',
     justifyContent: 'space-around',

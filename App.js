@@ -22,12 +22,11 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { auth, db } from './firebaseConfig';
-import './utils/trackingCarrera';
 import { registrarNotificaciones } from './utils/notificaciones';
 import { prepararSolicitudResena } from './utils/reviews';
 import * as Notifications from 'expo-notifications';
 import { colors } from './utils/theme';
-import { obtenerMetaTracking } from './utils/trackingCarrera';
+import { obtenerMetaTracking, obtenerRutaTracking, resolverDistanciaTracking } from './utils/trackingCarrera';
 import { enviarCarrerasPendientesBackground } from './utils/carrerasPendientes';
 import { guardarStravaUrl } from './utils/stravaDeepLink';
 import { formatTiempo } from './utils/formatters';
@@ -191,14 +190,17 @@ export default function App() {
     }
 
     const actualizarCarreraActiva = async () => {
-      const meta = await obtenerMetaTracking();
+      const [meta, ruta] = await Promise.all([
+        obtenerMetaTracking(),
+        obtenerRutaTracking(),
+      ]);
 
       if (!meta) {
         setCarreraActiva(null);
         return;
       }
 
-      const distancia = meta.distanciaAcumulada ?? 0;
+      const { distancia } = resolverDistanciaTracking(ruta, meta);
       const ahoraParaTiempo = meta.pausada && meta.pausadaEn ? meta.pausadaEn : Date.now();
       const segundos = Math.max(0, Math.floor((ahoraParaTiempo - meta.iniciadaEn - (meta.tiempoPausadoMs ?? 0)) / 1000));
       setCarreraActiva({ distancia, segundos, pausada: Boolean(meta.pausada) });

@@ -10,6 +10,15 @@ export const GPS_TIMEOUT_SIN_SENYAL_MS = 30000;
 
 const RUTA_KEY = 'conqurun:carrera:ruta';
 const META_KEY = 'conqurun:carrera:meta';
+let colaEscrituraTracking = Promise.resolve();
+
+const encolarEscrituraTracking = (operacion) => {
+  const siguiente = colaEscrituraTracking.then(operacion, operacion);
+  colaEscrituraTracking = siguiente.catch(() => {});
+  return siguiente;
+};
+
+export const esperarEscriturasTracking = () => colaEscrituraTracking;
 
 const normalizarPunto = (location) => ({
   latitude: location.coords.latitude,
@@ -57,6 +66,40 @@ export const calcularDistanciaFiltrada = (puntos) => puntos.reduce((total, punto
   if (!puntoCuentaParaDistancia(anterior, punto)) return total;
   return total + getDistancia(anterior, punto);
 }, 0);
+
+const normalizarDistancia = (valor) => {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero >= 0 ? numero : null;
+};
+
+export const resolverDistanciaTracking = (
+  ruta = [],
+  meta = null,
+  { forzarRecalculo = false } = {}
+) => {
+  const distanciaAcumulada = normalizarDistancia(meta?.distanciaAcumulada);
+  const tieneRuta = Array.isArray(ruta) && ruta.length >= 2;
+  const necesitaRecalculo = forzarRecalculo || distanciaAcumulada == null || (tieneRuta && distanciaAcumulada < 200);
+  const distanciaRecalculada = necesitaRecalculo ? calcularDistanciaFiltrada(ruta) : null;
+  let distancia = distanciaAcumulada ?? distanciaRecalculada ?? 0;
+
+  if (distanciaRecalculada != null) {
+    const diferencia = Math.abs(distanciaRecalculada - distancia);
+    const diferenciaRelativa = diferencia / Math.max(distanciaRecalculada, distancia, 1);
+    const acumuladaNoSoportaCarrera = distancia < 200 && distanciaRecalculada >= 200;
+    const divergenciaCritica = forzarRecalculo && diferencia > 100 && diferenciaRelativa > 0.35;
+    if (acumuladaNoSoportaCarrera || divergenciaCritica || distanciaAcumulada == null) {
+      distancia = distanciaRecalculada;
+    }
+  }
+
+  return {
+    distancia,
+    distanciaAcumulada,
+    distanciaRecalculada,
+    usaRecalculada: distanciaRecalculada != null && distancia !== distanciaAcumulada,
+  };
+};
 
 const distanciaPuntoSegmentoMetros = (punto, inicio, fin) => {
   const latReferencia = ((inicio.latitude + fin.latitude) / 2) * (Math.PI / 180);
@@ -139,7 +182,7 @@ export const obtenerRutaTracking = () => leerJson(RUTA_KEY, []);
 
 export const obtenerMetaTracking = () => leerJson(META_KEY, null);
 
-export const agregarPuntosTracking = async (locations = []) => {
+const agregarPuntosTrackingSincronizado = async (locations = []) => {
   if (!locations.length) return [];
 
   const [[, rutaStr], [, metaStr]] = await AsyncStorage.multiGet([RUTA_KEY, META_KEY]);
@@ -147,7 +190,12 @@ export const agregarPuntosTracking = async (locations = []) => {
   let meta = null;
   try { if (rutaStr) rutaActual = JSON.parse(rutaStr); } catch {}
   try { if (metaStr) meta = JSON.parse(metaStr); } catch {}
-  const puntos = locations.map(normalizarPunto);
+  if (!meta) return rutaActual;
+
+  const inicioValido = (meta.iniciadaEn ?? 0) - 60000;
+  const puntos = locations
+    .map(normalizarPunto)
+    .filter(punto => !meta.iniciadaEn || punto.timestamp >= inicioValido);
   const rutaNueva = [...rutaActual];
   let distanciaAcumulada = meta?.distanciaAcumulada ?? 0;
 
@@ -181,8 +229,12 @@ export const agregarPuntosTracking = async (locations = []) => {
   return rutaNueva;
 };
 
+export const agregarPuntosTracking = (locations = []) => (
+  encolarEscrituraTracking(() => agregarPuntosTrackingSincronizado(locations))
+);
+
 export const prepararTrackingCarrera = async ({ segundoPlano = false } = {}) => {
-  await AsyncStorage.multiSet([
+  await encolarEscrituraTracking(() => AsyncStorage.multiSet([
     [RUTA_KEY, JSON.stringify([])],
     [META_KEY, JSON.stringify({
       iniciadaEn: Date.now(),
@@ -190,12 +242,13 @@ export const prepararTrackingCarrera = async ({ segundoPlano = false } = {}) => 
       pausada: false,
       pausadaEn: null,
       tiempoPausadoMs: 0,
+      distanciaAcumulada: 0,
     })],
-  ]);
+  ]));
 };
 
 export const limpiarTrackingCarrera = async () => {
-  await AsyncStorage.multiRemove([RUTA_KEY, META_KEY]);
+  await encolarEscrituraTracking(() => AsyncStorage.multiRemove([RUTA_KEY, META_KEY]));
 };
 
 export const iniciarTrackingCarrera = async () => {
@@ -206,6 +259,7 @@ export const iniciarTrackingCarrera = async () => {
 
   await Location.startLocationUpdatesAsync(CARRERA_LOCATION_TASK, {
     accuracy: Location.Accuracy.High,
+    activityType: Location.ActivityType.Fitness,
     distanceInterval: 5,
     timeInterval: 2000,
     pausesUpdatesAutomatically: false,
@@ -221,6 +275,7 @@ export const iniciarTrackingCarrera = async () => {
 export const iniciarTrackingPrimerPlano = async (onUpdate) => Location.watchPositionAsync(
   {
     accuracy: Location.Accuracy.High,
+    activityType: Location.ActivityType.Fitness,
     distanceInterval: 5,
     timeInterval: 2000,
   },
@@ -238,34 +293,38 @@ export const pararTrackingCarrera = async () => {
 };
 
 export const pausarTrackingCarrera = async () => {
-  const meta = await obtenerMetaTracking();
-  if (!meta || meta.pausada) return;
-
   await pararTrackingCarrera();
-  await AsyncStorage.setItem(META_KEY, JSON.stringify({
-    ...meta,
-    pausada: true,
-    pausadaEn: Date.now(),
-  }));
+  await encolarEscrituraTracking(async () => {
+    const meta = await obtenerMetaTracking();
+    if (!meta || meta.pausada) return;
+
+    await AsyncStorage.setItem(META_KEY, JSON.stringify({
+      ...meta,
+      pausada: true,
+      pausadaEn: Date.now(),
+    }));
+  });
 };
 
 export const reanudarTrackingCarrera = async () => {
-  const meta = await obtenerMetaTracking();
-  if (!meta) return null;
+  return encolarEscrituraTracking(async () => {
+    const meta = await obtenerMetaTracking();
+    if (!meta) return null;
 
-  const ahora = Date.now();
-  const tiempoPausadoMs = meta.pausadaEn
-    ? (meta.tiempoPausadoMs ?? 0) + (ahora - meta.pausadaEn)
-    : (meta.tiempoPausadoMs ?? 0);
-  const metaNueva = {
-    ...meta,
-    pausada: false,
-    pausadaEn: null,
-    tiempoPausadoMs,
-  };
+    const ahora = Date.now();
+    const tiempoPausadoMs = meta.pausadaEn
+      ? (meta.tiempoPausadoMs ?? 0) + (ahora - meta.pausadaEn)
+      : (meta.tiempoPausadoMs ?? 0);
+    const metaNueva = {
+      ...meta,
+      pausada: false,
+      pausadaEn: null,
+      tiempoPausadoMs,
+    };
 
-  await AsyncStorage.setItem(META_KEY, JSON.stringify(metaNueva));
-  return metaNueva;
+    await AsyncStorage.setItem(META_KEY, JSON.stringify(metaNueva));
+    return metaNueva;
+  });
 };
 
 export const trackingSegundoPlanoActivo = () => (
