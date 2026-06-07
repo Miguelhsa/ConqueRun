@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from 'react-native';
 import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
-import { esCarreraPuntuable, esCarreraStravaVerificada, normalizarCarrera } from '../utils/carreras';
+import { esCarreraPuntuable, esCarreraStravaVerificada, normalizarCarrera, puedeMostrarEnlaceStrava } from '../utils/carreras';
 import { formatRitmo } from '../utils/formatters';
 import { colors, radius } from '../utils/theme';
 import { EstadoVacio, PantallaCargando } from '../components/ui';
@@ -88,7 +88,7 @@ export default function HistorialScreen() {
                   ))}
                 </View>
               )}
-              {carrera.stravaActivityUrl && (
+              {puedeMostrarEnlaceStrava(carrera) && (
                 <TouchableOpacity onPress={() => Linking.openURL(carrera.stravaActivityUrl)}>
                   <Text style={styles.stravaLink}>Ver en Strava</Text>
                 </TouchableOpacity>

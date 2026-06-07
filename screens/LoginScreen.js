@@ -173,7 +173,7 @@ export default function LoginScreen({ onLogin }) {
           editable={!cargando}
         />
 
-        {esRegistro && (
+        {(esRegistro || !aceptaTerminos) && (
           <>
             <TouchableOpacity
               style={styles.checkboxFila}
@@ -185,7 +185,7 @@ export default function LoginScreen({ onLogin }) {
                 {aceptaTerminos && <Text style={styles.checkboxTick}>✓</Text>}
               </View>
               <Text style={styles.checkboxTexto}>
-                He leído y acepto los{' '}
+                {esRegistro ? 'He leído y acepto los' : 'Para crear una cuenta nueva, acepta los'}{' '}
                 <Text
                   style={styles.enlace}
                   onPress={() => Linking.openURL(URL_TERMINOS)}
@@ -199,6 +199,7 @@ export default function LoginScreen({ onLogin }) {
                 >
                   Política de Privacidad
                 </Text>
+                {!esRegistro ? '. Si ya tienes cuenta, puedes iniciar sesión sin marcarla.' : ''}
               </Text>
             </TouchableOpacity>
           </>

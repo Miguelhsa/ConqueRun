@@ -1,6 +1,9 @@
 {
   "functions": {
-    "source": "functions"
+    "source": "functions",
+    "predeploy": [
+      "node scripts/guardAppCheckEnforce.mjs"
+    ]
   },
   "firestore": {
     "rules": "firestore.rules",

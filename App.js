@@ -15,6 +15,7 @@ if (!__DEV__) {
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { AppState, Linking, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Application from 'expo-application';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -26,6 +27,7 @@ import { registrarNotificaciones } from './utils/notificaciones';
 import { prepararSolicitudResena } from './utils/reviews';
 import * as Notifications from 'expo-notifications';
 import { colors } from './utils/theme';
+import { diagnosticarAppCheck } from './utils/appCheckDiagnostics';
 import { obtenerMetaTracking, obtenerRutaTracking, resolverDistanciaTracking } from './utils/trackingCarrera';
 import { enviarCarrerasPendientesBackground } from './utils/carrerasPendientes';
 import { guardarStravaUrl } from './utils/stravaDeepLink';
@@ -67,6 +69,7 @@ const compararVersion = (a, b) => {
 };
 
 const SPLASH_MIN_MS = 2500;
+const biometricPreferenceKey = (uid) => `conqurun:biometria_habilitada:${uid}`;
 
 export default function App() {
   const [usuario, setUsuario] = useState(null);
@@ -143,7 +146,7 @@ export default function App() {
         if (user) {
           identificarUsuario(user.uid);
           if (!loginManualRef.current) {
-            setBiometriaBloqueada(await debeUsarBiometria());
+            setBiometriaBloqueada(await debeUsarBiometria(user.uid));
           }
           loginManualRef.current = false;
           const perfil = await comprobarPerfil(user.uid);
@@ -182,6 +185,11 @@ export default function App() {
     if (!usuario || biometriaBloqueada || !tieneNickname || !tieneCiudad || (onboardingPendiente && !onboardingCompletado)) return;
     reintentarCarrerasPendientes();
   }, [usuario, biometriaBloqueada, tieneNickname, tieneCiudad, onboardingPendiente, onboardingCompletado, reintentarCarrerasPendientes]);
+
+  useEffect(() => {
+    if (!usuario || biometriaBloqueada) return;
+    diagnosticarAppCheck().catch(() => {});
+  }, [usuario, biometriaBloqueada]);
 
   useEffect(() => {
     if (!usuario || biometriaBloqueada || !tieneNickname || (onboardingPendiente && !onboardingCompletado)) {
@@ -255,7 +263,11 @@ export default function App() {
       .finally(() => prepararSolicitudResena(uid).catch(() => {}));
   };
 
-  const debeUsarBiometria = async () => {
+  const debeUsarBiometria = async (uid) => {
+    if (!uid) return false;
+    const biometriaHabilitada = await AsyncStorage.getItem(biometricPreferenceKey(uid));
+    if (biometriaHabilitada !== 'true') return false;
+
     const compatible = await LocalAuthentication.hasHardwareAsync();
     if (!compatible) return false;
 

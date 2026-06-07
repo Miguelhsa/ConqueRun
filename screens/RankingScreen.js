@@ -3,7 +3,7 @@ import { View, Text, FlatList, StyleSheet, Image, TouchableOpacity, Alert, Image
 import { useFocusEffect } from '@react-navigation/native';
 import { PantallaCargando, EstadoVacio } from '../components/ui';
 import { db, auth } from '../firebaseConfig';
-import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { LOGROS } from '../utils/logros';
 import { bloquearUsuario, crearReporte, fotoAprobada } from '../utils/moderacion';
 import { CIUDAD_FALLBACK } from '../utils/ciudades';
@@ -118,13 +118,11 @@ export default function RankingScreen() {
 
   const cargarGrupos = async (ciudadId) => {
     const q = ciudadId
-      ? query(collection(db, 'grupos'), where('ciudadId', '==', ciudadId), where('esPublico', '==', true), limit(200))
-      : query(collection(db, 'grupos'), where('esPublico', '==', true), limit(200));
+      ? query(collection(db, 'grupos'), where('ciudadId', '==', ciudadId), where('esPublico', '==', true), orderBy('puntosTotales', 'desc'), limit(10))
+      : query(collection(db, 'grupos'), where('esPublico', '==', true), orderBy('puntosTotales', 'desc'), limit(10));
     const snap = await getDocs(q);
     const lista = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.puntosTotales ?? 0) - (a.puntosTotales ?? 0))
-      .slice(0, 10)
       .map((g, i) => ({ ...g, posicion: i + 1 }));
     setRankingGrupos(lista);
   };

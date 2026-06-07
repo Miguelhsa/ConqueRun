@@ -14,7 +14,12 @@ import {
   validarCarrera,
 } from '../utils/grupos';
 import { normalizarCarrera, esCarreraPuntuable } from '../utils/carreras';
-import { guardarCarreraPendiente, obtenerCarrerasPendientes, eliminarCarreraPendiente, marcarIntentoFallido } from '../utils/carrerasPendientes';
+import {
+  guardarCarreraPendiente,
+  obtenerCarrerasPendientes,
+  eliminarCarreraPendiente,
+  enviarCarrerasPendientesConGuard,
+} from '../utils/carrerasPendientes';
 import { consumirStravaUrl } from '../utils/stravaDeepLink';
 import { registrarError, registrarEvento } from '../utils/monitoring';
 import DetalleCarreraScreen from './DetalleCarreraScreen';
@@ -29,6 +34,7 @@ import {
   GPS_ACCURACY_MAX_METROS,
   GPS_TIMEOUT_SIN_SENYAL_MS,
   agregarPuntosTracking,
+  esperarEscriturasTracking,
   limpiarTrackingCarrera,
   iniciarTrackingCarrera,
   iniciarTrackingPrimerPlano,
@@ -45,6 +51,8 @@ import {
 
 const STRAVA_CLIENT_ID = '238442';
 const STRAVA_REDIRECT_URI = 'https://us-central1-conquerrun-8d30e.cloudfunctions.net/stravaOAuthCallback';
+
+const crearCarreraId = (uid) => `${uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 export default function CorrerScreen() {
   const [corriendo, setCorriendo] = useState(false);
@@ -68,6 +76,7 @@ export default function CorrerScreen() {
   const [importandoStrava, setImportandoStrava] = useState(false);
   const [desconectandoStrava, setDesconectandoStrava] = useState(false);
   const [carrerasPendientesCount, setCarrerasPendientesCount] = useState(0);
+  const [finalizandoCarrera, setFinalizandoCarrera] = useState(false);
   const timerRef = useRef(null);
   const foregroundWatchRef = useRef(null);
   const barriosRef = useRef([]);
@@ -85,10 +94,12 @@ export default function CorrerScreen() {
   const barrioNombreRef = useRef(null);
   const ritmoActualRef = useRef(null);
   const preparandoGpsRef = useRef(false);
+  const finalizandoCarreraRef = useRef(false);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);
     foregroundWatchRef.current?.remove();
+    foregroundWatchRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -241,6 +252,31 @@ export default function CorrerScreen() {
     };
   };
 
+  const detenerWatcherPrimerPlano = () => {
+    foregroundWatchRef.current?.remove();
+    foregroundWatchRef.current = null;
+  };
+
+  const iniciarWatcherPrimerPlano = async () => {
+    detenerWatcherPrimerPlano();
+    setTrackingSegundoPlano(false);
+    foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
+      sincronizarTracking().catch(console.error);
+    });
+  };
+
+  const iniciarFinalizacionCarrera = () => {
+    if (finalizandoCarreraRef.current) return false;
+    finalizandoCarreraRef.current = true;
+    setFinalizandoCarrera(true);
+    return true;
+  };
+
+  const terminarFinalizacionCarrera = () => {
+    finalizandoCarreraRef.current = false;
+    setFinalizandoCarrera(false);
+  };
+
   const calcularSegundosMeta = (meta) => {
     if (!meta?.iniciadaEn) return 0;
     const ahoraParaTiempo = meta.pausada && meta.pausadaEn ? meta.pausadaEn : Date.now();
@@ -302,6 +338,7 @@ export default function CorrerScreen() {
     if (metaTracking?.segundoPlano && !segundoPlanoActivo && !metaTracking?.pausada) {
       try {
         await iniciarTrackingCarrera();
+        detenerWatcherPrimerPlano();
         usaSegundoPlano = true;
       } catch {
         usaSegundoPlano = false;
@@ -309,9 +346,7 @@ export default function CorrerScreen() {
     }
 
     if (!usaSegundoPlano && !metaTracking?.pausada) {
-      foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
-        sincronizarTracking().catch(console.error);
-      });
+      await iniciarWatcherPrimerPlano();
     }
 
     setTrackingSegundoPlano(usaSegundoPlano);
@@ -323,8 +358,7 @@ export default function CorrerScreen() {
 
   const descartarCarreraPendiente = async () => {
     clearInterval(timerRef.current);
-    foregroundWatchRef.current?.remove();
-    foregroundWatchRef.current = null;
+    detenerWatcherPrimerPlano();
     await pararTrackingCarrera();
     await limpiarTrackingCarrera();
     rutaRef.current = [];
@@ -342,27 +376,18 @@ export default function CorrerScreen() {
   const enviarCarrerasPendientes = async () => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const pendientes = await obtenerCarrerasPendientes();
-    const propias = pendientes.filter(c => c.uid === uid);
-    if (propias.length === 0) return;
-    setCarrerasPendientesCount(propias.length);
-    const registrarCarrera = httpsCallable(getFunctions(), 'registrarCarreraConqurun');
-    for (const carrera of propias) {
-      try {
-        await registrarCarrera(carrera.payload);
-        await eliminarCarreraPendiente(carrera.id);
+    const result = await enviarCarrerasPendientesConGuard(uid, {
+      onPendientes: total => setCarrerasPendientesCount(total),
+      onProcesada: () => {
         setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
-        invalidarCacheTerritorios(carrera.payload.ciudadId).catch(() => {});
         cargarCarrerasRecientes().catch(() => {});
-      } catch (e) {
-        if (e.code === 'functions/failed-precondition' || e.code === 'functions/invalid-argument') {
-          await eliminarCarreraPendiente(carrera.id);
-          setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
-        } else {
-          await marcarIntentoFallido(carrera.id);
-          break;
-        }
-      }
+      },
+      onDescartada: () => setCarrerasPendientesCount(prev => Math.max(0, prev - 1)),
+    });
+
+    if (result?.enCurso) {
+      const pendientes = await obtenerCarrerasPendientes();
+      setCarrerasPendientesCount(pendientes.filter(c => c.uid === uid).length);
     }
   };
 
@@ -388,7 +413,7 @@ export default function CorrerScreen() {
   };
 
   const iniciarCarrera = async () => {
-    if (preparandoGpsRef.current) return;
+    if (preparandoGpsRef.current || finalizandoCarreraRef.current) return;
     preparandoGpsRef.current = true;
     setPreparandoGps(true);
     const uid = auth.currentUser?.uid;
@@ -495,24 +520,24 @@ export default function CorrerScreen() {
       distanciaRef.current = 0;
       segundosRef.current = 0;
 
-      await prepararTrackingCarrera({ segundoPlano: usaServicioContinuo });
+      await prepararTrackingCarrera({
+        segundoPlano: usaServicioContinuo,
+        carreraId: crearCarreraId(uid),
+        uid,
+      });
       const loc = await obtenerPrimeraUbicacion();
       await agregarPuntosTracking([loc]);
 
       if (usaServicioContinuo) {
         try {
           await iniciarTrackingCarrera();
+          detenerWatcherPrimerPlano();
         } catch {
           // El tracking en segundo plano no está disponible, continuar en primer plano
-          setTrackingSegundoPlano(false);
-          foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
-            sincronizarTracking().catch(console.error);
-          });
+          await iniciarWatcherPrimerPlano();
         }
       } else {
-        foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
-          sincronizarTracking().catch(console.error);
-        });
+        await iniciarWatcherPrimerPlano();
       }
 
       await sincronizarTracking();
@@ -539,21 +564,30 @@ export default function CorrerScreen() {
   };
 
   const pararCarrera = async () => {
-    const uid = auth.currentUser?.uid;
-    const carreraId = uid
-      ? `${uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      : null;
-    setCorriendo(false);
-    setTrackingSegundoPlano(false);
-    setPausada(false);
-    clearInterval(timerRef.current);
-    foregroundWatchRef.current?.remove();
-    foregroundWatchRef.current = null;
-    await pararTrackingCarrera().catch(e => registrarError(e, 'pararTrackingCarrera'));
-    const trackingFinal = await sincronizarTracking({ forzarRecalculo: true });
-    const rutaFinal = trackingFinal.ruta;
-    const distanciaFinal = trackingFinal.distancia;
-    const segundosFinales = trackingFinal.segundos;
+    if (!iniciarFinalizacionCarrera()) return;
+    try {
+      const uidSesion = auth.currentUser?.uid;
+      setCorriendo(false);
+      setTrackingSegundoPlano(false);
+      setPausada(false);
+      clearInterval(timerRef.current);
+      detenerWatcherPrimerPlano();
+      await pararTrackingCarrera().catch(e => registrarError(e, 'pararTrackingCarrera'));
+      await esperarEscriturasTracking();
+      const trackingFinal = await sincronizarTracking({ forzarRecalculo: true });
+      const rutaFinal = trackingFinal.ruta;
+      const distanciaFinal = trackingFinal.distancia;
+      const segundosFinales = trackingFinal.segundos;
+      const uidMeta = typeof trackingFinal.meta?.uid === 'string' && trackingFinal.meta.uid
+        ? trackingFinal.meta.uid
+        : null;
+      const uid = uidMeta ?? uidSesion;
+      const sesionCoincide = Boolean(uid && uidSesion === uid);
+      const carreraId = uid
+        ? (typeof trackingFinal.meta?.carreraId === 'string' && trackingFinal.meta.carreraId.startsWith(`${uid}_`)
+          ? trackingFinal.meta.carreraId
+          : crearCarreraId(uid))
+        : null;
 
     if (rutaFinal.length < 2) {
       await descartarCarreraTerminada(
@@ -585,15 +619,53 @@ export default function CorrerScreen() {
 
     const rutaFiltrada = (() => {
       const filtrada = [rutaFinal[0]];
+      let cortePendiente = false;
       for (let i = 1; i < rutaFinal.length; i++) {
         const p = rutaFinal[i];
-        if (p.segmentStart || p.gapStart || p.accuracy == null || p.accuracy <= 50) filtrada.push(p);
+        if (p.segmentStart || p.gapStart) {
+          filtrada.push(p);
+          cortePendiente = false;
+          continue;
+        }
+        if (p.accuracy != null && p.accuracy > GPS_ACCURACY_MAX_METROS) {
+          cortePendiente = true;
+          continue;
+        }
+        filtrada.push(cortePendiente ? { ...p, gapStart: true } : p);
+        cortePendiente = false;
       }
       return filtrada.length >= 2 ? filtrada : rutaFinal;
     })();
-    const rutaParaGuardar = simplificarRutaParaGuardar(rutaFiltrada);
+    const rutaParaEnviar = rutaFiltrada.length > 20000
+      ? simplificarRutaParaGuardar(rutaFiltrada, { toleranciaMetros: 1, maxPuntos: 20000 })
+      : rutaFiltrada;
     let grupoActivo = null;
     let pendingId = null;
+
+    if (!uid || !carreraId) {
+      await limpiarTrackingCarrera().catch(() => {});
+      Alert.alert('Sesión expirada', 'No se pudo guardar la carrera porque la sesión no está disponible.');
+      return;
+    }
+
+    if (!sesionCoincide) {
+      const payload = {
+        carreraId,
+        ruta: rutaParaEnviar,
+        distancia: Math.round(distanciaFinal),
+        duracion: segundosFinales,
+        grupoActivoId: null,
+        ciudadId: ciudadRef.current.id,
+      };
+      const savedId = await guardarCarreraPendiente(uid, payload);
+      if (savedId) {
+        await limpiarTrackingCarrera();
+        Alert.alert('Sesión expirada', 'Tu carrera se ha guardado en este dispositivo. Inicia sesión de nuevo para enviarla.');
+      } else {
+        Alert.alert('Error al guardar', 'No se pudo guardar la carrera localmente. Comprueba el almacenamiento del dispositivo e inténtalo de nuevo.');
+      }
+      return;
+    }
 
     try {
       await cargarCiudadYBarrios(rutaFinal[0]);
@@ -610,7 +682,7 @@ export default function CorrerScreen() {
       // está en AsyncStorage y se reenvía automáticamente al volver.
       const payload = {
         carreraId,
-        ruta: rutaParaGuardar,
+        ruta: rutaParaEnviar,
         distancia: Math.round(distanciaFinal),
         duracion: segundosFinales,
         grupoActivoId: grupoActivo?.id ?? null,
@@ -755,7 +827,7 @@ export default function CorrerScreen() {
         if (uid && !pendingId) {
           savedId = await guardarCarreraPendiente(uid, {
             carreraId,
-            ruta: rutaParaGuardar,
+            ruta: rutaParaEnviar,
             distancia: Math.round(distanciaFinal),
             duracion: segundosFinales,
             grupoActivoId: grupoActivo?.id ?? null,
@@ -783,6 +855,9 @@ export default function CorrerScreen() {
           Alert.alert('Sin conexión', 'Tu carrera se ha guardado. Se enviará automáticamente cuando tengas conexión.', [{ text: 'Entendido' }]);
         }
       }
+    }
+    } finally {
+      terminarFinalizacionCarrera();
     }
   };
 
@@ -818,30 +893,36 @@ export default function CorrerScreen() {
   };
 
   const pausarCarrera = async () => {
+    if (finalizandoCarreraRef.current) return;
     clearInterval(timerRef.current);
-    foregroundWatchRef.current?.remove();
-    foregroundWatchRef.current = null;
+    detenerWatcherPrimerPlano();
     await pausarTrackingCarrera();
     setPausada(true);
     await sincronizarTracking();
   };
 
   const reanudarCarrera = async () => {
-    if (preparandoGpsRef.current) return;
+    if (preparandoGpsRef.current || finalizandoCarreraRef.current) return;
     preparandoGpsRef.current = true;
     setPreparandoGps(true);
     try {
       const meta = await reanudarTrackingCarrera();
       const loc = await obtenerPrimeraUbicacion();
       await agregarPuntosTracking([{ ...loc, segmentStart: true }]);
+      let servicioReiniciado = false;
       if (meta?.segundoPlano) {
-        await iniciarTrackingCarrera();
-        setTrackingSegundoPlano(true);
-      } else {
-        foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
-          sincronizarTracking().catch(console.error);
-        });
-        setTrackingSegundoPlano(false);
+        try {
+          await iniciarTrackingCarrera();
+          detenerWatcherPrimerPlano();
+          setTrackingSegundoPlano(true);
+          servicioReiniciado = true;
+        } catch {
+          servicioReiniciado = false;
+        }
+      }
+
+      if (!servicioReiniciado) {
+        await iniciarWatcherPrimerPlano();
       }
       setPausada(false);
       await sincronizarTracking();
@@ -861,7 +942,10 @@ export default function CorrerScreen() {
     }
   };
 
-  const confirmarPararCarrera = () => setConfirmarFin(true);
+  const confirmarPararCarrera = () => {
+    if (preparandoGpsRef.current || finalizandoCarreraRef.current) return;
+    setConfirmarFin(true);
+  };
 
   const cerrarResumenCarrera = () => {
     const uid = auth.currentUser?.uid;
@@ -1031,34 +1115,41 @@ export default function CorrerScreen() {
   useEffect(() => {
     const handleAppState = async (nextState) => {
       if (nextState !== 'active') return;
-      enviarCarrerasPendientes().catch(console.error);
+      // Retry de carreras pendientes centralizado en App.js — no duplicar aquí.
 
       // Si hay carrera activa y el servicio continuo no está vivo al volver a primer plano,
       // intentamos levantarlo de nuevo antes de caer al watcher normal.
-      try {
-        const meta = await obtenerMetaTracking();
-        const bgActivo = meta && !meta.pausada && meta.segundoPlano
-          ? await trackingSegundoPlanoActivo()
-          : false;
-        if (meta && !meta.pausada && !bgActivo && !foregroundWatchRef.current) {
-          let servicioReiniciado = false;
-          if (meta.segundoPlano) {
-            try {
-              await iniciarTrackingCarrera();
+      if (!finalizandoCarreraRef.current) {
+        try {
+          const meta = await obtenerMetaTracking();
+          if (meta && !meta.pausada) {
+            const bgActivo = meta.segundoPlano
+              ? await trackingSegundoPlanoActivo()
+              : false;
+
+            if (bgActivo) {
+              detenerWatcherPrimerPlano();
               setTrackingSegundoPlano(true);
-              servicioReiniciado = true;
-            } catch {
-              setTrackingSegundoPlano(false);
+            } else {
+              let servicioReiniciado = false;
+              if (meta.segundoPlano) {
+                try {
+                  await iniciarTrackingCarrera();
+                  detenerWatcherPrimerPlano();
+                  setTrackingSegundoPlano(true);
+                  servicioReiniciado = true;
+                } catch {
+                  servicioReiniciado = false;
+                }
+              }
+
+              if (!servicioReiniciado) {
+                await iniciarWatcherPrimerPlano();
+              }
             }
           }
-
-          if (!servicioReiniciado) {
-            foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
-              sincronizarTracking().catch(console.error);
-            });
-          }
-        }
-      } catch {}
+        } catch {}
+      }
 
       if (!esperandoStravaRef.current) return;
       esperandoStravaRef.current = false;
@@ -1121,8 +1212,13 @@ export default function CorrerScreen() {
         visible={confirmarFin}
         distancia={distancia}
         segundos={segundos}
-        onCancelar={() => setConfirmarFin(false)}
-        onConfirmar={() => { setConfirmarFin(false); pararCarrera(); }}
+        finalizando={finalizandoCarrera}
+        onCancelar={() => { if (!finalizandoCarrera) setConfirmarFin(false); }}
+        onConfirmar={() => {
+          if (finalizandoCarreraRef.current) return;
+          setConfirmarFin(false);
+          pararCarrera().catch(e => registrarError(e, 'pararCarrera'));
+        }}
       />
 
       <ResumenCarreraModal
@@ -1158,6 +1254,7 @@ export default function CorrerScreen() {
           pausada={pausada}
           trackingSegundoPlano={trackingSegundoPlano}
           preparandoGps={preparandoGps}
+          finalizandoCarrera={finalizandoCarrera}
           onPausar={pausada ? reanudarCarrera : pausarCarrera}
           onTerminar={confirmarPararCarrera}
         />
@@ -1250,13 +1347,13 @@ export default function CorrerScreen() {
 
       <View style={styles.panelInicio}>
         <TouchableOpacity
-          style={[styles.botonEmpezar, preparandoGps && styles.botonDesactivado]}
+          style={[styles.botonEmpezar, (preparandoGps || finalizandoCarrera) && styles.botonDesactivado]}
           onPress={iniciarCarrera}
-          disabled={preparandoGps}
+          disabled={preparandoGps || finalizandoCarrera}
           activeOpacity={0.85}
         >
           <Text style={styles.botonEmpezarTexto}>
-            {preparandoGps ? 'Preparando GPS...' : 'Empezar'}
+            {finalizandoCarrera ? 'Guardando carrera...' : preparandoGps ? 'Preparando GPS...' : 'Empezar'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -1341,7 +1438,7 @@ function StravaImportModal({ visible, importando, onAbrirStrava, onCancelar }) {
   );
 }
 
-function ModalConfirmarFin({ visible, distancia, segundos, onCancelar, onConfirmar }) {
+function ModalConfirmarFin({ visible, distancia, segundos, finalizando, onCancelar, onConfirmar }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancelar}>
       <View style={styles.confirmarOverlay}>
@@ -1359,11 +1456,21 @@ function ModalConfirmarFin({ visible, distancia, segundos, onCancelar, onConfirm
             </View>
           </View>
           <View style={styles.confirmarBotones}>
-            <TouchableOpacity style={styles.confirmarBotonSeguir} onPress={onCancelar}>
+            <TouchableOpacity
+              style={[styles.confirmarBotonSeguir, finalizando && { opacity: 0.5 }]}
+              onPress={onCancelar}
+              disabled={finalizando}
+            >
               <Text style={styles.confirmarBotonSeguirTexto}>Seguir corriendo</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.confirmarBotonTerminar} onPress={onConfirmar}>
-              <Text style={styles.confirmarBotonTerminarTexto}>Terminar</Text>
+            <TouchableOpacity
+              style={[styles.confirmarBotonTerminar, finalizando && { opacity: 0.5 }]}
+              onPress={onConfirmar}
+              disabled={finalizando}
+            >
+              <Text style={styles.confirmarBotonTerminarTexto}>
+                {finalizando ? 'Guardando...' : 'Terminar'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1516,9 +1623,10 @@ const formatFecha = (fecha) => {
   return new Date(ms).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
 };
 
-function VistaCorrer({ barrio, uid, distancia, segundos, ritmoActual, gpsDebil, pausada, trackingSegundoPlano, preparandoGps, onPausar, onTerminar }) {
+function VistaCorrer({ barrio, uid, distancia, segundos, ritmoActual, gpsDebil, pausada, trackingSegundoPlano, preparandoGps, finalizandoCarrera, onPausar, onTerminar }) {
   const km = (distancia / 1000).toFixed(2);
   const ritmoMedio = distancia > 0 ? segundos / (distancia / 1000) : null;
+  const accionesBloqueadas = preparandoGps || finalizandoCarrera;
 
   const esPropio = barrio?.dueno === uid;
   const esLibre = barrio && !barrio.dueno;
@@ -1577,22 +1685,24 @@ function VistaCorrer({ barrio, uid, distancia, segundos, ritmoActual, gpsDebil, 
 
       <View style={styles.botonesCarrera}>
         <TouchableOpacity
-          style={[styles.botonCarrera, pausada ? styles.botonCarreraReanudar : styles.botonCarreraPausar, preparandoGps && styles.botonDesactivado]}
+          style={[styles.botonCarrera, pausada ? styles.botonCarreraReanudar : styles.botonCarreraPausar, accionesBloqueadas && styles.botonDesactivado]}
           onPress={onPausar}
-          disabled={preparandoGps}
+          disabled={accionesBloqueadas}
           activeOpacity={0.85}
         >
           <Text style={[styles.botonCarreraTexto, pausada && { color: colors.bg }]}>
-            {preparandoGps ? 'GPS...' : pausada ? 'Reanudar' : 'Pausar'}
+            {finalizandoCarrera ? 'Guardando...' : preparandoGps ? 'GPS...' : pausada ? 'Reanudar' : 'Pausar'}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.botonCarrera, styles.botonCarreraTerminar, preparandoGps && styles.botonDesactivado]}
+          style={[styles.botonCarrera, styles.botonCarreraTerminar, accionesBloqueadas && styles.botonDesactivado]}
           onPress={onTerminar}
-          disabled={preparandoGps}
+          disabled={accionesBloqueadas}
           activeOpacity={0.85}
         >
-          <Text style={styles.botonCarreraTexto}>Terminar</Text>
+          <Text style={styles.botonCarreraTexto}>
+            {finalizandoCarrera ? 'Terminando...' : 'Terminar'}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>

@@ -28,6 +28,7 @@ export const normalizarCarrera = (carrera) => {
     verificationStatus: carrera.verificationStatus ?? ESTADOS_VERIFICACION.SELF_RECORDED,
     importedAt: carrera.importedAt ?? null,
     stravaActivityUrl: carrera.stravaActivityUrl ?? null,
+    stravaRawVisibility: carrera.stravaRawVisibility ?? null,
     puntosPersonales: carrera.puntosPersonales ?? carrera.puntos ?? 0,
     aportacionesGrupo: carrera.aportacionesGrupo ?? [],
     grupoActivoId: carrera.grupoActivoId ?? null,
@@ -116,5 +117,14 @@ export const esCarreraStravaVerificada = (carrera) => {
     normalizada.source === FUENTES_CARRERA.STRAVA &&
     normalizada.externalProvider === PROVEEDORES_EXTERNOS.STRAVA &&
     normalizada.verificationStatus === ESTADOS_VERIFICACION.STRAVA_VERIFIED
+  );
+};
+
+export const puedeMostrarEnlaceStrava = (carrera) => {
+  const normalizada = normalizarCarrera(carrera);
+  return (
+    esCarreraStravaVerificada(normalizada) &&
+    Boolean(normalizada.stravaActivityUrl) &&
+    String(normalizada.stravaRawVisibility ?? '').toLowerCase() === 'everyone'
   );
 };

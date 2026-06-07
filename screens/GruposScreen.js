@@ -6,19 +6,19 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { auth, db } from '../firebaseConfig';
-import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import {
   crearGrupo, generarRefGrupo, unirseACodigo, unirseAGrupo, salirDeGrupo, expulsarMiembro, regenerarCodigo,
   obtenerMisGrupos, obtenerGruposPublicos
 } from '../utils/grupos';
-import { FOTO_ESTADOS, contieneTextoProhibido, crearReporte, fotoAprobada } from '../utils/moderacion';
+import { contieneTextoProhibido, crearReporte, fotoAprobada } from '../utils/moderacion';
 import { colors, radius } from '../utils/theme';
 import { EstadoError, EstadoVacio, PantallaCargando } from '../components/ui';
 
 export default function GruposScreen() {
   const [misGrupos, setMisGrupos] = useState([]);
   const [gruposPublicos, setGruposPublicos] = useState([]);
-  const [offsetPublicos, setOffsetPublicos] = useState(0);
+  const [cursorPublicos, setCursorPublicos] = useState(null);
   const [hayMasPublicos, setHayMasPublicos] = useState(false);
   const [cargandoMas, setCargandoMas] = useState(false);
   const cargandoMasRef = useRef(false);
@@ -40,6 +40,14 @@ export default function GruposScreen() {
     setErrorRed(false);
     try {
       const uid = auth.currentUser?.uid;
+      if (!uid) {
+        setCiudadActualId(null);
+        setMisGrupos([]);
+        setGruposPublicos([]);
+        setCursorPublicos(null);
+        setHayMasPublicos(false);
+        return;
+      }
       const userSnap = await getDoc(doc(db, 'usuarios', uid));
       const ciudad = userSnap.exists() ? userSnap.data().ciudadActualId : null;
       setCiudadActualId(ciudad);
@@ -48,7 +56,7 @@ export default function GruposScreen() {
         obtenerMisGrupos(),
         obtenerGruposPublicos(ciudad),
       ]);
-      const { grupos: publicos, hayMas } = resultPublicos;
+      const { grupos: publicos, hayMas, cursor } = resultPublicos;
 
       // Calcular posición de cada grupo en su ciudad (una query por ciudad)
       const ciudadesUnicas = [...new Set(mios.filter(g => g.ciudadId).map(g => g.ciudadId))];
@@ -58,6 +66,7 @@ export default function GruposScreen() {
           const snap = await getDocs(query(
             collection(db, 'grupos'),
             where('ciudadId', '==', cid),
+            orderBy('puntosTotales', 'desc'),
             limit(100)
           ));
           rankingsPorCiudad[cid] = snap.docs
@@ -76,7 +85,7 @@ export default function GruposScreen() {
 
       setMisGrupos(miosConPosicion);
       setGruposPublicos(publicos.filter(g => !mios.find(m => m.id === g.id)));
-      setOffsetPublicos(publicos.length);
+      setCursorPublicos(cursor);
       setHayMasPublicos(hayMas);
     } catch (e) {
       console.error('[GruposScreen] cargarDatos error:', e);
@@ -103,9 +112,8 @@ export default function GruposScreen() {
     }
   };
 
-  const subirFotoGrupo = async (uri, grupoId) => {
+  const subirFotoGrupo = async (uri, grupoId, uid) => {
     const storage = getStorage();
-    const uid = auth.currentUser?.uid;
     if (!uid) throw new Error('Sesión no iniciada');
     const storageRef = ref(storage, `gruposPendientes/${uid}/${grupoId}.jpg`);
     const response = await fetch(uri);
@@ -123,13 +131,23 @@ export default function GruposScreen() {
       Alert.alert('Contenido no permitido', 'Revisa el nombre o la descripción del grupo');
       return;
     }
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      Alert.alert('Sesión expirada', 'Inicia sesión de nuevo para crear un grupo.');
+      return;
+    }
     setSubiendoFoto(true);
     const grupoRef = generarRefGrupo();
     let fotoPendienteUrl = null;
+    const tieneFotoPendiente = Boolean(nuevoGrupo.foto);
+    const fotoPendientePath = `gruposPendientes/${uid}/${grupoRef.id}.jpg`;
     try {
-      fotoPendienteUrl = nuevoGrupo.foto
-        ? await subirFotoGrupo(nuevoGrupo.foto, grupoRef.id)
+      fotoPendienteUrl = tieneFotoPendiente
+        ? await subirFotoGrupo(nuevoGrupo.foto, grupoRef.id, uid)
         : null;
+      if (auth.currentUser?.uid !== uid) {
+        throw new Error('Sesión expirada');
+      }
 
       const { id, codigo } = await crearGrupo(nuevoGrupo, { grupoRef, fotoPendienteUrl });
 
@@ -138,9 +156,9 @@ export default function GruposScreen() {
       cargarDatos();
       Alert.alert('¡Grupo creado!', `Comparte este código con tus compañeros:\n\n${codigo}`);
     } catch (e) {
-      if (fotoPendienteUrl) {
+      if (tieneFotoPendiente) {
         const storage = getStorage();
-        deleteObject(ref(storage, `gruposPendientes/${auth.currentUser?.uid}/${grupoRef.id}.jpg`)).catch(() => {});
+        deleteObject(ref(storage, fotoPendientePath)).catch(() => {});
       }
       Alert.alert('Error', 'No se pudo crear el grupo');
     } finally {
@@ -154,10 +172,10 @@ export default function GruposScreen() {
     setCargandoMas(true);
     try {
       const miosIds = new Set(misGrupos.map(g => g.id));
-      const { grupos: mas, hayMas: nuevoHayMas } = await obtenerGruposPublicos(ciudadActualId, { offset: offsetPublicos });
+      const { grupos: mas, hayMas: nuevoHayMas, cursor } = await obtenerGruposPublicos(ciudadActualId, { cursor: cursorPublicos });
       const nuevos = mas.filter(g => !miosIds.has(g.id));
       setGruposPublicos(prev => [...prev, ...nuevos]);
-      setOffsetPublicos(prev => prev + mas.length);
+      setCursorPublicos(cursor);
       setHayMasPublicos(nuevoHayMas);
     } finally {
       cargandoMasRef.current = false;
@@ -437,12 +455,13 @@ export default function GruposScreen() {
 
 function GrupoCard({ grupo, esMio, uid, onUnirse, onSalir, onExpulsar, onRegenerarCodigo, onReportar }) {
   const esCreador = esMio && grupo.creador === uid;
+  const fotoGrupoVisible = grupo.foto || grupo.fotoPendiente;
 
   return (
     <View style={styles.grupoCard}>
       <View style={styles.grupoHeaderRow}>
-        {fotoAprobada(grupo.foto, grupo.fotoEstado) ? (
-          <Image source={{ uri: grupo.foto }} style={styles.grupoFoto} />
+        {fotoAprobada(fotoGrupoVisible, grupo.fotoEstado) ? (
+          <Image source={{ uri: fotoGrupoVisible }} style={styles.grupoFoto} />
         ) : (
           <View style={styles.grupoFotoPlaceholder}>
             <Text style={{ fontSize: 22 }}>👥</Text>
@@ -460,10 +479,6 @@ function GrupoCard({ grupo, esMio, uid, onUnirse, onSalir, onExpulsar, onRegener
           ) : null}
         </View>
       </View>
-
-      {grupo.fotoPendiente && grupo.fotoEstado === FOTO_ESTADOS.PENDIENTE && esMio && (
-        <Text style={styles.fotoPendienteTexto}>Foto pendiente de revisión</Text>
-      )}
 
       <View style={styles.grupoStats}>
         <Text style={styles.grupoStat}>👥 {grupo.miembros.length} miembros</Text>

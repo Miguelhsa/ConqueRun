@@ -3,7 +3,7 @@ import { FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { RouteLine, TerritoryMap } from '../components/map/MapAdapter';
 import { colors, radius } from '../utils/theme';
 import { formatTiempo, formatRitmo } from '../utils/formatters';
-import { esCarreraPuntuable, esCarreraStravaVerificada, ESTADOS_VERIFICACION } from '../utils/carreras';
+import { esCarreraPuntuable, esCarreraStravaVerificada, ESTADOS_VERIFICACION, puedeMostrarEnlaceStrava } from '../utils/carreras';
 
 const partirRuta = (puntos) => {
   const segmentos = [];
@@ -105,7 +105,7 @@ export default function DetalleCarreraScreen({ carrera, onClose }) {
             <Metrica label="Conquistas" valor={totalConquistas.toLocaleString()} destacado={totalConquistas > 0} />
           </View>
 
-          {carrera.stravaActivityUrl && (
+          {puedeMostrarEnlaceStrava(carrera) && (
             <TouchableOpacity
               style={styles.stravaLink}
               onPress={() => Linking.openURL(carrera.stravaActivityUrl)}

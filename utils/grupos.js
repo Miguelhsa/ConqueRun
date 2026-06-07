@@ -2,7 +2,7 @@ import { db, auth } from '../firebaseConfig';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   collection, doc, getDoc, getDocs, setDoc,
-  updateDoc, arrayUnion, arrayRemove, deleteField, query, where, limit, serverTimestamp,
+  updateDoc, arrayUnion, arrayRemove, deleteField, query, where, orderBy, startAfter, limit, serverTimestamp,
 } from 'firebase/firestore';
 
 const MAX_GRUPOS_POR_USUARIO = 50;
@@ -191,19 +191,20 @@ export const obtenerMisGrupos = async () => {
 
 const PAGE_SIZE = 20;
 
-// Sin orderBy para evitar índices compuestos: filtra y ordena en cliente, pagina por offset.
-const MAX_GRUPOS_CARGA = 200;
+export const obtenerGruposPublicos = async (ciudadId, { cursor = null } = {}) => {
+  const constraints = ciudadId
+    ? [where('ciudadId', '==', ciudadId), where('esPublico', '==', true)]
+    : [where('esPublico', '==', true)];
+  constraints.push(orderBy('puntosTotales', 'desc'));
+  if (cursor) constraints.push(startAfter(cursor));
+  constraints.push(limit(PAGE_SIZE + 1));
 
-export const obtenerGruposPublicos = async (ciudadId, { offset = 0 } = {}) => {
-  const q = ciudadId
-    ? query(collection(db, 'grupos'), where('ciudadId', '==', ciudadId), where('esPublico', '==', true), limit(MAX_GRUPOS_CARGA))
-    : query(collection(db, 'grupos'), where('esPublico', '==', true), limit(MAX_GRUPOS_CARGA));
+  const q = query(collection(db, 'grupos'), ...constraints);
   const snap = await getDocs(q);
-  const todos = snap.docs
-    .sort((a, b) => (b.data().puntosTotales ?? 0) - (a.data().puntosTotales ?? 0));
-  const pagina = todos.slice(offset, offset + PAGE_SIZE);
+  const pagina = snap.docs.slice(0, PAGE_SIZE);
   return {
     grupos: pagina.map(d => ({ id: d.id, ...d.data() })),
-    hayMas: offset + PAGE_SIZE < todos.length,
+    cursor: pagina.length > 0 ? pagina[pagina.length - 1] : cursor,
+    hayMas: snap.docs.length > PAGE_SIZE,
   };
 };

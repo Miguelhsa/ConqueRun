@@ -18,7 +18,14 @@ const encolarEscrituraTracking = (operacion) => {
   return siguiente;
 };
 
-export const esperarEscriturasTracking = () => colaEscrituraTracking;
+export const esperarEscriturasTracking = async () => {
+  let colaEsperada = colaEscrituraTracking;
+  while (true) {
+    await colaEsperada;
+    if (colaEsperada === colaEscrituraTracking) return;
+    colaEsperada = colaEscrituraTracking;
+  }
+};
 
 const normalizarPunto = (location) => ({
   latitude: location.coords.latitude,
@@ -86,8 +93,11 @@ export const resolverDistanciaTracking = (
   if (distanciaRecalculada != null) {
     const diferencia = Math.abs(distanciaRecalculada - distancia);
     const diferenciaRelativa = diferencia / Math.max(distanciaRecalculada, distancia, 1);
+    const diferenciaRelativaDeclarada = diferencia / Math.max(distancia, 1);
     const acumuladaNoSoportaCarrera = distancia < 200 && distanciaRecalculada >= 200;
-    const divergenciaCritica = forzarRecalculo && diferencia > 100 && diferenciaRelativa > 0.35;
+    const divergenciaCritica = forzarRecalculo &&
+      diferencia > 100 &&
+      (diferenciaRelativa > 0.35 || diferenciaRelativaDeclarada > 0.35);
     if (acumuladaNoSoportaCarrera || divergenciaCritica || distanciaAcumulada == null) {
       distancia = distanciaRecalculada;
     }
@@ -191,6 +201,7 @@ const agregarPuntosTrackingSincronizado = async (locations = []) => {
   try { if (rutaStr) rutaActual = JSON.parse(rutaStr); } catch {}
   try { if (metaStr) meta = JSON.parse(metaStr); } catch {}
   if (!meta) return rutaActual;
+  if (meta.pausada) return rutaActual;
 
   const inicioValido = (meta.iniciadaEn ?? 0) - 60000;
   const puntos = locations
@@ -233,11 +244,13 @@ export const agregarPuntosTracking = (locations = []) => (
   encolarEscrituraTracking(() => agregarPuntosTrackingSincronizado(locations))
 );
 
-export const prepararTrackingCarrera = async ({ segundoPlano = false } = {}) => {
+export const prepararTrackingCarrera = async ({ segundoPlano = false, carreraId = null, uid = null } = {}) => {
   await encolarEscrituraTracking(() => AsyncStorage.multiSet([
     [RUTA_KEY, JSON.stringify([])],
     [META_KEY, JSON.stringify({
       iniciadaEn: Date.now(),
+      uid,
+      carreraId,
       segundoPlano,
       pausada: false,
       pausadaEn: null,

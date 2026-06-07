@@ -13,6 +13,7 @@
         "expo-splash-screen",
         {
           "image": "./assets/logo.png",
+          "imageWidth": 360,
           "resizeMode": "contain",
           "backgroundColor": "#0A0A0A"
         }
@@ -76,7 +77,7 @@
         "UIBackgroundModes": [
           "location"
         ],
-        "NSPhotoLibraryUsageDescription": "ConqueRun usa tu galería para elegir fotos de perfil o grupo, que se revisan antes de publicarse.",
+        "NSPhotoLibraryUsageDescription": "ConqueRun usa tu galería para elegir fotos de perfil o grupo. Las fotos se publican inmediatamente y pueden moderarse por reportes.",
         "NSFaceIDUsageDescription": "ConqueRun usa Face ID para desbloquear tu sesión guardada.",
         "ITSAppUsesNonExemptEncryption": false,
         "LSApplicationQueriesSchemes": ["strava"]

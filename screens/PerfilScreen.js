@@ -60,6 +60,10 @@ export default function PerfilScreen() {
   const [editando, setEditando] = useState(false);
   const [mostrarEditorPerfil, setMostrarEditorPerfil] = useState(false);
   const [mostrarInfo, setMostrarInfo] = useState(false);
+  const fotoPerfilVisible = fotoPendiente || fotoPerfil;
+  const fotoPerfilEstadoVisible = fotoPendiente?.startsWith?.('file://')
+    ? FOTO_ESTADOS.APROBADA
+    : fotoPerfilEstado;
   const [mostrarSegmentosRitmo, setMostrarSegmentosRitmo] = useState(false);
   const [mostrarModalEliminar, setMostrarModalEliminar] = useState(false);
   const [eliminando, setEliminando] = useState(false);
@@ -337,7 +341,8 @@ export default function PerfilScreen() {
         const response = await fetch(fotoPendiente);
         const blob = await response.blob();
         await uploadBytes(storageRef, blob);
-        fotoUrl = await getDownloadURL(storageRef);
+        const downloadUrl = await getDownloadURL(storageRef);
+        fotoUrl = `${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
       }
 
       await setDoc(doc(db, 'usuarios', uid), {
@@ -430,8 +435,8 @@ export default function PerfilScreen() {
           <Text style={styles.botonInfoTexto}>ⓘ</Text>
         </TouchableOpacity>
         <View style={styles.avatarWrapper}>
-          {fotoAprobada(fotoPerfil, fotoPerfilEstado) ? (
-            <Image source={{ uri: fotoPerfil }} style={styles.avatarFoto} />
+          {fotoAprobada(fotoPerfilVisible, fotoPerfilEstadoVisible) ? (
+            <Image source={{ uri: fotoPerfilVisible }} style={styles.avatarFoto} />
           ) : (
             <View style={styles.avatar}>
               <Text style={styles.avatarTexto}>{nickname?.[0]?.toUpperCase()}</Text>
@@ -442,9 +447,6 @@ export default function PerfilScreen() {
           </View>
         </View>
 
-        {fotoPendiente && fotoPerfilEstado === FOTO_ESTADOS.PENDIENTE && (
-          <Text style={styles.fotoPendienteTexto}>Foto pendiente de revisión</Text>
-        )}
         {fotoPerfilEstado === FOTO_ESTADOS.RECHAZADA && (
           <Text style={styles.fotoRechazadaTexto}>
             {fotoMotivoRechazo
@@ -836,7 +838,7 @@ export default function PerfilScreen() {
       <View style={styles.seccion}>
         <SeccionTitulo icon="shield-outline">Privacidad y seguridad</SeccionTitulo>
         <Text style={styles.privacidadTexto}>
-          ConqueRun usa tu email para la cuenta, tu ubicación solo mientras grabas carreras, y tus fotos se revisan antes de mostrarse públicamente. Puedes solicitar la eliminación de tu cuenta y datos desde aquí.
+          ConqueRun usa tu email para la cuenta, tu ubicación solo mientras grabas carreras, y tus fotos se publican inmediatamente y pueden moderarse por reportes. Puedes solicitar la eliminación de tu cuenta y datos desde aquí.
         </Text>
         <TouchableOpacity style={styles.botonEliminar} onPress={confirmarEliminacion}>
           <Text style={styles.botonEliminarTexto}>Solicitar eliminación de cuenta</Text>

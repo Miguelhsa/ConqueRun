@@ -2,9 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../firebaseConfig';
 import { collection, collectionGroup, getDocs, limit, query, where } from 'firebase/firestore';
 import { obtenerTerritoriosSeed } from './territoriosSeed';
+import { registrarError } from './monitoring';
 
 const COLECCION_TERRITORIOS = 'territorios';
 const COLECCION_BARRIOS = 'barrios';
+const GPS_ACCURACY_MAX_METROS = 50;
+const GPS_VELOCIDAD_MAX_MS = 7;
 
 const TTL_MS = 10 * 60 * 1000;
 const cacheKey = (ciudadId) => `territorios_v1_${ciudadId ?? 'global'}`;
@@ -62,6 +65,10 @@ const esTerritorioValido = (territorio) => (
 // Construye un índice espacial por cuadrícula para lookups O(1) en tiempo real.
 // cellSizeM debe ser >= 2 * radio_máximo de las zonas.
 export const buildIndiceEspacial = (barrios, cellSizeM = 1600) => {
+  const maxSearchM = barrios.length
+    ? barrios.reduce((max, b) => Math.max(max, (Number(b.radio) || 800) + 500), 1300)
+    : 1300;
+  const searchRadiusCells = Math.max(1, Math.ceil(maxSearchM / cellSizeM));
   const cellLat = cellSizeM / 111_320;
   const avgLat = barrios.length ? barrios.reduce((s, b) => s + b.lat, 0) / barrios.length : 40;
   const cellLng = cellSizeM / (111_320 * Math.cos((avgLat * Math.PI) / 180));
@@ -73,7 +80,7 @@ export const buildIndiceEspacial = (barrios, cellSizeM = 1600) => {
     if (!grid.has(key)) grid.set(key, []);
     grid.get(key).push(barrio);
   }
-  return { grid, cellLat, cellLng };
+  return { grid, cellLat, cellLng, searchRadiusCells };
 };
 
 export const calcularBarrio = (punto, barriosOIndice) => {
@@ -82,12 +89,12 @@ export const calcularBarrio = (punto, barriosOIndice) => {
   const candidatos = Array.isArray(barriosOIndice)
     ? barriosOIndice
     : (() => {
-        const { grid, cellLat, cellLng } = barriosOIndice;
+        const { grid, cellLat, cellLng, searchRadiusCells = 1 } = barriosOIndice;
         const row = Math.floor(punto.latitude / cellLat);
         const col = Math.floor(punto.longitude / cellLng);
         const result = [];
-        for (let dr = -1; dr <= 1; dr++)
-          for (let dc = -1; dc <= 1; dc++)
+        for (let dr = -searchRadiusCells; dr <= searchRadiusCells; dr++)
+          for (let dc = -searchRadiusCells; dc <= searchRadiusCells; dc++)
             result.push(...(grid.get(`${row + dr},${col + dc}`) ?? []));
         return result;
       })();
@@ -95,7 +102,9 @@ export const calcularBarrio = (punto, barriosOIndice) => {
     const d = getDistancia(punto, { latitude: barrio.lat, longitude: barrio.lng });
     if (d < mejorDist) { mejorDist = d; mejor = barrio; }
   }
-  return mejor;
+  if (!mejor) return null;
+  const maxDist = (mejor.radio ?? 800) + 500;
+  return mejorDist <= maxDist ? mejor : null;
 };
 
 export const getDistancia = (a, b) => {
@@ -116,6 +125,25 @@ const puntoMedio = (a, b) => ({
   longitude: (a.longitude + b.longitude) / 2,
 });
 
+const puntoPrecisionAceptable = (punto) => (
+  punto?.accuracy == null || punto.accuracy <= GPS_ACCURACY_MAX_METROS
+);
+
+const distanciaTramoPuntuable = (anterior, actual) => {
+  if (!anterior || !actual || actual.segmentStart || actual.gapStart) return null;
+  if (!puntoPrecisionAceptable(anterior) || !puntoPrecisionAceptable(actual)) return null;
+
+  const distancia = getDistancia(anterior, actual);
+  if (!distancia || !isFinite(distancia)) return null;
+
+  const dt = actual.timestamp && anterior.timestamp
+    ? (actual.timestamp - anterior.timestamp) / 1000
+    : null;
+  if (dt != null && dt > 0 && distancia / dt > GPS_VELOCIDAD_MAX_MS) return null;
+
+  return distancia;
+};
+
 export const calcularResumenTerritorial = (ruta, barrios, puntosPersonales, distanciaTotal) => {
   if (!Array.isArray(ruta) || ruta.length < 2 || !Array.isArray(barrios) || barrios.length === 0) {
     return [];
@@ -127,8 +155,8 @@ export const calcularResumenTerritorial = (ruta, barrios, puntosPersonales, dist
   for (let i = 1; i < ruta.length; i++) {
     const anterior = ruta[i - 1];
     const actual = ruta[i];
-    const distanciaTramo = getDistancia(anterior, actual);
-    if (!distanciaTramo || !isFinite(distanciaTramo)) continue;
+    const distanciaTramo = distanciaTramoPuntuable(anterior, actual);
+    if (!distanciaTramo) continue;
 
     const barrio = calcularBarrio(puntoMedio(anterior, actual), barrios)
       ?? calcularBarrio(actual, barrios)
@@ -238,8 +266,12 @@ export const aplicarSegmentoCompetitivo = async (territorios, segmentoCompetitiv
           ...territorio,
           segmentoCompetitivo,
           dueno: null,
+          duenoNombre: null,
           duenoPuntos: 0,
+          duenoGrupo: null,
+          duenoGrupoPuntos: 0,
           top10: [],
+          top10Uids: [],
         };
       }
       return {
@@ -253,12 +285,20 @@ export const aplicarSegmentoCompetitivo = async (territorios, segmentoCompetitiv
       };
     });
   } catch (e) {
-    console.warn('[barrios] Lectura de segmentos no disponible; mostrando propietarios base.', {
+    registrarError(e, 'aplicarSegmentoCompetitivo');
+    // Devolver territorios sin dueño en lugar de datos base incorrectos:
+    // los datos base ignoran el segmento y mezclarían propietarios de otras ligas.
+    return territorios.map(t => ({
+      ...t,
       segmentoCompetitivo,
-      code: e?.code,
-      message: e?.message,
-    });
-    return territorios;
+      dueno: null,
+      duenoNombre: null,
+      duenoPuntos: 0,
+      duenoGrupo: null,
+      duenoGrupoPuntos: 0,
+      top10: [],
+      top10Uids: [],
+    }));
   }
 };
 

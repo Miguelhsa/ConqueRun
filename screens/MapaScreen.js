@@ -32,6 +32,33 @@ const aplicarAlpha = (color, alpha) => (
   color?.startsWith('#') && color.length === 7 ? `${color}${alpha}` : color
 );
 
+const MAX_TERRITORIOS_VORONOI_COMPLETO = 180;
+const VIEWPORT_MARGIN_MULTIPLIER = 1.25;
+
+const filtrarTerritoriosPorViewport = (territorios, region, seleccionado) => {
+  if (!region || territorios.length <= MAX_TERRITORIOS_VORONOI_COMPLETO) return territorios;
+
+  const latDelta = Math.max(region.latitudeDelta ?? 0.18, 0.02);
+  const lngDelta = Math.max(region.longitudeDelta ?? 0.18, 0.02);
+  const latMin = region.latitude - latDelta * VIEWPORT_MARGIN_MULTIPLIER;
+  const latMax = region.latitude + latDelta * VIEWPORT_MARGIN_MULTIPLIER;
+  const lngMin = region.longitude - lngDelta * VIEWPORT_MARGIN_MULTIPLIER;
+  const lngMax = region.longitude + lngDelta * VIEWPORT_MARGIN_MULTIPLIER;
+
+  const visibles = territorios.filter(t =>
+    t.lat >= latMin &&
+    t.lat <= latMax &&
+    t.lng >= lngMin &&
+    t.lng <= lngMax
+  );
+
+  if (seleccionado && !visibles.some(t => t.id === seleccionado.id)) {
+    visibles.push(seleccionado);
+  }
+
+  return visibles.length > 0 ? visibles : territorios;
+};
+
 export default function MapaScreen() {
   const [ubicacion, setUbicacion] = useState(null);
   const [barrios, setBarrios] = useState([]);
@@ -50,6 +77,7 @@ export default function MapaScreen() {
   const [listadoEquiposVisible, setListadoEquiposVisible] = useState(false);
   const [segmentoCompetitivo, setSegmentoCompetitivo] = useState(null);
   const [segmentoEtiqueta, setSegmentoEtiqueta] = useState(null);
+  const [usuariosBloqueados, setUsuariosBloqueados] = useState(new Set());
   const ultimaCargaRef = useRef(0);
 
   useFocusEffect(useCallback(() => {
@@ -64,6 +92,10 @@ export default function MapaScreen() {
       setDuenoInfo(null);
       return;
     }
+    if (usuariosBloqueados.has(barrioSeleccionado.dueno)) {
+      setDuenoInfo({ nickname: 'Usuario bloqueado', fotoPerfil: null, bloqueado: true });
+      return;
+    }
     setDuenoInfo(null);
     getDoc(doc(db, 'usuariosPublicos', barrioSeleccionado.dueno))
       .then(snap => {
@@ -75,7 +107,7 @@ export default function MapaScreen() {
         }
       })
       .catch(() => {});
-  }, [barrioSeleccionado?.id]);
+  }, [barrioSeleccionado?.id, usuariosBloqueados]);
 
   useEffect(() => {
     const grupoId = barrioSeleccionado?.duenoGrupo;
@@ -176,6 +208,7 @@ export default function MapaScreen() {
       ]);
       const userData = userSnap?.exists?.() ? userSnap.data() : {};
       const segmento = userData.segmentoCompetitivo ?? null;
+      setUsuariosBloqueados(new Set(userData.usuariosBloqueados ?? []));
       const ciudadPerfil = userData.ciudadActualId
         ? ciudades.find(c => c.id === userData.ciudadActualId)
         : null;
@@ -224,8 +257,20 @@ export default function MapaScreen() {
     latitudeDelta: ubicacion ? 0.15 : 0.22,
     longitudeDelta: ubicacion ? 0.15 : 0.22,
   };
-  const voronoi = useMemo(() => calcularVoronoi(barrios), [barrios]);
-  const mostrarEtiquetas = shouldMostrarEtiquetas(regionActual ?? regionMapa);
+  const regionReferencia = regionActual ?? regionMapa;
+  const barriosEnViewport = useMemo(
+    () => filtrarTerritoriosPorViewport(barrios, regionReferencia, barrioSeleccionado),
+    [
+      barrios,
+      barrioSeleccionado,
+      regionReferencia?.latitude,
+      regionReferencia?.longitude,
+      regionReferencia?.latitudeDelta,
+      regionReferencia?.longitudeDelta,
+    ]
+  );
+  const voronoi = useMemo(() => calcularVoronoi(barriosEnViewport), [barriosEnViewport]);
+  const mostrarEtiquetas = shouldMostrarEtiquetas(regionReferencia);
   const uid = auth.currentUser?.uid;
 
   const coloresEquipos = useMemo(() => {
@@ -321,6 +366,7 @@ export default function MapaScreen() {
           const grupoColor = barrio.duenoGrupo && misGruposIds.has(barrio.duenoGrupo)
             ? coloresEquipos[barrio.duenoGrupo]?.base
             : null;
+          const duenoBloqueado = barrio.dueno && usuariosBloqueados.has(barrio.dueno);
 
           return (
             <React.Fragment key={barrio.id}>
@@ -340,7 +386,7 @@ export default function MapaScreen() {
                 >
                   <View style={[styles.etiqueta, seleccionado && styles.etiquetaSeleccionada]}>
                     <Text style={[styles.etiquetaTexto, { color: estilo.color }]}>{getNombreTerritorio(barrio)}</Text>
-                    {mostrarEtiquetas && modoMapa === 'individual' && barrio.dueno && barrio.duenoNombre && (
+                    {mostrarEtiquetas && modoMapa === 'individual' && barrio.dueno && barrio.duenoNombre && !duenoBloqueado && (
                       <Text style={[styles.etiquetaDuenoTexto, { color: estilo.color }]}>{barrio.duenoNombre}</Text>
                     )}
                     {seleccionado && grupoNombre && (
