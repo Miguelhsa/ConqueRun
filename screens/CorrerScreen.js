@@ -34,6 +34,7 @@ import {
   GPS_ACCURACY_MAX_METROS,
   GPS_TIMEOUT_SIN_SENYAL_MS,
   agregarPuntosTracking,
+  actualizarMetaTracking,
   esperarEscriturasTracking,
   limpiarTrackingCarrera,
   iniciarTrackingCarrera,
@@ -44,6 +45,7 @@ import {
   pararTrackingCarrera,
   prepararTrackingCarrera,
   reanudarTrackingCarrera,
+  registrarEstadoServicioTracking,
   resolverDistanciaTracking,
   simplificarRutaParaGuardar,
   trackingSegundoPlanoActivo,
@@ -53,6 +55,7 @@ const STRAVA_CLIENT_ID = '238442';
 const STRAVA_REDIRECT_URI = 'https://us-central1-conquerrun-8d30e.cloudfunctions.net/stravaOAuthCallback';
 
 const crearCarreraId = (uid) => `${uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+const esperar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export default function CorrerScreen() {
   const [corriendo, setCorriendo] = useState(false);
@@ -95,6 +98,7 @@ export default function CorrerScreen() {
   const ritmoActualRef = useRef(null);
   const preparandoGpsRef = useRef(false);
   const finalizandoCarreraRef = useRef(false);
+  const ultimoReintentoServicioRef = useRef(0);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);
@@ -218,6 +222,26 @@ export default function CorrerScreen() {
         ritmoActualRef.current = null;
         setRitmoActual(null);
       }
+      if (!nuevoGpsDebil) {
+        // GPS recuperado: resetear el contador para que el próximo fallo reintente de inmediato.
+        ultimoReintentoServicioRef.current = 0;
+      }
+    }
+
+    // Si llevamos >30s sin GPS y el servicio de segundo plano debería estar activo,
+    // intentar reiniciarlo. Reintento cada 60s para cubrir el caso en que el SO lo
+    // mata repetidamente mientras la pantalla sigue apagada.
+    if (
+      sinSenyal &&
+      !metaTracking?.pausada &&
+      !finalizandoCarreraRef.current &&
+      (metaTracking?.segundoPlanoSolicitado || Platform.OS === 'android')
+    ) {
+      const ahora = Date.now();
+      if (ahora - ultimoReintentoServicioRef.current >= 60_000) {
+        ultimoReintentoServicioRef.current = ahora;
+        iniciarServicioContinuo('auto_restart_pantalla_apagada').catch(() => {});
+      }
     }
 
     await cargarCiudadYBarrios(ultimoPunto);
@@ -262,6 +286,95 @@ export default function CorrerScreen() {
     setTrackingSegundoPlano(false);
     foregroundWatchRef.current = await iniciarTrackingPrimerPlano(() => {
       sincronizarTracking().catch(console.error);
+    });
+  };
+
+  const iniciarServicioContinuo = async (motivo) => {
+    try {
+      await iniciarTrackingCarrera();
+      const activo = await trackingSegundoPlanoActivo();
+      if (!activo) throw new Error('TRACKING_SEGUNDO_PLANO_NO_ACTIVO');
+      detenerWatcherPrimerPlano();
+      setTrackingSegundoPlano(true);
+      await registrarEstadoServicioTracking({ segundoPlano: true, motivo });
+      registrarEvento('tracking_segundo_plano_activo', { motivo });
+      return true;
+    } catch (e) {
+      await registrarEstadoServicioTracking({
+        segundoPlano: false,
+        motivo: `${motivo}_fallback_primer_plano`,
+        error: e,
+      }).catch(() => {});
+      registrarError(e, `iniciarServicioContinuo:${motivo}`);
+      return false;
+    }
+  };
+
+  const iniciarTrackingDisponible = async ({ preferirSegundoPlano, motivo }) => {
+    if (preferirSegundoPlano) {
+      const activo = await iniciarServicioContinuo(motivo);
+      if (activo) return true;
+    }
+    await iniciarWatcherPrimerPlano();
+    await registrarEstadoServicioTracking({
+      segundoPlano: false,
+      motivo: `${motivo}_primer_plano`,
+    }).catch(() => {});
+    return false;
+  };
+
+  const obtenerUbicacionCierre = async () => {
+    const conTimeout = (promise, ms) => Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('GPS_TIMEOUT_CIERRE')), ms)),
+    ]);
+
+    try {
+      const ultima = await Location.getLastKnownPositionAsync({ maxAge: 10000, requiredAccuracy: 80 });
+      if (ultima) return ultima;
+    } catch {}
+
+    return conTimeout(
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      6000,
+    );
+  };
+
+  const agregarPuntoCierreSeguro = async () => {
+    try {
+      const loc = await obtenerUbicacionCierre();
+      await agregarPuntosTracking([loc], { origen: 'cierre' });
+      return true;
+    } catch (e) {
+      registrarError(e, 'agregarPuntoCierreSeguro');
+      return false;
+    }
+  };
+
+  const prepararTrackingParaCierre = async () => {
+    const metaAntes = await obtenerMetaTracking();
+    const servicioActivo = metaAntes?.segundoPlano
+      ? await trackingSegundoPlanoActivo().catch(() => false)
+      : false;
+
+    // Al volver de pantalla apagada, Android/iOS pueden estar entregando el último lote
+    // del background task. Damos una ventana corta antes de parar el servicio.
+    if (servicioActivo) {
+      await esperar(1500);
+      await esperarEscriturasTracking();
+    }
+
+    await agregarPuntoCierreSeguro();
+    await esperarEscriturasTracking();
+
+    const metaDespues = await obtenerMetaTracking();
+    registrarEvento('tracking_cierre_preparado', {
+      servicio_activo: Boolean(servicioActivo),
+      segundo_plano: Boolean(metaDespues?.segundoPlano),
+      background_eventos: metaDespues?.backgroundEventos ?? 0,
+      background_puntos: metaDespues?.backgroundPuntos ?? 0,
+      puntos_ruta: metaDespues?.puntosRutaTotal ?? 0,
+      ultimo_origen: metaDespues?.ultimoOrigenTracking ?? 'none',
     });
   };
 
@@ -332,21 +445,18 @@ export default function CorrerScreen() {
 
   const continuarCarreraPendiente = async () => {
     const metaTracking = await obtenerMetaTracking();
-    const segundoPlanoActivo = await trackingSegundoPlanoActivo();
-    let usaSegundoPlano = Boolean(metaTracking?.segundoPlano && segundoPlanoActivo);
+    let usaSegundoPlano = false;
 
-    if (metaTracking?.segundoPlano && !segundoPlanoActivo && !metaTracking?.pausada) {
-      try {
-        await iniciarTrackingCarrera();
-        detenerWatcherPrimerPlano();
-        usaSegundoPlano = true;
-      } catch {
-        usaSegundoPlano = false;
-      }
-    }
-
-    if (!usaSegundoPlano && !metaTracking?.pausada) {
-      await iniciarWatcherPrimerPlano();
+    if (!metaTracking?.pausada) {
+      const preferirSegundoPlano = Boolean(
+        metaTracking?.segundoPlano ||
+        metaTracking?.segundoPlanoSolicitado ||
+        Platform.OS === 'android'
+      );
+      usaSegundoPlano = await iniciarTrackingDisponible({
+        preferirSegundoPlano,
+        motivo: 'continuar_carrera',
+      });
     }
 
     setTrackingSegundoPlano(usaSegundoPlano);
@@ -513,32 +623,30 @@ export default function CorrerScreen() {
       setSegundos(0);
       barrioNombreRef.current = null;
       setBarrioActual(null);
-      const usaServicioContinuo = permiteSegundoPlano || Platform.OS === 'android';
-      setTrackingSegundoPlano(usaServicioContinuo);
+      const solicitaServicioContinuo = permiteSegundoPlano || Platform.OS === 'android';
+      setTrackingSegundoPlano(false);
       setPausada(false);
       rutaRef.current = [];
       distanciaRef.current = 0;
       segundosRef.current = 0;
 
       await prepararTrackingCarrera({
-        segundoPlano: usaServicioContinuo,
+        segundoPlano: false,
         carreraId: crearCarreraId(uid),
         uid,
       });
+      await actualizarMetaTracking({
+        segundoPlanoSolicitado: solicitaServicioContinuo,
+        segundoPlanoPermisoBackground: permiteSegundoPlano,
+        plataforma: Platform.OS,
+      });
       const loc = await obtenerPrimeraUbicacion();
-      await agregarPuntosTracking([loc]);
+      await agregarPuntosTracking([loc], { origen: 'inicio' });
 
-      if (usaServicioContinuo) {
-        try {
-          await iniciarTrackingCarrera();
-          detenerWatcherPrimerPlano();
-        } catch {
-          // El tracking en segundo plano no está disponible, continuar en primer plano
-          await iniciarWatcherPrimerPlano();
-        }
-      } else {
-        await iniciarWatcherPrimerPlano();
-      }
+      await iniciarTrackingDisponible({
+        preferirSegundoPlano: solicitaServicioContinuo,
+        motivo: 'inicio_carrera',
+      });
 
       await sincronizarTracking();
       setCorriendo(true);
@@ -572,6 +680,7 @@ export default function CorrerScreen() {
       setPausada(false);
       clearInterval(timerRef.current);
       detenerWatcherPrimerPlano();
+      await prepararTrackingParaCierre();
       await pararTrackingCarrera().catch(e => registrarError(e, 'pararTrackingCarrera'));
       await esperarEscriturasTracking();
       const trackingFinal = await sincronizarTracking({ forzarRecalculo: true });
@@ -609,6 +718,9 @@ export default function CorrerScreen() {
         puntos_ruta: rutaFinal.length,
         duracion_s: segundosFinales,
         segundo_plano: Boolean(trackingFinal.meta?.segundoPlano),
+        background_eventos: trackingFinal.meta?.backgroundEventos ?? 0,
+        background_puntos: trackingFinal.meta?.backgroundPuntos ?? 0,
+        ultimo_origen_tracking: trackingFinal.meta?.ultimoOrigenTracking ?? 'none',
       });
       await descartarCarreraTerminada(
         'Carrera terminada',
@@ -787,6 +899,9 @@ export default function CorrerScreen() {
         puntos: puntosGuardados + bonusLogros,
         territorios_conquistados: nuevosTerritorios.length,
         con_grupo: Boolean(grupoActivo),
+        segundo_plano: Boolean(trackingFinal.meta?.segundoPlano),
+        background_eventos: trackingFinal.meta?.backgroundEventos ?? 0,
+        background_puntos: trackingFinal.meta?.backgroundPuntos ?? 0,
       });
       setResumenCarrera({
         distancia: distanciaFinal,
@@ -908,22 +1023,15 @@ export default function CorrerScreen() {
     try {
       const meta = await reanudarTrackingCarrera();
       const loc = await obtenerPrimeraUbicacion();
-      await agregarPuntosTracking([{ ...loc, segmentStart: true }]);
-      let servicioReiniciado = false;
-      if (meta?.segundoPlano) {
-        try {
-          await iniciarTrackingCarrera();
-          detenerWatcherPrimerPlano();
-          setTrackingSegundoPlano(true);
-          servicioReiniciado = true;
-        } catch {
-          servicioReiniciado = false;
-        }
-      }
-
-      if (!servicioReiniciado) {
-        await iniciarWatcherPrimerPlano();
-      }
+      await agregarPuntosTracking([{ ...loc, segmentStart: true }], { origen: 'reanudar' });
+      await iniciarTrackingDisponible({
+        preferirSegundoPlano: Boolean(
+          meta?.segundoPlano ||
+          meta?.segundoPlanoSolicitado ||
+          Platform.OS === 'android'
+        ),
+        motivo: 'reanudar_carrera',
+      });
       setPausada(false);
       await sincronizarTracking();
       arrancarSincronizacion();
@@ -1114,6 +1222,23 @@ export default function CorrerScreen() {
 
   useEffect(() => {
     const handleAppState = async (nextState) => {
+      // Cuando la pantalla se apaga o la app va a segundo plano: si hay carrera activa
+      // usando el watcher de primer plano, elevar al servicio de fondo AHORA, antes de
+      // que el SO pueda congelar el hilo JS o matar el watcher.
+      if (nextState === 'background') {
+        if (!finalizandoCarreraRef.current) {
+          try {
+            const meta = await obtenerMetaTracking();
+            if (meta && !meta.pausada && (meta.segundoPlanoSolicitado || Platform.OS === 'android')) {
+              const bgActivo = await trackingSegundoPlanoActivo().catch(() => false);
+              if (!bgActivo) {
+                iniciarServicioContinuo('pantalla_apagada').catch(() => {});
+              }
+            }
+          } catch {}
+        }
+        return;
+      }
       if (nextState !== 'active') return;
       // Retry de carreras pendientes centralizado en App.js — no duplicar aquí.
 
@@ -1128,25 +1253,28 @@ export default function CorrerScreen() {
               : false;
 
             if (bgActivo) {
+              await esperar(1000);
+              await esperarEscriturasTracking();
               detenerWatcherPrimerPlano();
               setTrackingSegundoPlano(true);
             } else {
-              let servicioReiniciado = false;
               if (meta.segundoPlano) {
                 try {
-                  await iniciarTrackingCarrera();
-                  detenerWatcherPrimerPlano();
-                  setTrackingSegundoPlano(true);
-                  servicioReiniciado = true;
-                } catch {
-                  servicioReiniciado = false;
-                }
+                  const loc = await obtenerUbicacionCierre();
+                  await agregarPuntosTracking([{ ...loc, gapStart: true }], { origen: 'appstate_active' });
+                } catch {}
               }
 
-              if (!servicioReiniciado) {
-                await iniciarWatcherPrimerPlano();
-              }
+              await iniciarTrackingDisponible({
+                preferirSegundoPlano: Boolean(
+                  meta.segundoPlano ||
+                  meta.segundoPlanoSolicitado ||
+                  Platform.OS === 'android'
+                ),
+                motivo: 'appstate_active',
+              });
             }
+            await sincronizarTracking();
           }
         } catch {}
       }

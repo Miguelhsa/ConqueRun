@@ -192,7 +192,32 @@ export const obtenerRutaTracking = () => leerJson(RUTA_KEY, []);
 
 export const obtenerMetaTracking = () => leerJson(META_KEY, null);
 
-const agregarPuntosTrackingSincronizado = async (locations = []) => {
+const actualizarMetaTrackingSincronizado = async (updater) => {
+  const meta = await obtenerMetaTracking();
+  if (!meta) return null;
+  const patch = typeof updater === 'function' ? updater(meta) : updater;
+  if (!patch) return meta;
+  const metaNueva = { ...meta, ...patch };
+  await AsyncStorage.setItem(META_KEY, JSON.stringify(metaNueva));
+  return metaNueva;
+};
+
+export const actualizarMetaTracking = (updater) => (
+  encolarEscrituraTracking(() => actualizarMetaTrackingSincronizado(updater))
+);
+
+export const registrarEstadoServicioTracking = ({
+  segundoPlano,
+  motivo = null,
+  error = null,
+} = {}) => actualizarMetaTracking({
+  segundoPlano: Boolean(segundoPlano),
+  segundoPlanoActualizadoEn: Date.now(),
+  segundoPlanoMotivo: motivo,
+  segundoPlanoError: error ? String(error?.message ?? error).slice(0, 240) : null,
+});
+
+const agregarPuntosTrackingSincronizado = async (locations = [], { origen = 'unknown' } = {}) => {
   if (!locations.length) return [];
 
   const [[, rutaStr], [, metaStr]] = await AsyncStorage.multiGet([RUTA_KEY, META_KEY]);
@@ -234,14 +259,28 @@ const agregarPuntosTrackingSincronizado = async (locations = []) => {
 
   const updates = [[RUTA_KEY, JSON.stringify(rutaNueva)]];
   if (meta) {
-    updates.push([META_KEY, JSON.stringify({ ...meta, distanciaAcumulada })]);
+    const ahora = Date.now();
+    const metaNueva = {
+      ...meta,
+      distanciaAcumulada,
+      ultimaEscrituraTrackingEn: ahora,
+      ultimoOrigenTracking: origen,
+      puntosTrackingTotal: (meta.puntosTrackingTotal ?? 0) + puntos.length,
+      puntosRutaTotal: rutaNueva.length,
+    };
+    if (origen === 'background') {
+      metaNueva.backgroundEventos = (meta.backgroundEventos ?? 0) + 1;
+      metaNueva.backgroundPuntos = (meta.backgroundPuntos ?? 0) + puntos.length;
+      metaNueva.ultimoBackgroundEn = ahora;
+    }
+    updates.push([META_KEY, JSON.stringify(metaNueva)]);
   }
   await AsyncStorage.multiSet(updates);
   return rutaNueva;
 };
 
-export const agregarPuntosTracking = (locations = []) => (
-  encolarEscrituraTracking(() => agregarPuntosTrackingSincronizado(locations))
+export const agregarPuntosTracking = (locations = [], options = {}) => (
+  encolarEscrituraTracking(() => agregarPuntosTrackingSincronizado(locations, options))
 );
 
 export const prepararTrackingCarrera = async ({ segundoPlano = false, carreraId = null, uid = null } = {}) => {
@@ -293,7 +332,7 @@ export const iniciarTrackingPrimerPlano = async (onUpdate) => Location.watchPosi
     timeInterval: 2000,
   },
   async (loc) => {
-    const ruta = await agregarPuntosTracking([loc]);
+    const ruta = await agregarPuntosTracking([loc], { origen: 'foreground' });
     onUpdate?.(ruta);
   }
 );
@@ -350,5 +389,5 @@ TaskManager.defineTask(CARRERA_LOCATION_TASK, async ({ data, error }) => {
     return;
   }
 
-  await agregarPuntosTracking(data?.locations ?? []);
+  await agregarPuntosTracking(data?.locations ?? [], { origen: 'background' });
 });
