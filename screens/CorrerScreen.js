@@ -1782,10 +1782,6 @@ function VistaCorrer({ barrio, uid, distancia, segundos, ritmoActual, gpsDebil, 
         )}
       </View>
 
-      {/* Aviso solo en iOS sin servicio de fondo (Android siempre reintenta automáticamente) */}
-      {!trackingSegundoPlano && !pausada && Platform.OS === 'ios' && (
-        <Text style={styles.avisoSegundoPlano}>⚠ Mantén la pantalla encendida — la ruta no graba con pantalla bloqueada</Text>
-      )}
 
       {/* Tarjetas grandes: km y tiempo */}
       <View style={styles.filaTarjetas}>
