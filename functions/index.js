@@ -482,6 +482,7 @@ exports.eliminarCuenta = onCall(async (request) => {
   const ops = [];
 
   const [
+    usuarioSnap,
     territoriosSnap,
     barriosSnap,
     segmentosDuenoSnap,
@@ -496,6 +497,7 @@ exports.eliminarCuenta = onCall(async (request) => {
     reportesPorSnap,
     reportesRecursoSnap,
   ] = await Promise.all([
+    db.collection('usuarios').doc(uid).get(),
     db.collection('territorios').where('dueno', '==', uid).get(),
     db.collection('barrios').where('dueno', '==', uid).get(),
     db.collectionGroup('segmentos').where('dueno', '==', uid).get(),
@@ -634,6 +636,11 @@ exports.eliminarCuenta = onCall(async (request) => {
 
   ops.push({ type: 'delete', ref: db.collection('usuariosPublicos').doc(uid) });
   ops.push({ type: 'delete', ref: db.collection('usuarios').doc(uid) });
+
+  const nicknameActual = usuarioSnap.exists ? usuarioSnap.data()?.nickname : null;
+  if (nicknameActual) {
+    ops.push({ type: 'delete', ref: db.collection('nicknames').doc(nicknameActual.toLowerCase()) });
+  }
 
   await commitEnChunks(ops);
 
