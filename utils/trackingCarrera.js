@@ -330,6 +330,7 @@ export const iniciarTrackingPrimerPlano = async (onUpdate) => Location.watchPosi
     activityType: Location.ActivityType.Fitness,
     distanceInterval: 5,
     timeInterval: 2000,
+    showsBackgroundLocationIndicator: true,
   },
   async (loc) => {
     const ruta = await agregarPuntosTracking([loc], { origen: 'foreground' });

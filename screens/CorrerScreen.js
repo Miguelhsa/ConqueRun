@@ -1232,7 +1232,7 @@ export default function CorrerScreen() {
             if (meta && !meta.pausada && (meta.segundoPlanoSolicitado || Platform.OS === 'android')) {
               const bgActivo = await trackingSegundoPlanoActivo().catch(() => false);
               if (!bgActivo) {
-                iniciarServicioContinuo('pantalla_apagada').catch(() => {});
+                await iniciarServicioContinuo('pantalla_apagada').catch(() => {});
               }
             }
           } catch {}
