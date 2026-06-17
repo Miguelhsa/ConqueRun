@@ -234,8 +234,7 @@ export default function CorrerScreen() {
     if (
       sinSenyal &&
       !metaTracking?.pausada &&
-      !finalizandoCarreraRef.current &&
-      (metaTracking?.segundoPlanoSolicitado || Platform.OS === 'android')
+      !finalizandoCarreraRef.current
     ) {
       const ahora = Date.now();
       if (ahora - ultimoReintentoServicioRef.current >= 60_000) {
@@ -448,13 +447,8 @@ export default function CorrerScreen() {
     let usaSegundoPlano = false;
 
     if (!metaTracking?.pausada) {
-      const preferirSegundoPlano = Boolean(
-        metaTracking?.segundoPlano ||
-        metaTracking?.segundoPlanoSolicitado ||
-        Platform.OS === 'android'
-      );
       usaSegundoPlano = await iniciarTrackingDisponible({
-        preferirSegundoPlano,
+        preferirSegundoPlano: true,
         motivo: 'continuar_carrera',
       });
     }
@@ -623,7 +617,7 @@ export default function CorrerScreen() {
       setSegundos(0);
       barrioNombreRef.current = null;
       setBarrioActual(null);
-      const solicitaServicioContinuo = permiteSegundoPlano || Platform.OS === 'android';
+      const solicitaServicioContinuo = true;
       setTrackingSegundoPlano(false);
       setPausada(false);
       rutaRef.current = [];
@@ -1229,7 +1223,7 @@ export default function CorrerScreen() {
         if (!finalizandoCarreraRef.current) {
           try {
             const meta = await obtenerMetaTracking();
-            if (meta && !meta.pausada && (meta.segundoPlanoSolicitado || Platform.OS === 'android')) {
+            if (meta && !meta.pausada) {
               const bgActivo = await trackingSegundoPlanoActivo().catch(() => false);
               if (!bgActivo) {
                 await iniciarServicioContinuo('pantalla_apagada').catch(() => {});
@@ -1266,11 +1260,7 @@ export default function CorrerScreen() {
               }
 
               await iniciarTrackingDisponible({
-                preferirSegundoPlano: Boolean(
-                  meta.segundoPlano ||
-                  meta.segundoPlanoSolicitado ||
-                  Platform.OS === 'android'
-                ),
+                preferirSegundoPlano: true,
                 motivo: 'appstate_active',
               });
             }
