@@ -163,8 +163,8 @@ function validarFechaNacimientoInicial(raw) {
   const mesActual = ahora.getUTCMonth() + 1;
   const diaActual = ahora.getUTCDate();
   if (mesActual < mes || (mesActual === mes && diaActual < dia)) edad -= 1;
-  if (edad < 13) {
-    throw new HttpsError('failed-precondition', 'Debes tener al menos 13 anos.');
+  if (edad < 14) {
+    throw new HttpsError('failed-precondition', 'Debes tener al menos 14 años para registrarte.');
   }
   return fechaNacimiento;
 }
@@ -2112,6 +2112,66 @@ exports.marcarNotificacionesPendientesLeidas = onCall(async (request) => {
   }, { merge: true });
 
   return { ok: true, limpiadas: Array.isArray(pendientes) ? pendientes.length : 0 };
+});
+
+function serializarParaExport(obj) {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj.toDate === 'function') return obj.toDate().toISOString();
+  if (Array.isArray(obj)) return obj.map(serializarParaExport);
+  if (typeof obj === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) out[k] = serializarParaExport(v);
+    return out;
+  }
+  return obj;
+}
+
+exports.exportarDatosUsuario = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
+  verificarAppCheckCallable(request, 'exportarDatosUsuario');
+
+  const db = getFirestore();
+  const { FieldValue } = require('firebase-admin/firestore');
+  const usuarioRef = db.collection('usuarios').doc(uid);
+  const privadoRef = usuarioRef.collection('privado').doc('datos');
+
+  const privadoSnap = await privadoRef.get();
+  const privado = privadoSnap.exists ? privadoSnap.data() : {};
+
+  // Rate limit: máx 1 exportación cada 24h
+  const ultimaExportacion = privado.ultimaExportacionEn?.toMillis?.() ?? 0;
+  if (Date.now() - ultimaExportacion < 24 * 60 * 60 * 1000) {
+    throw new HttpsError('resource-exhausted', 'Ya exportaste tus datos recientemente. Vuelve a intentarlo en 24 horas.');
+  }
+
+  const [usuarioSnap, carrerasSnap, marcasSnap] = await Promise.all([
+    usuarioRef.get(),
+    db.collection('carreras').where('uid', '==', uid).orderBy('fecha', 'desc').limit(500).get(),
+    usuarioRef.collection('marcasTerritoriales').get(),
+  ]);
+
+  if (!usuarioSnap.exists) throw new HttpsError('not-found', 'Perfil no encontrado.');
+
+  const perfil = usuarioSnap.data();
+  // Excluir campos internos y credenciales de Strava
+  const {
+    stravaConectado, stravaAthleteId, stravaConectadoEn,
+    onboardingPendiente, onboardingCompletado, onboardingCompletadoEn,
+    ...perfilExport
+  } = perfil;
+
+  await privadoRef.set({ ultimaExportacionEn: FieldValue.serverTimestamp() }, { merge: true });
+
+  return {
+    exportadoEn: new Date().toISOString(),
+    uid,
+    email: request.auth.token?.email ?? null,
+    perfil: serializarParaExport(perfilExport),
+    fechaNacimiento: privado.fechaNacimiento ?? null,
+    carreras: carrerasSnap.docs.map(d => serializarParaExport({ id: d.id, ...d.data() })),
+    marcasTerritoriales: marcasSnap.docs.map(d => serializarParaExport({ id: d.id, ...d.data() })),
+  };
 });
 
 exports.generarNonceStrava = onCall(async (request) => {

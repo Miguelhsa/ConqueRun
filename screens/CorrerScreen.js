@@ -747,6 +747,7 @@ export default function CorrerScreen() {
       : rutaFiltrada;
     let grupoActivo = null;
     let pendingId = null;
+    let pasaPorTerritoriosLocal = false;
 
     if (!uid || !carreraId) {
       await limpiarTrackingCarrera().catch(() => {});
@@ -837,6 +838,7 @@ export default function CorrerScreen() {
         puntos,
         distanciaFinal
       );
+      pasaPorTerritoriosLocal = territorioCarrera.length > 0;
       const registrarCarrera = httpsCallable(getFunctions(), 'registrarCarreraConqurun');
       const { data } = await registrarCarrera(payload);
       const nuevosTerritorios = data.conquistas ?? [];
@@ -914,14 +916,26 @@ export default function CorrerScreen() {
       setBarrioActual(null);
     } catch (e) {
       if (e.code === 'functions/failed-precondition') {
-        // Carrera inválida: eliminar de pendientes y descartar
-        if (pendingId) {
-          await eliminarCarreraPendiente(pendingId).catch(() => {});
-          setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
+        const esErrorTerritorios = e.message === 'La carrera no atraviesa territorios activos.';
+        if (esErrorTerritorios && pasaPorTerritoriosLocal && pendingId) {
+          // El servidor no encontró territorios pero el cliente sí: puede ser GPS degradado
+          // o un fallo temporal del servidor. La carrera ya está en pendientes, dejar que se reintente.
+          registrarEvento('carrera_guardada_sin_red', { distancia_m: Math.round(distanciaFinal) });
+          Alert.alert(
+            'Carrera guardada',
+            'No se pudo procesar el mapa en este momento. Tu carrera se ha guardado y se enviará automáticamente.',
+            [{ text: 'Entendido' }]
+          );
         } else {
-          await limpiarTrackingCarrera().catch(() => {});
+          // Carrera inválida: eliminar de pendientes y descartar
+          if (pendingId) {
+            await eliminarCarreraPendiente(pendingId).catch(() => {});
+            setCarrerasPendientesCount(prev => Math.max(0, prev - 1));
+          } else {
+            await limpiarTrackingCarrera().catch(() => {});
+          }
+          Alert.alert('Carrera no válida', e.message ?? 'La carrera no cumple las condiciones para guardar.');
         }
-        Alert.alert('Carrera no válida', e.message ?? 'La carrera no cumple las condiciones para guardar.');
       } else if (e.code === 'functions/invalid-argument') {
         if (pendingId) {
           await eliminarCarreraPendiente(pendingId).catch(() => {});

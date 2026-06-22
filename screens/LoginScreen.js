@@ -28,10 +28,12 @@ export default function LoginScreen({ onLogin }) {
   const [cargando, setCargando] = useState(false);
   const [cargandoSocial, setCargandoSocial] = useState(null);
   const [aceptaTerminos, setAceptaTerminos] = useState(false);
+  const [aceptaPrivacidad, setAceptaPrivacidad] = useState(false);
 
   const cambiarModo = (nuevoModo) => {
     setEsRegistro(nuevoModo);
     setAceptaTerminos(false);
+    setAceptaPrivacidad(false);
   };
 
   const handleAuth = async () => {
@@ -42,8 +44,8 @@ export default function LoginScreen({ onLogin }) {
         Alert.alert('Contraseña débil', 'La contraseña debe tener al menos 8 caracteres.');
         return;
       }
-      if (!aceptaTerminos) {
-        Alert.alert('Términos requeridos', 'Debes aceptar los Términos de Uso y la Política de Privacidad para crear tu cuenta.');
+      if (!aceptaTerminos || !aceptaPrivacidad) {
+        Alert.alert('Consentimiento requerido', 'Debes aceptar los Términos de Uso y la Política de Privacidad por separado para crear tu cuenta.');
         return;
       }
     }
@@ -87,10 +89,10 @@ export default function LoginScreen({ onLogin }) {
       if (!result) return;
       const snap = await getDoc(doc(db, 'usuarios', result.user.uid));
       const tieneNickname = snap.exists() && !!snap.data()?.nickname;
-      if (!tieneNickname && !aceptaTerminos) {
+      if (!tieneNickname && (!aceptaTerminos || !aceptaPrivacidad)) {
         await signOut(auth);
         cambiarModo(true);
-        Alert.alert('Términos requeridos', 'Para crear una cuenta, acepta los Términos de Uso y la Política de Privacidad y vuelve a continuar con Google.');
+        Alert.alert('Consentimiento requerido', 'Para crear una cuenta, acepta los Términos de Uso y la Política de Privacidad por separado y vuelve a continuar con Google.');
         return;
       }
       onLogin();
@@ -113,10 +115,10 @@ export default function LoginScreen({ onLogin }) {
       if (!result) return;
       const snap = await getDoc(doc(db, 'usuarios', result.user.uid));
       const tieneNickname = snap.exists() && !!snap.data()?.nickname;
-      if (!tieneNickname && !aceptaTerminos) {
+      if (!tieneNickname && (!aceptaTerminos || !aceptaPrivacidad)) {
         await signOut(auth);
         cambiarModo(true);
-        Alert.alert('Términos requeridos', 'Para crear una cuenta, acepta los Términos de Uso y la Política de Privacidad y vuelve a continuar con Apple.');
+        Alert.alert('Consentimiento requerido', 'Para crear una cuenta, acepta los Términos de Uso y la Política de Privacidad por separado y vuelve a continuar con Apple.');
         return;
       }
       onLogin();
@@ -173,7 +175,7 @@ export default function LoginScreen({ onLogin }) {
           editable={!cargando}
         />
 
-        {(esRegistro || !aceptaTerminos) && (
+        {(esRegistro || !aceptaTerminos || !aceptaPrivacidad) && (
           <>
             <TouchableOpacity
               style={styles.checkboxFila}
@@ -185,21 +187,26 @@ export default function LoginScreen({ onLogin }) {
                 {aceptaTerminos && <Text style={styles.checkboxTick}>✓</Text>}
               </View>
               <Text style={styles.checkboxTexto}>
-                {esRegistro ? 'He leído y acepto los' : 'Para crear una cuenta nueva, acepta los'}{' '}
-                <Text
-                  style={styles.enlace}
-                  onPress={() => Linking.openURL(URL_TERMINOS)}
-                >
+                {esRegistro ? 'He leído y acepto los' : 'Acepta los'}{' '}
+                <Text style={styles.enlace} onPress={() => Linking.openURL(URL_TERMINOS)}>
                   Términos de Uso
                 </Text>
-                {' '}y la{' '}
-                <Text
-                  style={styles.enlace}
-                  onPress={() => Linking.openURL(URL_PRIVACIDAD)}
-                >
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.checkboxFila}
+              onPress={() => setAceptaPrivacidad(v => !v)}
+              activeOpacity={0.7}
+              disabled={cargando}
+            >
+              <View style={[styles.checkbox, aceptaPrivacidad && styles.checkboxMarcado]}>
+                {aceptaPrivacidad && <Text style={styles.checkboxTick}>✓</Text>}
+              </View>
+              <Text style={styles.checkboxTexto}>
+                {esRegistro ? 'Acepto el tratamiento de mis datos personales según la' : 'Acepta la'}{' '}
+                <Text style={styles.enlace} onPress={() => Linking.openURL(URL_PRIVACIDAD)}>
                   Política de Privacidad
                 </Text>
-                {!esRegistro ? '. Si ya tienes cuenta, puedes iniciar sesión sin marcarla.' : ''}
               </Text>
             </TouchableOpacity>
           </>

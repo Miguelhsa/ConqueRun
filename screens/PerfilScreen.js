@@ -1,10 +1,11 @@
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, TextInput, Alert, Modal, ImageBackground, Linking } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, TextInput, Alert, Modal, ImageBackground, Linking, Share } from 'react-native';
 import GruposScreen from './GruposScreen';
 import { useFocusEffect } from '@react-navigation/native';
 import { EstadoVacio, PantallaCargando } from '../components/ui';
 import { auth, db } from '../firebaseConfig';
 import { signOut } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -67,6 +68,7 @@ export default function PerfilScreen() {
   const [mostrarSegmentosRitmo, setMostrarSegmentosRitmo] = useState(false);
   const [mostrarModalEliminar, setMostrarModalEliminar] = useState(false);
   const [eliminando, setEliminando] = useState(false);
+  const [exportando, setExportando] = useState(false);
   const [estadoNotif, setEstadoNotif] = useState(null);
   const [tabPrincipal, setTabPrincipal] = useState('perfil');
   const [totalConquistas, setTotalConquistas] = useState(0);
@@ -381,6 +383,24 @@ export default function PerfilScreen() {
       Alert.alert('Error', 'No se pudo guardar el perfil');
     } finally {
       setGuardando(false);
+    }
+  };
+
+  const exportarDatos = async () => {
+    if (exportando) return;
+    setExportando(true);
+    try {
+      const fn = httpsCallable(getFunctions(), 'exportarDatosUsuario');
+      const { data } = await fn();
+      const json = JSON.stringify(data, null, 2);
+      await Share.share({ message: json, title: 'Mis datos de ConqueRun' });
+    } catch (e) {
+      const mensaje = e.code === 'functions/resource-exhausted'
+        ? e.message
+        : 'No se pudieron exportar los datos. Inténtalo más tarde.';
+      Alert.alert('Error al exportar', mensaje);
+    } finally {
+      setExportando(false);
     }
   };
 
@@ -838,8 +858,14 @@ export default function PerfilScreen() {
       <View style={styles.seccion}>
         <SeccionTitulo icon="shield-outline">Privacidad y seguridad</SeccionTitulo>
         <Text style={styles.privacidadTexto}>
-          ConqueRun usa tu email para la cuenta, tu ubicación solo mientras grabas carreras, y tus fotos se publican inmediatamente y pueden moderarse por reportes. Puedes solicitar la eliminación de tu cuenta y datos desde aquí.
+          ConqueRun usa tu email para la cuenta, tu ubicación solo mientras grabas carreras, y tus fotos se publican inmediatamente y pueden moderarse por reportes. Puedes exportar todos tus datos o solicitar la eliminación de tu cuenta desde aquí.
         </Text>
+        <TouchableOpacity style={styles.botonExportar} onPress={exportarDatos} disabled={exportando}>
+          {exportando
+            ? <ActivityIndicator color={colors.gold} size="small" />
+            : <Text style={styles.botonExportarTexto}>Exportar mis datos (GDPR)</Text>
+          }
+        </TouchableOpacity>
         <TouchableOpacity style={styles.botonEliminar} onPress={confirmarEliminacion}>
           <Text style={styles.botonEliminarTexto}>Solicitar eliminación de cuenta</Text>
         </TouchableOpacity>
@@ -1355,6 +1381,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   botonNotifTexto: { color: colors.gold ?? '#C6F432', fontSize: 14, fontWeight: '600' },
+  botonExportar: {
+    backgroundColor: 'rgba(198,244,50,0.08)',
+    borderColor: colors.gold,
+    borderWidth: 1,
+    padding: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 10,
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  botonExportarTexto: { color: colors.gold, fontSize: 14, fontWeight: '600' },
   botonEliminar: {
     backgroundColor: '#2a1215',
     borderColor: '#e63946',
