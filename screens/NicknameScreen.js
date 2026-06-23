@@ -87,8 +87,8 @@ export default function NicknameScreen({ onGuardado }) {
       return;
     }
     const edad = calcularEdad(fechaNacimiento);
-    if (edad < 13) {
-      Alert.alert('Edad mínima', 'Debes tener al menos 13 años para usar ConqueRun.');
+    if (edad < 14) {
+      Alert.alert('Edad mínima', 'Debes tener al menos 14 años para usar ConqueRun.');
       return;
     }
     setGuardando(true);
