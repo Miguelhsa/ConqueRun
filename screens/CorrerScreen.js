@@ -1405,32 +1405,13 @@ export default function CorrerScreen() {
 
       <ScrollView style={styles.historial} contentContainerStyle={styles.historialContenido}>
         <Text style={styles.historialTitulo}>Últimas carreras</Text>
-        <TouchableOpacity
-          style={[styles.stravaImportarCard, importandoStrava && styles.stravaImportarCardDisabled]}
-          onPress={iniciarImportacionStrava}
-          disabled={importandoStrava || desconectandoStrava}
-          activeOpacity={0.85}
-        >
+        <View style={[styles.stravaImportarCard, styles.stravaImportarCardDisabled]}>
           <View style={styles.stravaImportarCabecera}>
             <FontAwesome6 name="strava" size={16} color={colors.strava} />
-            <Text style={styles.stravaImportarTitulo}>
-              {importandoStrava ? 'Importando desde Strava...' : 'Importar conquistas de Strava'}
-            </Text>
+            <Text style={styles.stravaImportarTitulo}>Importar conquistas de Strava</Text>
           </View>
-          <Text style={styles.stravaImportarTexto}>Carreras recientes con GPS válido</Text>
-        </TouchableOpacity>
-        {stravaConectado && (
-          <TouchableOpacity
-            style={styles.stravaDesconectarBoton}
-            onPress={handleDesconectarStrava}
-            disabled={desconectandoStrava || importandoStrava}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.stravaDesconectarTexto}>
-              {desconectandoStrava ? 'Desconectando...' : 'Desconectar Strava'}
-            </Text>
-          </TouchableOpacity>
-        )}
+          <Text style={styles.stravaImportarTexto}>Estamos trabajando en ello, próximamente disponible</Text>
+        </View>
         {carrerasRecientes.length === 0 ? (
           <Text style={styles.historialVacio}>Aún no has corrido. ¡A por el primer kilómetro!</Text>
         ) : (
@@ -1548,15 +1529,15 @@ function StravaImportModal({ visible, importando, onAbrirStrava, onCancelar }) {
           ) : (
             <>
               <Text style={styles.stravaModalTexto}>
-                Autoriza ConqueRun en Strava y volverás automáticamente a la app. Solo importaremos carreras con GPS válido para conquistar.
+                La integración con Strava estará disponible próximamente. Podrás importar tus carreras con GPS y conquistar barrios automáticamente.
               </Text>
               <Text style={styles.stravaModalConsejo}>
-                💡 ¿Usas Garmin, Suunto o Polar? Sincronízalos con Strava y tus carreras se importarán automáticamente.
+                💡 ¿Usas Garmin, Suunto o Polar? Cuando esté disponible, sincroniza con Strava y tus carreras se importarán automáticamente.
               </Text>
-              <TouchableOpacity style={styles.stravaAutorizarBoton} onPress={onAbrirStrava} activeOpacity={0.85}>
+              <View style={[styles.stravaAutorizarBoton, { opacity: 0.4 }]}>
                 <FontAwesome6 name="strava" size={20} color={colors.text} />
-                <Text style={styles.stravaAutorizarTexto}>Conectar con Strava</Text>
-              </TouchableOpacity>
+                <Text style={styles.stravaAutorizarTexto}>Próximamente</Text>
+              </View>
               <View style={styles.stravaAcciones}>
                 <TouchableOpacity style={styles.stravaCancelarBoton} onPress={onCancelar}>
                   <Text style={styles.stravaCancelarTexto}>Cancelar</Text>
