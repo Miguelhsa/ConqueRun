@@ -1981,6 +1981,13 @@ exports.registrarCarreraConqurun = onCall(
   await procesarConquistaGrupo(db, aportacionesGrupo, territorioCarreraConMarcas, segmentos, uid, ahoraMs, FieldValue);
   await actualizarTop10Territorios(db, territorioCarreraConMarcas, usuarioRef, segmentos, uid, FieldValue);
 
+  // Reconciliar barrios reales en ranking para evitar drift por triggers no fiables
+  const barriosReales = await contarBarriosUsuarioEnSegmento(db, uid, ciudad.id, segmentos.segmentoCompetitivo);
+  await db.collection('rankingsCiudad').doc(`${ciudad.id}_${uid}`).set(
+    { barrios: barriosReales, actualizadoEn: FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+
   await carreraRef.update({ secondaryStatus: 'complete' });
 
   return {
