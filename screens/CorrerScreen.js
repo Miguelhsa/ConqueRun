@@ -370,11 +370,18 @@ export default function CorrerScreen() {
   const iniciarServicioContinuo = async (motivo) => {
     registrarDiagnosticoTracking('tracking_servicio_intento', { motivo: valorTracking(motivo) });
     try {
-      await iniciarTrackingCarrera();
-      // startLocationUpdatesAsync garantiza el registro cuando resuelve sin lanzar.
-      // hasStartedLocationUpdatesAsync inmediato puede devolver false en Android porque
-      // el OS aún no ha terminado de bindear el servicio, causando un fallback innecesario
-      // a watchPositionAsync que muere en cuanto la pantalla se apaga.
+      await iniciarTrackingCarrera(); // incluye 400ms de espera en Android
+      // Verificar que el servicio está realmente activo. Con el delay de 400ms ya incluido
+      // en iniciarTrackingCarrera, esta comprobación es fiable en Android.
+      // Si aún devuelve false: algún OEM tarda más en bindear — un segundo intento con 600ms
+      // adicionales captura esos casos. Solo si ambos fallan consideramos que el servicio
+      // no está disponible y caemos al watcher de primer plano.
+      const activo = await trackingSegundoPlanoActivo();
+      if (!activo) {
+        await esperar(600);
+        const activoRetry = await trackingSegundoPlanoActivo();
+        if (!activoRetry) throw new Error('TRACKING_SEGUNDO_PLANO_NO_ACTIVO');
+      }
       detenerWatcherPrimerPlano();
       setTrackingSegundoPlano(true);
       await registrarEstadoServicioTracking({ segundoPlano: true, motivo });
@@ -699,6 +706,19 @@ export default function CorrerScreen() {
         await Location.enableNetworkProviderAsync().catch(e => {
           registrarError(e, 'enableNetworkProviderAsync');
         });
+
+        // Android 13+ (API 33+): POST_NOTIFICATIONS es necesario para que la notificación
+        // del foreground service sea visible. Sin ella, el OS puede matar el servicio en
+        // dispositivos con optimización de batería agresiva. No bloqueamos la carrera si
+        // el usuario deniega, pero el GPS con pantalla apagada puede ser menos fiable.
+        if (Platform.Version >= 33) {
+          try {
+            const notifPermiso = await Notifications.getPermissionsAsync();
+            if (!notifPermiso.granted && notifPermiso.canAskAgain) {
+              await Notifications.requestPermissionsAsync();
+            }
+          } catch {}
+        }
       }
 
       await registrarDiagnosticoTracking('tracking_preinicio', { motivo: 'inicio_carrera' });
@@ -1381,7 +1401,13 @@ export default function CorrerScreen() {
           try {
             const meta = await obtenerMetaTracking();
             if (meta && !meta.pausada) {
-              const bgActivo = await trackingSegundoPlanoActivo().catch(() => false);
+              // Si el servicio continuo ya está activo según meta, no hay que relanzarlo.
+              // Usar meta.segundoPlano en lugar de hasStartedLocationUpdatesAsync evita
+              // el falso negativo que se daría si el check corre antes de que el OS complete
+              // el bind del servicio (race condition habitual en Android).
+              const bgActivo = meta.segundoPlano
+                ? await trackingSegundoPlanoActivo().catch(() => false)
+                : false;
               if (!bgActivo) {
                 await iniciarServicioContinuo('pantalla_apagada').catch(() => {});
               }

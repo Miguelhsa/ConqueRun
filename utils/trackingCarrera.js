@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import { Platform } from 'react-native';
 import { getDistancia } from './barrios';
 
 export const CARRERA_LOCATION_TASK = 'conqurun-carrera-location-task';
@@ -11,6 +12,30 @@ export const GPS_TIMEOUT_SIN_SENYAL_MS = 30000;
 const RUTA_KEY = 'conqurun:carrera:ruta';
 const META_KEY = 'conqurun:carrera:meta';
 let colaEscrituraTracking = Promise.resolve();
+
+const leerSeguro = async (operacion, fallback = null) => {
+  try {
+    return await operacion();
+  } catch {
+    return fallback;
+  }
+};
+
+const resumirPermisoUbicacion = (permiso) => ({
+  status: permiso?.status ?? 'unknown',
+  granted: Boolean(permiso?.granted ?? permiso?.status === 'granted'),
+  canAskAgain: permiso?.canAskAgain ?? null,
+  accuracy: permiso?.android?.accuracy ?? null,
+  scope: permiso?.ios?.scope ?? null,
+});
+
+const resumirProviderStatus = (providerStatus) => providerStatus ? ({
+  locationServicesEnabled: providerStatus.locationServicesEnabled ?? null,
+  backgroundModeEnabled: providerStatus.backgroundModeEnabled ?? null,
+  gpsAvailable: providerStatus.gpsAvailable ?? null,
+  networkAvailable: providerStatus.networkAvailable ?? null,
+  passiveAvailable: providerStatus.passiveAvailable ?? null,
+}) : null;
 
 const encolarEscrituraTracking = (operacion) => {
   const siguiente = colaEscrituraTracking.then(operacion, operacion);
@@ -320,8 +345,16 @@ export const iniciarTrackingCarrera = async () => {
       notificationTitle: 'ConqueRun activo',
       notificationBody: 'Grabando tu carrera y conquistando barrios.',
       notificationColor: '#C6F432',
+      killServiceOnDestroy: false,
     },
   });
+
+  // Android registra el servicio de forma asíncrona después de que startLocationUpdatesAsync
+  // resuelve. Sin esta espera, hasStartedLocationUpdatesAsync puede devolver false durante
+  // ~300ms incluso cuando el servicio está corriendo, causando fallbacks innecesarios.
+  if (Platform.OS === 'android') {
+    await new Promise(r => setTimeout(r, 400));
+  }
 };
 
 export const iniciarTrackingPrimerPlano = async (onUpdate) => Location.watchPositionAsync(
@@ -383,6 +416,40 @@ export const reanudarTrackingCarrera = async () => {
 export const trackingSegundoPlanoActivo = () => (
   Location.hasStartedLocationUpdatesAsync(CARRERA_LOCATION_TASK)
 );
+
+export const obtenerDiagnosticoTrackingCarrera = async () => {
+  const [
+    foreground,
+    background,
+    serviciosUbicacionActivos,
+    providerStatus,
+    backgroundDisponible,
+    tareaActiva,
+    tareaRegistrada,
+    taskManagerDisponible,
+  ] = await Promise.all([
+    leerSeguro(() => Location.getForegroundPermissionsAsync()),
+    leerSeguro(() => Location.getBackgroundPermissionsAsync()),
+    leerSeguro(() => Location.hasServicesEnabledAsync()),
+    leerSeguro(() => Location.getProviderStatusAsync()),
+    leerSeguro(() => Location.isBackgroundLocationAvailableAsync()),
+    leerSeguro(() => trackingSegundoPlanoActivo()),
+    leerSeguro(() => TaskManager.isTaskRegisteredAsync(CARRERA_LOCATION_TASK)),
+    leerSeguro(() => TaskManager.isAvailableAsync()),
+  ]);
+
+  return {
+    foreground: resumirPermisoUbicacion(foreground),
+    background: resumirPermisoUbicacion(background),
+    serviciosUbicacionActivos,
+    backgroundDisponible,
+    providerStatus: resumirProviderStatus(providerStatus),
+    tareaActiva,
+    tareaRegistrada,
+    taskDefinida: TaskManager.isTaskDefined(CARRERA_LOCATION_TASK),
+    taskManagerDisponible,
+  };
+};
 
 TaskManager.defineTask(CARRERA_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
