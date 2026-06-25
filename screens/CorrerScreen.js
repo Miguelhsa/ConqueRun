@@ -724,11 +724,13 @@ export default function CorrerScreen() {
               const background = await Location.requestBackgroundPermissionsAsync();
               if (background.status === 'granted') {
                 permiteSegundoPlano = true;
-              } else if (Platform.OS === 'android') {
-                // Android 11+: requestBackgroundPermissionsAsync abre Ajustes y resuelve
-                // inmediatamente con el estado anterior (denegado). Si arrancamos la carrera
-                // ahora, lo haría en modo primer plano — el GPS muere al apagar la pantalla.
-                // Instruimos al usuario y salimos para que pulse Empezar después de conceder.
+              } else if (Platform.OS === 'android' && Platform.Version >= 30) {
+                // Android 11+ (API 30+): requestBackgroundPermissionsAsync NO muestra diálogo,
+                // abre Ajustes directamente y resuelve inmediatamente con el estado anterior
+                // (denegado). En Android ≤10 sí muestra diálogo nativo — si el usuario denegó
+                // ahí fue una decisión explícita y no mostramos instrucciones de Ajustes.
+                // Si arrancamos la carrera ahora en Android 11+ sin el permiso concedido,
+                // lo haría en modo primer plano y el GPS moriría al apagar la pantalla.
                 Alert.alert(
                   'Activa la ubicación en Ajustes',
                   'Para grabar la carrera con la pantalla apagada:\n\n1. En la pantalla de Ajustes que se ha abierto, toca "Ubicación".\n2. Selecciona "Permitir siempre".\n3. Vuelve a ConqueRun y pulsa Empezar.',
