@@ -2287,30 +2287,41 @@ exports.stravaOAuthCallback = onRequest({ secrets: [STRAVA_CLIENT_SECRET] }, asy
   }
   if (error) primaryDeepLink += `?error=${encodeURIComponent(error)}`;
 
+  const esError = Boolean(error);
+  const titulo = esError ? 'Algo salió mal' : 'Strava conectado ✓';
+  const descripcion = esError
+    ? 'No se pudo completar la conexión con Strava. Vuelve a ConqueRun e inténtalo de nuevo.'
+    : 'Tu cuenta de Strava está conectada. Toca el botón para volver a ConqueRun e importar tus carreras.';
+
   res.status(200).send(`<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Volviendo a ConqueRun</title>
+  <title>${esError ? 'Error — ConqueRun' : 'Volviendo a ConqueRun'}</title>
   <style>
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#080b14;color:#f7f1df;margin:0;display:grid;min-height:100vh;place-items:center;padding:24px}
     main{max-width:420px;text-align:center}
     h1{font-size:24px;margin:0 0 12px}
     p{color:#aeb6c8;line-height:1.45}
-    a{display:block;margin-top:14px;background:#fc4c02;color:white;text-decoration:none;font-weight:800;padding:14px 18px;border-radius:10px}
-    a.secondary{background:#1d2638;margin-top:10px}
+    a.primary{display:block;margin-top:20px;background:${esError ? '#64748b' : '#fc4c02'};color:white;text-decoration:none;font-weight:800;padding:16px 18px;border-radius:10px;font-size:16px}
+    a.secondary{display:block;margin-top:10px;background:#1d2638;color:white;text-decoration:none;font-weight:600;padding:12px 18px;border-radius:10px;font-size:14px}
   </style>
   <script>
-    window.location.href = ${JSON.stringify(primaryDeepLink)};
-    setTimeout(() => { window.location.href = ${JSON.stringify(expoDeepLink)}; }, 900);
+    // iOS Safari bloquea window.location.href a esquemas custom si no viene de un gesto del usuario.
+    // Intentamos igual por si el sistema lo permite (Android WebView, Chrome), pero el botón
+    // manual es el path principal.
+    try { window.location.href = ${JSON.stringify(primaryDeepLink)}; } catch(e) {}
+    setTimeout(function() {
+      try { window.location.href = ${JSON.stringify(expoDeepLink)}; } catch(e) {}
+    }, 1000);
   </script>
 </head>
 <body>
   <main>
-    <h1>Strava conectado ✓</h1>
-    <p>Volviendo a ConqueRun para importar tus carreras...</p>
-    <a href="${primaryDeepLink}">Abrir ConqueRun</a>
+    <h1>${titulo}</h1>
+    <p>${descripcion}</p>
+    <a class="primary" href="${primaryDeepLink}">Abrir ConqueRun</a>
     <a class="secondary" href="${expoDeepLink}">Abrir versión de desarrollo</a>
   </main>
 </body>

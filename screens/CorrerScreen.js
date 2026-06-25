@@ -1574,13 +1574,21 @@ export default function CorrerScreen() {
 
       <ScrollView style={styles.historial} contentContainerStyle={styles.historialContenido}>
         <Text style={styles.historialTitulo}>Últimas carreras</Text>
-        <View style={[styles.stravaImportarCard, styles.stravaImportarCardDisabled]}>
+        <TouchableOpacity style={styles.stravaImportarCard} onPress={iniciarImportacionStrava} activeOpacity={0.8} disabled={importandoStrava}>
           <View style={styles.stravaImportarCabecera}>
             <FontAwesome6 name="strava" size={16} color={colors.strava} />
             <Text style={styles.stravaImportarTitulo}>Importar conquistas de Strava</Text>
+            {importandoStrava && <ActivityIndicator size="small" color={colors.strava} style={{ marginLeft: 6 }} />}
           </View>
-          <Text style={styles.stravaImportarTexto}>Estamos trabajando en ello, próximamente disponible</Text>
-        </View>
+          <Text style={styles.stravaImportarTexto}>
+            {stravaConectado ? 'Importar carreras de los últimos 90 días' : 'Conecta tu cuenta para importar tus carreras'}
+          </Text>
+        </TouchableOpacity>
+        {stravaConectado && (
+          <TouchableOpacity style={styles.stravaDesconectarBoton} onPress={handleDesconectarStrava} disabled={desconectandoStrava}>
+            <Text style={styles.stravaDesconectarTexto}>{desconectandoStrava ? 'Desconectando...' : 'Desconectar Strava'}</Text>
+          </TouchableOpacity>
+        )}
         {carrerasRecientes.length === 0 ? (
           <Text style={styles.historialVacio}>Aún no has corrido. ¡A por el primer kilómetro!</Text>
         ) : (
@@ -1698,15 +1706,15 @@ function StravaImportModal({ visible, importando, onAbrirStrava, onCancelar }) {
           ) : (
             <>
               <Text style={styles.stravaModalTexto}>
-                La integración con Strava estará disponible próximamente. Podrás importar tus carreras con GPS y conquistar barrios automáticamente.
+                Conecta tu cuenta de Strava para importar automáticamente tus carreras con GPS y conquistar barrios.
               </Text>
               <Text style={styles.stravaModalConsejo}>
-                💡 ¿Usas Garmin, Suunto o Polar? Cuando esté disponible, sincroniza con Strava y tus carreras se importarán automáticamente.
+                💡 ¿Usas Garmin, Suunto o Polar? Sincroniza con Strava y tus carreras se importarán automáticamente.
               </Text>
-              <View style={[styles.stravaAutorizarBoton, { opacity: 0.4 }]}>
+              <TouchableOpacity style={styles.stravaAutorizarBoton} onPress={onAbrirStrava}>
                 <FontAwesome6 name="strava" size={20} color={colors.text} />
-                <Text style={styles.stravaAutorizarTexto}>Próximamente</Text>
-              </View>
+                <Text style={styles.stravaAutorizarTexto}>Conectar con Strava</Text>
+              </TouchableOpacity>
               <View style={styles.stravaAcciones}>
                 <TouchableOpacity style={styles.stravaCancelarBoton} onPress={onCancelar}>
                   <Text style={styles.stravaCancelarTexto}>Cancelar</Text>
