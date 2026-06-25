@@ -3,6 +3,7 @@ import { ActivityIndicator, AppState, Platform, View, Text, TouchableOpacity, St
 import { RouteLine, TerritoryMap } from '../components/map/MapAdapter';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import { db, auth } from '../firebaseConfig';
 import { serverTimestamp, collection, doc, getDoc, getDocs, orderBy, query, setDoc, Timestamp, where } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -39,6 +40,7 @@ import {
   limpiarTrackingCarrera,
   iniciarTrackingCarrera,
   iniciarTrackingPrimerPlano,
+  obtenerDiagnosticoTrackingCarrera,
   obtenerMetaTracking,
   obtenerRutaTracking,
   pausarTrackingCarrera,
@@ -56,6 +58,15 @@ const STRAVA_REDIRECT_URI = 'https://us-central1-conquerrun-8d30e.cloudfunctions
 
 const crearCarreraId = (uid) => `${uid}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const esperar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const valorTracking = (valor) => {
+  if (valor === null || typeof valor === 'undefined') return 'unknown';
+  if (typeof valor === 'boolean') return valor ? 'true' : 'false';
+  return String(valor).slice(0, 96);
+};
+const resumirErrorTracking = (error) => ({
+  error_code: valorTracking(error?.code ?? error?.name ?? 'unknown'),
+  error_msg: valorTracking(error?.message ?? error),
+});
 
 export default function CorrerScreen() {
   const [corriendo, setCorriendo] = useState(false);
@@ -99,6 +110,7 @@ export default function CorrerScreen() {
   const preparandoGpsRef = useRef(false);
   const finalizandoCarreraRef = useRef(false);
   const ultimoReintentoServicioRef = useRef(0);
+  const avisoSegundoPlanoMostradoRef = useRef(false);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);
@@ -176,6 +188,73 @@ export default function CorrerScreen() {
     segmentoBarriosRef.current = perfil.segmentoCompetitivo ?? null;
     indiceBarriosRef.current = buildIndiceEspacial(barriosRef.current);
     barrioCargadoEnRef.current = Date.now();
+  };
+
+  const obtenerPermisoNotificacionesTracking = async () => {
+    if (Platform.OS !== 'android') return { status: 'not_applicable', granted: true, canAskAgain: null };
+    try {
+      const permiso = await Notifications.getPermissionsAsync();
+      return {
+        status: permiso.status ?? 'unknown',
+        granted: Boolean(permiso.granted ?? permiso.status === 'granted'),
+        canAskAgain: permiso.canAskAgain ?? null,
+      };
+    } catch {
+      return { status: 'error', granted: null, canAskAgain: null };
+    }
+  };
+
+  const construirParamsDiagnosticoTracking = async (extra = {}) => {
+    const [diagnostico, notificaciones] = await Promise.all([
+      obtenerDiagnosticoTrackingCarrera(),
+      obtenerPermisoNotificacionesTracking(),
+    ]);
+    const provider = diagnostico.providerStatus ?? {};
+    return {
+      plataforma: Platform.OS,
+      android_version: Platform.OS === 'android' ? valorTracking(Platform.Version) : 'na',
+      app_state: valorTracking(AppState.currentState),
+      fg_status: valorTracking(diagnostico.foreground?.status),
+      fg_granted: valorTracking(diagnostico.foreground?.granted),
+      fg_accuracy: valorTracking(diagnostico.foreground?.accuracy ?? diagnostico.foreground?.scope),
+      bg_status: valorTracking(diagnostico.background?.status),
+      bg_granted: valorTracking(diagnostico.background?.granted),
+      bg_accuracy: valorTracking(diagnostico.background?.accuracy ?? diagnostico.background?.scope),
+      location_services: valorTracking(diagnostico.serviciosUbicacionActivos),
+      bg_available: valorTracking(diagnostico.backgroundDisponible),
+      provider_bg: valorTracking(provider.backgroundModeEnabled),
+      gps_available: valorTracking(provider.gpsAvailable),
+      network_available: valorTracking(provider.networkAvailable),
+      task_active: valorTracking(diagnostico.tareaActiva),
+      task_registered: valorTracking(diagnostico.tareaRegistrada),
+      task_defined: valorTracking(diagnostico.taskDefinida),
+      task_manager: valorTracking(diagnostico.taskManagerDisponible),
+      notif_status: valorTracking(notificaciones.status),
+      notif_granted: valorTracking(notificaciones.granted),
+      ...extra,
+    };
+  };
+
+  const registrarDiagnosticoTracking = async (evento, extra = {}) => {
+    try {
+      registrarEvento(evento, await construirParamsDiagnosticoTracking(extra));
+    } catch {}
+  };
+
+  const avisarSegundoPlanoNoActivo = () => {
+    if (avisoSegundoPlanoMostradoRef.current) return;
+    avisoSegundoPlanoMostradoRef.current = true;
+    const mensaje = Platform.OS === 'android'
+      ? 'La carrera ha empezado, pero Android no ha dejado activo el servicio permanente de ubicación. Mantén ConqueRun abierto para no perder ruta. Para máxima fiabilidad, revisa Ajustes: ubicación precisa, permitir todo el tiempo y batería sin restricciones.'
+      : 'La carrera ha empezado, pero iOS no ha dejado activo el seguimiento en segundo plano. Mantén ConqueRun abierto o revisa Ajustes > Ubicación y permite el acceso siempre.';
+    Alert.alert(
+      'Segundo plano no activado',
+      mensaje,
+      [
+        { text: 'Abrir Ajustes', onPress: () => Linking.openSettings() },
+        { text: 'Seguir corriendo', style: 'cancel' },
+      ],
+    );
   };
 
   const sincronizarTracking = async ({ forzarRecalculo = false } = {}) => {
@@ -289,14 +368,18 @@ export default function CorrerScreen() {
   };
 
   const iniciarServicioContinuo = async (motivo) => {
+    registrarDiagnosticoTracking('tracking_servicio_intento', { motivo: valorTracking(motivo) });
     try {
       await iniciarTrackingCarrera();
-      const activo = await trackingSegundoPlanoActivo();
-      if (!activo) throw new Error('TRACKING_SEGUNDO_PLANO_NO_ACTIVO');
+      // startLocationUpdatesAsync garantiza el registro cuando resuelve sin lanzar.
+      // hasStartedLocationUpdatesAsync inmediato puede devolver false en Android porque
+      // el OS aún no ha terminado de bindear el servicio, causando un fallback innecesario
+      // a watchPositionAsync que muere en cuanto la pantalla se apaga.
       detenerWatcherPrimerPlano();
       setTrackingSegundoPlano(true);
       await registrarEstadoServicioTracking({ segundoPlano: true, motivo });
       registrarEvento('tracking_segundo_plano_activo', { motivo });
+      await registrarDiagnosticoTracking('tracking_servicio_activo', { motivo: valorTracking(motivo) });
       return true;
     } catch (e) {
       await registrarEstadoServicioTracking({
@@ -304,6 +387,10 @@ export default function CorrerScreen() {
         motivo: `${motivo}_fallback_primer_plano`,
         error: e,
       }).catch(() => {});
+      await registrarDiagnosticoTracking('tracking_servicio_fallo', {
+        motivo: valorTracking(motivo),
+        ...resumirErrorTracking(e),
+      });
       registrarError(e, `iniciarServicioContinuo:${motivo}`);
       return false;
     }
@@ -458,6 +545,7 @@ export default function CorrerScreen() {
     await sincronizarTracking();
     setCorriendo(true);
     if (!metaTracking?.pausada) arrancarSincronizacion();
+    if (!metaTracking?.pausada && !usaSegundoPlano) avisarSegundoPlanoNoActivo();
   };
 
   const descartarCarreraPendiente = async () => {
@@ -475,6 +563,7 @@ export default function CorrerScreen() {
     setTrackingSegundoPlano(false);
     setPausada(false);
     setCorriendo(false);
+    avisoSegundoPlanoMostradoRef.current = false;
   };
 
   const enviarCarrerasPendientes = async () => {
@@ -567,7 +656,8 @@ export default function CorrerScreen() {
         }, { merge: true });
       }
 
-      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+      const foregroundPermiso = await Location.requestForegroundPermissionsAsync();
+      const { status, canAskAgain } = foregroundPermiso;
       if (status !== 'granted') {
         if (!canAskAgain) {
           Alert.alert(
@@ -583,6 +673,35 @@ export default function CorrerScreen() {
         }
         return;
       }
+
+      const serviciosUbicacionActivos = await Location.hasServicesEnabledAsync().catch(() => true);
+      if (!serviciosUbicacionActivos) {
+        Alert.alert('Ubicación desactivada', 'Activa la ubicación del dispositivo para poder grabar la carrera.');
+        return;
+      }
+
+      if (Platform.OS === 'android') {
+        const permisoActual = foregroundPermiso.android?.accuracy
+          ? foregroundPermiso
+          : await Location.getForegroundPermissionsAsync().catch(() => foregroundPermiso);
+        if (permisoActual.android?.accuracy && permisoActual.android.accuracy !== 'fine') {
+          Alert.alert(
+            'Activa ubicación precisa',
+            'ConqueRun necesita ubicación precisa para medir distancia y conquistar barrios. Cambia el permiso a ubicación precisa en Ajustes.',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Abrir Ajustes', onPress: () => Linking.openSettings() },
+            ],
+          );
+          return;
+        }
+
+        await Location.enableNetworkProviderAsync().catch(e => {
+          registrarError(e, 'enableNetworkProviderAsync');
+        });
+      }
+
+      await registrarDiagnosticoTracking('tracking_preinicio', { motivo: 'inicio_carrera' });
 
       let permiteSegundoPlano = false;
       try {
@@ -603,7 +722,20 @@ export default function CorrerScreen() {
           if (aceptaSegundoPlano) {
             try {
               const background = await Location.requestBackgroundPermissionsAsync();
-              permiteSegundoPlano = background.status === 'granted';
+              if (background.status === 'granted') {
+                permiteSegundoPlano = true;
+              } else if (Platform.OS === 'android') {
+                // Android 11+: requestBackgroundPermissionsAsync abre Ajustes y resuelve
+                // inmediatamente con el estado anterior (denegado). Si arrancamos la carrera
+                // ahora, lo haría en modo primer plano — el GPS muere al apagar la pantalla.
+                // Instruimos al usuario y salimos para que pulse Empezar después de conceder.
+                Alert.alert(
+                  'Activa la ubicación en Ajustes',
+                  'Para grabar la carrera con la pantalla apagada:\n\n1. En la pantalla de Ajustes que se ha abierto, toca "Ubicación".\n2. Selecciona "Permitir siempre".\n3. Vuelve a ConqueRun y pulsa Empezar.',
+                  [{ text: 'Entendido' }]
+                );
+                return;
+              }
             } catch {
               // El dispositivo no soporta permisos en segundo plano — seguimos en primer plano
             }
@@ -613,11 +745,16 @@ export default function CorrerScreen() {
         // getBackgroundPermissionsAsync no disponible, mantener permiteSegundoPlano = false
       }
 
+      await registrarDiagnosticoTracking('tracking_post_permisos', {
+        bg_permiso: valorTracking(permiteSegundoPlano),
+      });
+
       setDistancia(0);
       setSegundos(0);
       barrioNombreRef.current = null;
       setBarrioActual(null);
       const solicitaServicioContinuo = true;
+      avisoSegundoPlanoMostradoRef.current = false;
       setTrackingSegundoPlano(false);
       setPausada(false);
       rutaRef.current = [];
@@ -637,7 +774,7 @@ export default function CorrerScreen() {
       const loc = await obtenerPrimeraUbicacion();
       await agregarPuntosTracking([loc], { origen: 'inicio' });
 
-      await iniciarTrackingDisponible({
+      const usaSegundoPlano = await iniciarTrackingDisponible({
         preferirSegundoPlano: solicitaServicioContinuo,
         motivo: 'inicio_carrera',
       });
@@ -645,6 +782,7 @@ export default function CorrerScreen() {
       await sincronizarTracking();
       setCorriendo(true);
       arrancarSincronizacion();
+      if (!usaSegundoPlano) avisarSegundoPlanoNoActivo();
     } catch (e) {
       await pararTrackingCarrera().catch(() => {});
       await limpiarTrackingCarrera().catch(() => {});
@@ -914,6 +1052,7 @@ export default function CorrerScreen() {
       setSegundos(0);
       barrioNombreRef.current = null;
       setBarrioActual(null);
+      avisoSegundoPlanoMostradoRef.current = false;
     } catch (e) {
       if (e.code === 'functions/failed-precondition') {
         const esErrorTerritorios = e.message === 'La carrera no atraviesa territorios activos.';
@@ -995,6 +1134,7 @@ export default function CorrerScreen() {
     setBarrioActual(null);
     setTrackingSegundoPlano(false);
     setPausada(false);
+    avisoSegundoPlanoMostradoRef.current = false;
     Alert.alert(titulo, mensaje);
   };
 
@@ -1032,7 +1172,7 @@ export default function CorrerScreen() {
       const meta = await reanudarTrackingCarrera();
       const loc = await obtenerPrimeraUbicacion();
       await agregarPuntosTracking([{ ...loc, segmentStart: true }], { origen: 'reanudar' });
-      await iniciarTrackingDisponible({
+      const usaSegundoPlano = await iniciarTrackingDisponible({
         preferirSegundoPlano: Boolean(
           meta?.segundoPlano ||
           meta?.segundoPlanoSolicitado ||
@@ -1043,6 +1183,7 @@ export default function CorrerScreen() {
       setPausada(false);
       await sincronizarTracking();
       arrancarSincronizacion();
+      if (!usaSegundoPlano) avisarSegundoPlanoNoActivo();
     } catch (e) {
       Alert.alert(
         'GPS no disponible',
@@ -1764,6 +1905,9 @@ function VistaCorrer({ barrio, uid, distancia, segundos, ritmoActual, gpsDebil, 
         <Text style={[styles.tarjetaBarrioLabel, { color: barrioColor }]}>{barrioLabel}</Text>
         {pausada && (
           <Text style={[styles.tarjetaBarrioEstado, { color: colors.conquest }]}>Pausada · no suma tiempo ni distancia</Text>
+        )}
+        {Platform.OS === 'android' && !trackingSegundoPlano && !pausada && (
+          <Text style={[styles.tarjetaBarrioEstado, { color: '#f59e0b' }]}>⚠ GPS solo activo con pantalla encendida · ve a Ajustes → Ubicación → Permitir siempre</Text>
         )}
       </View>
 
