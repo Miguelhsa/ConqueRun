@@ -1116,7 +1116,7 @@ async function obtenerTerritoriosSegmentadosSv(ciudadId, segmentoCompetitivo) {
 }
 
 async function stravaFetch(path, accessToken, options = {}) {
-  const res = await fetch(`https://www.strava.com/api/v3${path}`, {
+  const res = await fetch(`https://www.api-v3.strava.com${path}`, {
     ...options,
     headers: {
       authorization: `Bearer ${accessToken}`,
@@ -2830,7 +2830,7 @@ exports.desconectarStrava = onCall(async (request) => {
   if (snap.exists) {
     const { accessToken } = snap.data() ?? {};
     if (accessToken) {
-      fetch('https://www.strava.com/oauth/deauthorize', {
+      fetch('https://www.strava.com/oauth/revoke', {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
       }).catch(() => {});
