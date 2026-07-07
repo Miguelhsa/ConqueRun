@@ -7,7 +7,7 @@ const refPrivado = (uid) => doc(db, 'usuarios', uid, 'privado', 'notificaciones'
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: false,
+    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),

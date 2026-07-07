@@ -431,6 +431,10 @@ export default function MapaScreen() {
       <DetalleBarrioScreen
         barrio={barrioDetalle}
         duenoInfo={duenoInfo}
+        modoMapa={modoMapa}
+        grupoInfo={barrioDetalle?.duenoGrupo ? gruposInfo[barrioDetalle.duenoGrupo] : null}
+        grupoColor={barrioDetalle?.duenoGrupo ? coloresEquipos[barrioDetalle.duenoGrupo]?.base : null}
+        misGruposIds={misGruposIds}
         onClose={() => setBarrioDetalle(null)}
       />
 

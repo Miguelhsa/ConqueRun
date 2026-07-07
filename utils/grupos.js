@@ -180,6 +180,16 @@ export const expulsarMiembro = async (grupoId, miembroUid) => {
   });
 };
 
+export const transferirLiderazgo = async (grupoId, nuevoCreadorUid) => {
+  const fn = httpsCallable(getFunctions(), 'transferirLiderazgoGrupo');
+  await fn({ grupoId, nuevoCreadorUid });
+};
+
+export const disolverGrupo = async (grupoId) => {
+  const fn = httpsCallable(getFunctions(), 'disolverGrupo');
+  await fn({ grupoId });
+};
+
 // Obtener mis grupos
 export const obtenerMisGrupos = async () => {
   const uid = auth.currentUser?.uid;

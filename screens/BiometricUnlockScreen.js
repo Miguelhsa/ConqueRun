@@ -4,6 +4,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { signOut } from 'firebase/auth';
 
 import { auth } from '../firebaseConfig';
+import { pararTrackingCarrera, limpiarTrackingCarrera } from '../utils/trackingCarrera';
 import { colors, radius } from '../utils/theme';
 
 export default function BiometricUnlockScreen({ onUnlocked }) {
@@ -34,6 +35,8 @@ export default function BiometricUnlockScreen({ onUnlocked }) {
   };
 
   const cambiarCuenta = async () => {
+    await pararTrackingCarrera().catch(() => {});
+    await limpiarTrackingCarrera().catch(() => {});
     await signOut(auth);
   };
 

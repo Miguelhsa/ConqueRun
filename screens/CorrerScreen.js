@@ -111,6 +111,7 @@ export default function CorrerScreen() {
   const finalizandoCarreraRef = useRef(false);
   const ultimoReintentoServicioRef = useRef(0);
   const avisoSegundoPlanoMostradoRef = useRef(false);
+  const alertCarreraPendienteMostradoRef = useRef(false);
 
   useEffect(() => () => {
     clearInterval(timerRef.current);
@@ -318,7 +319,9 @@ export default function CorrerScreen() {
       const ahora = Date.now();
       if (ahora - ultimoReintentoServicioRef.current >= 60_000) {
         ultimoReintentoServicioRef.current = ahora;
-        iniciarServicioContinuo('auto_restart_pantalla_apagada').catch(() => {});
+        if (!finalizandoCarreraRef.current) {
+          iniciarServicioContinuo('auto_restart_pantalla_apagada').catch(() => {});
+        }
       }
     }
 
@@ -592,6 +595,7 @@ export default function CorrerScreen() {
   };
 
   const comprobarCarreraPendiente = async () => {
+    if (alertCarreraPendienteMostradoRef.current) return;
     const [rutaTracking, metaTracking] = await Promise.all([
       obtenerRutaTracking(),
       obtenerMetaTracking(),
@@ -602,6 +606,7 @@ export default function CorrerScreen() {
     await sincronizarTracking();
     const { distancia: distanciaPendiente } = resolverDistanciaTracking(rutaTracking, metaTracking);
     const segundosPendientes = calcularSegundosMeta(metaTracking);
+    alertCarreraPendienteMostradoRef.current = true;
     Alert.alert(
       metaTracking.pausada ? 'Carrera pausada' : 'Carrera en curso',
       `${(distanciaPendiente / 1000).toFixed(2)} km · ${formatTiempo(segundosPendientes)}\n¿Quieres continuarla?`,
@@ -827,12 +832,12 @@ export default function CorrerScreen() {
 
   const pararCarrera = async () => {
     if (!iniciarFinalizacionCarrera()) return;
+    clearInterval(timerRef.current);
     try {
       const uidSesion = auth.currentUser?.uid;
       setCorriendo(false);
       setTrackingSegundoPlano(false);
       setPausada(false);
-      clearInterval(timerRef.current);
       detenerWatcherPrimerPlano();
       await prepararTrackingParaCierre();
       await pararTrackingCarrera().catch(e => registrarError(e, 'pararTrackingCarrera'));
@@ -1162,7 +1167,6 @@ export default function CorrerScreen() {
 
   const seleccionarGrupoFinCarrera = async (grupos) => {
     if (!Array.isArray(grupos) || grupos.length === 0) return null;
-    if (grupos.length === 1) return grupos[0];
 
     return new Promise(resolve => {
       resolverGrupoFinRef.current = resolve;
@@ -1229,9 +1233,8 @@ export default function CorrerScreen() {
   const cerrarResumenCarrera = () => {
     const uid = auth.currentUser?.uid;
     const resumen = resumenCarrera;
+    if (uid && resumen) pedirResenaSiProcede(uid, 'carrera_completada', { accionPositiva: true }).catch(() => {});
     setResumenCarrera(null);
-    if (!uid || !resumen) return;
-    pedirResenaSiProcede(uid, 'carrera_completada', { accionPositiva: true }).catch(() => {});
   };
 
   const construirUrlRetornoStrava = () => {
@@ -1574,21 +1577,14 @@ export default function CorrerScreen() {
 
       <ScrollView style={styles.historial} contentContainerStyle={styles.historialContenido}>
         <Text style={styles.historialTitulo}>Últimas carreras</Text>
-        <TouchableOpacity style={styles.stravaImportarCard} onPress={iniciarImportacionStrava} activeOpacity={0.8} disabled={importandoStrava}>
+        <TouchableOpacity style={[styles.stravaImportarCard, { opacity: 0.5 }]} activeOpacity={1} disabled={true}>
           <View style={styles.stravaImportarCabecera}>
             <FontAwesome6 name="strava" size={16} color={colors.strava} />
             <Text style={styles.stravaImportarTitulo}>Importar conquistas de Strava</Text>
-            {importandoStrava && <ActivityIndicator size="small" color={colors.strava} style={{ marginLeft: 6 }} />}
+            <Text style={[styles.stravaImportarTexto, { marginLeft: 8, color: colors.strava }]}>Próximamente</Text>
           </View>
-          <Text style={styles.stravaImportarTexto}>
-            {stravaConectado ? 'Importar carreras de los últimos 90 días' : 'Conecta tu cuenta para importar tus carreras'}
-          </Text>
+          <Text style={styles.stravaImportarTexto}>Conecta tu cuenta de Strava para importar tus carreras</Text>
         </TouchableOpacity>
-        {stravaConectado && (
-          <TouchableOpacity style={styles.stravaDesconectarBoton} onPress={handleDesconectarStrava} disabled={desconectandoStrava}>
-            <Text style={styles.stravaDesconectarTexto}>{desconectandoStrava ? 'Desconectando...' : 'Desconectar Strava'}</Text>
-          </TouchableOpacity>
-        )}
         {carrerasRecientes.length === 0 ? (
           <Text style={styles.historialVacio}>Aún no has corrido. ¡A por el primer kilómetro!</Text>
         ) : (

@@ -15,20 +15,39 @@ const abrirNavegacion = (barrio) => {
     .catch(() => Linking.openURL(urlGoogle));
 };
 
-export default function DetalleBarrioScreen({ barrio, duenoInfo, onClose }) {
+export default function DetalleBarrioScreen({ barrio, duenoInfo, modoMapa, grupoInfo, grupoColor, misGruposIds, onClose }) {
   if (!barrio) return null;
 
   const uid = auth.currentUser?.uid;
-  const esPropio = barrio.dueno === uid;
-  const esLibre = !barrio.dueno;
-  const esRival = barrio.dueno && !esPropio;
+  const esGrupos = modoMapa === 'grupos';
 
-  const colorEstado = esLibre ? colors.subdued : esPropio ? colors.gold : colors.conquest;
-  const textoEstado = esLibre ? 'Sin conquistar' : esPropio ? 'Tuyo' : 'Rival';
+  const duenoCampo = esGrupos ? barrio.duenoGrupo : barrio.dueno;
+  const puntosCampo = esGrupos ? (barrio.duenoGrupoPuntos ?? 0) : (barrio.duenoPuntos ?? 0);
+  const fechaCampo = esGrupos ? barrio.actualizadoGrupoEn : barrio.conquistadoEn;
 
-  const fechaConquista = barrio.conquistadoEn?.toDate
-    ? barrio.conquistadoEn.toDate().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
+  const esLibre = !duenoCampo;
+  const esMio = esGrupos
+    ? (barrio.duenoGrupo && misGruposIds?.has(barrio.duenoGrupo))
+    : barrio.dueno === uid;
+  const esRival = !esLibre && !esMio;
+
+  const colorEstado = esLibre ? colors.subdued : esMio ? colors.gold : colors.conquest;
+  const textoEstado = esLibre
+    ? 'Sin conquistar'
+    : esMio
+      ? (esGrupos ? 'Tu equipo' : 'Tuyo')
+      : 'Rival';
+
+  const fechaConquista = (!esGrupos && fechaCampo?.toDate)
+    ? fechaCampo.toDate().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
     : null;
+
+  const nombreDueno = esGrupos
+    ? (grupoInfo?.nombre ?? 'Equipo')
+    : (duenoInfo?.nickname ?? 'Cargando...');
+
+  const letraAvatar = nombreDueno[0]?.toUpperCase() ?? '?';
+  const colorAvatar = esGrupos ? (grupoColor ?? colorEstado) : colorEstado;
 
   const regionMapa = {
     latitude: barrio.lat,
@@ -74,20 +93,20 @@ export default function DetalleBarrioScreen({ barrio, duenoInfo, onClose }) {
 
           {!esLibre && (
             <View style={styles.seccion}>
-              <Text style={styles.seccionTitulo}>Dueño actual</Text>
+              <Text style={styles.seccionTitulo}>{esGrupos ? 'Equipo dominante' : 'Dueño actual'}</Text>
               <View style={styles.duenoFila}>
-                <View style={[styles.duenoAvatar, { backgroundColor: colorEstado + '33' }]}>
-                  <Text style={[styles.duenoAvatarLetra, { color: colorEstado }]}>
-                    {(duenoInfo?.nickname ?? '?')[0].toUpperCase()}
+                <View style={[styles.duenoAvatar, { backgroundColor: colorAvatar + '33' }]}>
+                  <Text style={[styles.duenoAvatarLetra, { color: colorAvatar }]}>
+                    {letraAvatar}
                   </Text>
                 </View>
                 <View style={styles.duenoInfo}>
                   <Text style={styles.duenoNickname}>
-                    {duenoInfo?.nickname ?? 'Cargando...'}
-                    {esPropio ? ' (tú)' : ''}
+                    {nombreDueno}
+                    {esMio ? (esGrupos ? ' (tu equipo)' : ' (tú)') : ''}
                   </Text>
-                  {barrio.duenoPuntos > 0 && (
-                    <Text style={styles.duenoPuntos}>{barrio.duenoPuntos.toLocaleString()} pts en esta zona</Text>
+                  {puntosCampo > 0 && (
+                    <Text style={styles.duenoPuntos}>{puntosCampo.toLocaleString()} pts en esta zona</Text>
                   )}
                 </View>
               </View>
@@ -101,17 +120,23 @@ export default function DetalleBarrioScreen({ barrio, duenoInfo, onClose }) {
             <Text style={styles.seccionTitulo}>Cómo conquistarlo</Text>
             {esLibre && (
               <Text style={styles.infoTexto}>
-                Esta zona está libre. Corre dentro del radio y acumula puntos para hacerte con ella.
+                {esGrupos
+                  ? 'Ningún equipo controla esta zona. Corre aquí con tu equipo activo para reclamarla.'
+                  : 'Esta zona está libre. Corre dentro del radio y acumula puntos para hacerte con ella.'}
               </Text>
             )}
-            {esPropio && (
+            {esMio && (
               <Text style={styles.infoTexto}>
-                Es tuya. Para mantenerla, corre aquí con regularidad. Si otro corredor acumula más puntos que tú, te la quitará.
+                {esGrupos
+                  ? 'Tu equipo controla esta zona. Seguid corriendo aquí para mantener la ventaja.'
+                  : 'Es tuya. Para mantenerla, corre aquí con regularidad. Si otro corredor acumula más puntos que tú, te la quitará.'}
               </Text>
             )}
-            {esRival && barrio.duenoPuntos > 0 && (
+            {esRival && puntosCampo > 0 && (
               <Text style={styles.infoTexto}>
-                El dueño tiene {barrio.duenoPuntos.toLocaleString()} pts aquí. Necesitas superar esa marca con tus puntos acumulados en esta zona.
+                {esGrupos
+                  ? `El equipo rival tiene ${puntosCampo.toLocaleString()} pts aquí. Tu equipo necesita superar esa marca.`
+                  : `El dueño tiene ${puntosCampo.toLocaleString()} pts aquí. Necesitas superar esa marca con tus puntos acumulados en esta zona.`}
               </Text>
             )}
             <Text style={styles.infoRadio}>
@@ -177,24 +202,23 @@ const styles = StyleSheet.create({
   duenoInfo: { flex: 1 },
   duenoNickname: { color: colors.text, fontSize: 16, fontWeight: 'bold' },
   duenoPuntos: { color: colors.muted, fontSize: 13, marginTop: 2 },
-  fecha: { color: colors.subdued, fontSize: 12, marginTop: 10 },
-  infoTexto: { color: colors.muted, fontSize: 14, lineHeight: 20, marginBottom: 8 },
-  infoRadio: { color: colors.subdued, fontSize: 13 },
-  botonNavegar: {
-    backgroundColor: colors.surfaceAlt,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: radius.lg,
-    padding: 16,
-    alignItems: 'center',
-  },
-  botonNavegarTexto: { color: colors.text, fontSize: 15, fontWeight: '600' },
+  fecha: { color: colors.subdued, fontSize: 12, marginTop: 8 },
+  infoTexto: { color: colors.muted, fontSize: 14, lineHeight: 20 },
+  infoRadio: { color: colors.subdued, fontSize: 12, marginTop: 8 },
   etiquetaMapa: {
-    backgroundColor: 'rgba(8,11,20,0.9)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     borderWidth: 1,
   },
   etiquetaMapaTexto: { color: colors.text, fontSize: 11, fontWeight: 'bold' },
+  botonNavegar: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  botonNavegarTexto: { color: colors.bg, fontSize: 16, fontWeight: 'bold' },
 });

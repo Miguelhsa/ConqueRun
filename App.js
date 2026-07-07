@@ -197,6 +197,10 @@ export default function App() {
       return undefined;
     }
 
+    let intervalId = null;
+    let ticksSinCarrera = 0;
+    let pausaTimeoutId = null;
+
     const actualizarCarreraActiva = async () => {
       const [meta, ruta] = await Promise.all([
         obtenerMetaTracking(),
@@ -205,9 +209,19 @@ export default function App() {
 
       if (!meta) {
         setCarreraActiva(null);
+        ticksSinCarrera++;
+        if (ticksSinCarrera >= 3 && intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+          pausaTimeoutId = setTimeout(() => {
+            ticksSinCarrera = 0;
+            intervalId = setInterval(() => { actualizarCarreraActiva().catch(console.error); }, 1000);
+          }, 10000);
+        }
         return;
       }
 
+      ticksSinCarrera = 0;
       const { distancia } = resolverDistanciaTracking(ruta, meta);
       const ahoraParaTiempo = meta.pausada && meta.pausadaEn ? meta.pausadaEn : Date.now();
       const segundos = Math.max(0, Math.floor((ahoraParaTiempo - meta.iniciadaEn - (meta.tiempoPausadoMs ?? 0)) / 1000));
@@ -215,11 +229,14 @@ export default function App() {
     };
 
     actualizarCarreraActiva().catch(console.error);
-    const interval = setInterval(() => {
+    intervalId = setInterval(() => {
       actualizarCarreraActiva().catch(console.error);
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(pausaTimeoutId);
+    };
   }, [usuario, biometriaBloqueada, tieneNickname, onboardingPendiente, onboardingCompletado]);
 
   const comprobarPerfil = async (uid) => {

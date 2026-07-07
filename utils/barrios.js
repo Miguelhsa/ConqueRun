@@ -242,25 +242,46 @@ export const aplicarSegmentoCompetitivo = async (territorios, segmentoCompetitiv
     const chunks = [];
     for (let i = 0; i < territorios.length; i += 30) chunks.push(territorios.slice(i, i + 30));
 
-    const snapshots = await Promise.all(
-      chunks
-        .map(chunk => chunk.map(t => t.territorioId ?? t.id).filter(Boolean))
-        .filter(ids => ids.length > 0)
-        .map(ids => getDocs(query(
-          collectionGroup(db, 'segmentos'),
-          where('segmentoCompetitivo', '==', segmentoCompetitivo),
-          where('territorioId', 'in', ids)
-        )))
-    );
+    const [snapshots, gruposSnapshots] = await Promise.all([
+      Promise.all(
+        chunks
+          .map(chunk => chunk.map(t => t.territorioId ?? t.id).filter(Boolean))
+          .filter(ids => ids.length > 0)
+          .map(ids => getDocs(query(
+            collectionGroup(db, 'segmentos'),
+            where('segmentoCompetitivo', '==', segmentoCompetitivo),
+            where('territorioId', 'in', ids)
+          )))
+      ),
+      Promise.all(
+        chunks
+          .map(chunk => chunk.map(t => t.territorioId ?? t.id).filter(Boolean))
+          .filter(ids => ids.length > 0)
+          .map(ids => getDocs(query(
+            collectionGroup(db, 'segmentos'),
+            where('segmentoCompetitivo', '==', 'grupos'),
+            where('territorioId', 'in', ids)
+          )))
+      ),
+    ]);
     snapshots.forEach(snap =>
       snap.docs.forEach(d => {
         const data = d.data();
         if (data.territorioId) porTerritorioId.set(data.territorioId, data);
       })
     );
+    const gruposPorTerritorioId = new Map();
+    gruposSnapshots.forEach(snap =>
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (data.territorioId) gruposPorTerritorioId.set(data.territorioId, data);
+      })
+    );
 
     return territorios.map(territorio => {
-      const data = porTerritorioId.get(territorio.territorioId ?? territorio.id);
+      const tid = territorio.territorioId ?? territorio.id;
+      const data = porTerritorioId.get(tid);
+      const grupoData = gruposPorTerritorioId.get(tid);
       if (!data) {
         return {
           ...territorio,
@@ -268,8 +289,8 @@ export const aplicarSegmentoCompetitivo = async (territorios, segmentoCompetitiv
           dueno: null,
           duenoNombre: null,
           duenoPuntos: 0,
-          duenoGrupo: null,
-          duenoGrupoPuntos: 0,
+          duenoGrupo: grupoData?.duenoGrupo ?? null,
+          duenoGrupoPuntos: grupoData?.duenoGrupoPuntos ?? 0,
           top10: [],
           top10Uids: [],
         };
@@ -277,6 +298,8 @@ export const aplicarSegmentoCompetitivo = async (territorios, segmentoCompetitiv
       return {
         ...territorio,
         ...data,
+        duenoGrupo: grupoData?.duenoGrupo ?? data.duenoGrupo ?? null,
+        duenoGrupoPuntos: grupoData?.duenoGrupoPuntos ?? data.duenoGrupoPuntos ?? 0,
         id: territorio.id,
         barrioId: territorio.barrioId,
         territorioId: territorio.territorioId,

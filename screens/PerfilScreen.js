@@ -18,6 +18,7 @@ import { LOGROS } from '../utils/logros';
 import { formatDuracion, formatRitmo } from '../utils/formatters';
 import { FOTO_ESTADOS, fotoAprobada, eliminarCuentaCompleta } from '../utils/moderacion';
 import { obtenerEstadoPermiso, registrarNotificaciones } from '../utils/notificaciones';
+import { pararTrackingCarrera, limpiarTrackingCarrera } from '../utils/trackingCarrera';
 import { cargarMiEntradaRanking, cargarPosicionUsuario } from '../utils/rankingsCiudad';
 import { abrirResenaManual, prepararSolicitudResena } from '../utils/reviews';
 import { calcularSegmentoRitmo, calcularSegmentos30d, etiquetaSegmentoRitmo, SEGMENTOS_RITMO } from '../utils/segmentos';
@@ -126,7 +127,13 @@ export default function PerfilScreen() {
           segmentosPerfil = recalculados;
 
           if (cambioSegmento) {
-            invalidarCacheTerritorios(data.ciudadActualId).catch(() => {});
+            await httpsCallable(getFunctions(), 'sincronizarSegmento')()
+              .then(() => invalidarCacheTerritorios(data.ciudadActualId).catch(() => {}))
+              .catch(e => {
+                console.warn('[PerfilScreen] No se pudo sincronizar segmento:', e);
+                ultimaCargaPerfilRef.current = 0;
+                ultimoRecalculoSegmentosRef.current = 0;
+              });
           }
         } catch (e) {
           console.warn('[PerfilScreen] No se pudo recalcular segmento 30d:', e);
@@ -411,6 +418,8 @@ export default function PerfilScreen() {
   const ejecutarEliminacion = async () => {
     setEliminando(true);
     try {
+      await pararTrackingCarrera().catch(() => {});
+      await limpiarTrackingCarrera().catch(() => {});
       await eliminarCuentaCompleta();
     } catch (e) {
       setEliminando(false);
@@ -871,7 +880,7 @@ export default function PerfilScreen() {
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={styles.botonSalir} onPress={() => signOut(auth)}>
+      <TouchableOpacity style={styles.botonSalir} onPress={async () => { await pararTrackingCarrera().catch(() => {}); await limpiarTrackingCarrera().catch(() => {}); await signOut(auth); }}>
         <Text style={styles.botonSalirTexto}>Cerrar sesión</Text>
       </TouchableOpacity>
 

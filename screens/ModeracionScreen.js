@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { EstadoVacio, PantallaCargando } from '../components/ui';
-import { collection, doc, getDoc, getDocs, query, updateDoc, where, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, updateDoc, where, serverTimestamp, deleteField } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { FOTO_ESTADOS } from '../utils/moderacion';
 import { colors, radius } from '../utils/theme';
@@ -30,12 +30,14 @@ export default function ModeracionScreen() {
           const userSnap = await getDoc(doc(db, coleccion, reporte.recursoId));
           if (!userSnap.exists()) return null;
           const data = userSnap.data();
+          const fotoUrl = esUsuario ? data.fotoPerfil : (data.foto ?? data.fotoPendiente ?? null);
           return {
             reporteId: d.id,
             recursoId: reporte.recursoId,
             tipo: reporte.tipo,
             nombre: esUsuario ? (data.nickname ?? 'Usuario') : (data.nombre ?? 'Grupo'),
-            fotoUrl: esUsuario ? data.fotoPerfil : data.foto,
+            fotoUrl,
+            fotoPendienteUrl: esUsuario ? null : (data.fotoPendiente ?? null),
             fotoEstadoCampo: esUsuario ? 'fotoPerfilEstado' : 'fotoEstado',
           };
         })
@@ -80,6 +82,38 @@ export default function ModeracionScreen() {
     );
   };
 
+  const aprobarFoto = async (item) => {
+    if (!item.fotoPendienteUrl) return;
+    Alert.alert(
+      'Aprobar foto',
+      `¿Aprobar la foto de ${item.nombre}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Aprobar',
+          onPress: async () => {
+            try {
+              await updateDoc(doc(db, 'grupos', item.recursoId), {
+                foto: item.fotoPendienteUrl,
+                fotoPendiente: deleteField(),
+                fotoEstado: FOTO_ESTADOS.APROBADA,
+                fotoMotivoRechazo: deleteField(),
+                fotoRevisadaEn: serverTimestamp(),
+              });
+              await updateDoc(doc(db, 'reportes', item.reporteId), {
+                estado: 'resuelto',
+                resolvedAt: serverTimestamp(),
+              });
+              cargarReportes();
+            } catch {
+              Alert.alert('Error', 'No se pudo aprobar la foto');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const ignorar = async (item) => {
     try {
       await updateDoc(doc(db, 'reportes', item.reporteId), {
@@ -114,6 +148,11 @@ export default function ModeracionScreen() {
                 <Text style={styles.nombre}>{item.nombre}</Text>
                 <Text style={styles.tipo}>{item.tipo}</Text>
                 <View style={styles.acciones}>
+                  {item.fotoPendienteUrl && (
+                    <TouchableOpacity style={styles.botonAprobar} onPress={() => aprobarFoto(item)}>
+                      <Text style={styles.accionTexto}>Aprobar foto</Text>
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity style={styles.botonEliminar} onPress={() => eliminarFoto(item)}>
                     <Text style={styles.accionTexto}>Eliminar foto</Text>
                   </TouchableOpacity>
@@ -145,6 +184,7 @@ const styles = StyleSheet.create({
   nombre: { color: colors.text, fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
   tipo: { color: colors.muted, fontSize: 12, marginBottom: 12 },
   acciones: { flexDirection: 'row', gap: 8 },
+  botonAprobar: { flex: 1, backgroundColor: '#2a9d8f', borderRadius: 8, padding: 10, alignItems: 'center' },
   botonEliminar: { flex: 1, backgroundColor: '#e63946', borderRadius: 8, padding: 10, alignItems: 'center' },
   botonIgnorar: { flex: 1, backgroundColor: colors.border, borderRadius: 8, padding: 10, alignItems: 'center' },
   accionTexto: { color: colors.text, fontSize: 13, fontWeight: 'bold' },

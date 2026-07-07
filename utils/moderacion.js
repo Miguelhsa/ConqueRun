@@ -12,7 +12,7 @@ export const FOTO_ESTADOS = {
 };
 
 export const fotoAprobada = (url, estado) => {
-  return Boolean(url && estado !== FOTO_ESTADOS.RECHAZADA);
+  return Boolean(url && estado === FOTO_ESTADOS.APROBADA);
 };
 
 export const crearReporte = async ({ tipo, recursoId, motivo }) => {

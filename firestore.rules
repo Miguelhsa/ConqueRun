@@ -104,8 +104,6 @@ service cloud.firestore {
           'genero',
           'fotoPendiente',
           'usuariosBloqueados',
-          'consentimientoUbicacionCarrera',
-          'consentimientoUbicacionCarreraEn',
           'onboardingPendiente',
           'onboardingCompletado',
           'onboardingCompletadoEn',
@@ -236,10 +234,12 @@ service cloud.firestore {
         request.resource.data.nicknames.keys().hasAll(request.resource.data.miembros) &&
         request.resource.data.miembros.hasAll(request.resource.data.nicknames.keys()) &&
         request.resource.data.nicknames[request.auth.uid] == userDoc.nickname &&
-        request.resource.data.fotoPendiente == null &&
         request.resource.data.fotoMotivoRechazo == null &&
-        (request.resource.data.foto == null || request.resource.data.fotoEstado == 'aprobada') &&
-        (request.resource.data.foto != null || request.resource.data.fotoEstado == null) &&
+        request.resource.data.fotoPendiente == null &&
+        (
+          (request.resource.data.foto == null && request.resource.data.fotoEstado == null) ||
+          (request.resource.data.foto != null && request.resource.data.fotoEstado == 'aprobada')
+        ) &&
         nombreGrupoValido(request.resource.data.nombre) &&
         descripcionGrupoValida(request.resource.data.descripcion);
     }
@@ -254,6 +254,7 @@ service cloud.firestore {
         request.resource.data.miembros.hasAll(resource.data.miembros) &&
         request.resource.data.miembros.hasAll([request.auth.uid]) &&
         request.resource.data.miembros.size() == resource.data.miembros.size() + 1 &&
+        request.resource.data.miembros.size() <= 200 &&
         request.resource.data.nicknames.diff(resource.data.nicknames).affectedKeys().hasOnly([request.auth.uid]) &&
         request.resource.data.nicknames[request.auth.uid] == userDoc.nickname &&
         request.resource.data.nicknames.keys().hasAll(request.resource.data.miembros) &&
@@ -443,7 +444,7 @@ service cloud.firestore {
     }
 
     match /aportacionesGrupo/{id} {
-      allow read: if signedIn();
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
       allow create: if isAdmin();
       allow update, delete: if isAdmin();
     }
@@ -469,6 +470,7 @@ service cloud.firestore {
 
     match /reportes/{id} {
       allow create: if signedIn() &&
+        id == request.auth.uid + '_' + request.resource.data.recursoId &&
         noReporteRepetido() &&
         request.resource.data.keys().hasOnly([
           'tipo',
@@ -481,7 +483,11 @@ service cloud.firestore {
         request.resource.data.reportadoPor == request.auth.uid &&
         request.resource.data.estado == 'pendiente' &&
         request.resource.data.tipo in ['usuario', 'grupo'] &&
-        request.resource.data.motivo in ['contenido_inapropiado', 'trampa', 'spam'];
+        request.resource.data.motivo in ['contenido_inapropiado', 'trampa', 'spam'] &&
+        (
+          (request.resource.data.tipo == 'usuario' && exists(/databases/$(database)/documents/usuarios/$(request.resource.data.recursoId))) ||
+          (request.resource.data.tipo == 'grupo'   && exists(/databases/$(database)/documents/grupos/$(request.resource.data.recursoId)))
+        );
       allow read, update, delete: if isAdmin();
     }
 

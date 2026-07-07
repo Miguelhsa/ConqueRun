@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   TextInput, Alert, Modal, Image, Share, ImageBackground
@@ -8,10 +8,11 @@ import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'fire
 import { auth, db } from '../firebaseConfig';
 import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import {
-  crearGrupo, generarRefGrupo, unirseACodigo, unirseAGrupo, salirDeGrupo, expulsarMiembro, regenerarCodigo,
+  crearGrupo, generarRefGrupo, unirseACodigo, unirseAGrupo, salirDeGrupo, expulsarMiembro, regenerarCodigo, transferirLiderazgo, disolverGrupo,
   obtenerMisGrupos, obtenerGruposPublicos
 } from '../utils/grupos';
 import { contieneTextoProhibido, crearReporte, fotoAprobada } from '../utils/moderacion';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, radius } from '../utils/theme';
 import { EstadoError, EstadoVacio, PantallaCargando } from '../components/ui';
 
@@ -30,10 +31,11 @@ export default function GruposScreen() {
   const [codigo, setCodigo] = useState('');
   const [nuevoGrupo, setNuevoGrupo] = useState({ nombre: '', descripcion: '', esPublico: true, foto: null });
   const [subiendoFoto, setSubiendoFoto] = useState(false);
+  const [modalTransferir, setModalTransferir] = useState({ visible: false, grupoId: null, miembros: [] });
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     cargarDatos();
-  }, []);
+  }, []));
 
   const cargarDatos = async () => {
     setCargando(true);
@@ -66,6 +68,7 @@ export default function GruposScreen() {
           const snap = await getDocs(query(
             collection(db, 'grupos'),
             where('ciudadId', '==', cid),
+            where('esPublico', '==', true),
             orderBy('puntosTotales', 'desc'),
             limit(100)
           ));
@@ -246,6 +249,73 @@ export default function GruposScreen() {
     );
   };
 
+  const handleCreadorSalir = (grupo) => {
+    const uid = auth.currentUser?.uid;
+    const otrosMiembros = Object.entries(grupo.nicknames ?? {}).filter(([id]) => id !== uid);
+    Alert.alert(
+      'Eres el creador',
+      `¿Qué quieres hacer con "${grupo.nombre}"?`,
+      [
+        {
+          text: 'Transferir liderazgo',
+          onPress: () => {
+            if (otrosMiembros.length === 0) {
+              Alert.alert('Sin miembros', 'No hay otros miembros a los que transferir el liderazgo. Puedes disolver el grupo.');
+              return;
+            }
+            setModalTransferir({ visible: true, grupoId: grupo.id, miembros: otrosMiembros });
+          },
+        },
+        {
+          text: 'Disolver el grupo',
+          style: 'destructive',
+          onPress: () => Alert.alert(
+            'Disolver grupo',
+            `¿Seguro que quieres disolver "${grupo.nombre}"? Todos los miembros serán expulsados y los territorios quedarán libres.`,
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Disolver', style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await disolverGrupo(grupo.id);
+                    cargarDatos();
+                  } catch (e) {
+                    Alert.alert('Error', e.message);
+                  }
+                },
+              },
+            ]
+          ),
+        },
+        { text: 'Cancelar', style: 'cancel' },
+      ]
+    );
+  };
+
+  const handleTransferirConfirmar = async (nuevoCreadorUid, nick) => {
+    const { grupoId } = modalTransferir;
+    setModalTransferir({ visible: false, grupoId: null, miembros: [] });
+    Alert.alert(
+      'Confirmar transferencia',
+      `¿Transferir el liderazgo a ${nick}? Tú seguirás siendo miembro del grupo.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Transferir',
+          onPress: async () => {
+            try {
+              await transferirLiderazgo(grupoId, nuevoCreadorUid);
+              cargarDatos();
+            } catch (e) {
+              Alert.alert('Error', e.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleSalir = (grupoId, nombre) => {
     Alert.alert(
       'Abandonar grupo',
@@ -310,6 +380,7 @@ export default function GruposScreen() {
                   esMio
                   uid={auth.currentUser?.uid}
                   onSalir={grupo.creador !== auth.currentUser?.uid ? () => handleSalir(grupo.id, grupo.nombre) : null}
+                  onCreadorSalir={grupo.creador === auth.currentUser?.uid ? () => handleCreadorSalir(grupo) : null}
                   onExpulsar={grupo.creador === auth.currentUser?.uid
                     ? (miembroUid, nick) => handleExpulsar(grupo.id, miembroUid, nick)
                     : null}
@@ -426,6 +497,23 @@ export default function GruposScreen() {
       </ScrollView>
 
       {/* Modal código */}
+      <Modal visible={modalTransferir.visible} transparent animationType="fade" onRequestClose={() => setModalTransferir({ visible: false, grupoId: null, miembros: [] })}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitulo}>Elegir nuevo líder</Text>
+            <Text style={[styles.modalSubtitulo, { marginBottom: 12 }]}>Selecciona a quién transferir el liderazgo</Text>
+            {modalTransferir.miembros.map(([id, nick]) => (
+              <TouchableOpacity key={id} style={styles.botonMiembroTransferir} onPress={() => handleTransferirConfirmar(id, nick)}>
+                <Text style={styles.botonMiembroTransferirTexto}>{nick}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setModalTransferir({ visible: false, grupoId: null, miembros: [] })} style={{ marginTop: 12, alignItems: 'center' }}>
+              <Text style={{ color: colors.muted }}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={modalCodigo} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -453,7 +541,7 @@ export default function GruposScreen() {
   );
 }
 
-function GrupoCard({ grupo, esMio, uid, onUnirse, onSalir, onExpulsar, onRegenerarCodigo, onReportar }) {
+function GrupoCard({ grupo, esMio, uid, onUnirse, onSalir, onCreadorSalir, onExpulsar, onRegenerarCodigo, onReportar }) {
   const esCreador = esMio && grupo.creador === uid;
   const fotoGrupoVisible = grupo.foto || grupo.fotoPendiente;
 
@@ -544,6 +632,11 @@ function GrupoCard({ grupo, esMio, uid, onUnirse, onSalir, onExpulsar, onRegener
       {onSalir && (
         <TouchableOpacity style={styles.botonSalir} onPress={onSalir}>
           <Text style={styles.botonSalirTexto}>Salir del grupo</Text>
+        </TouchableOpacity>
+      )}
+      {onCreadorSalir && (
+        <TouchableOpacity style={styles.botonSalir} onPress={onCreadorSalir}>
+          <Text style={styles.botonSalirTexto}>Transferir / Disolver</Text>
         </TouchableOpacity>
       )}
 
@@ -679,5 +772,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface, borderTopLeftRadius: 20,
     borderTopRightRadius: 20, padding: 24,
   },
+  modalBox: {
+    backgroundColor: colors.surface, borderTopLeftRadius: 20,
+    borderTopRightRadius: 20, padding: 24,
+  },
   modalTitulo: { fontSize: 20, fontWeight: 'bold', color: colors.text, marginBottom: 16 },
+  modalSubtitulo: { color: colors.muted, fontSize: 13 },
+  botonMiembroTransferir: {
+    backgroundColor: colors.border, borderRadius: radius.md,
+    padding: 14, marginBottom: 8, alignItems: 'center',
+  },
+  botonMiembroTransferirTexto: { color: colors.text, fontSize: 15, fontWeight: 'bold' },
 });
