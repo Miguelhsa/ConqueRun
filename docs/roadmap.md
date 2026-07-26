@@ -1,6 +1,6 @@
 # Hoja de Ruta de ConqueRun
 
-Revision: 2026-05-17
+Revision: 2026-07-19
 
 Esta hoja de ruta refleja el estado real del repositorio tras revision exhaustiva de codigo: `App.js`, todas las `screens/`, todos los `utils/`, reglas de Firestore y documentos auxiliares. Las tareas ya implementadas se han retirado para que este documento sirva como guia operativa.
 
@@ -18,6 +18,35 @@ El bucle principal es:
 4. Conquista o defiende zonas.
 5. Compara su progreso en ranking, perfil y grupo.
 6. Vuelve porque tiene algo que recuperar, mejorar o mantener.
+
+---
+
+## Tareas Pendientes del Propietario
+
+Acciones que solo puede hacer Miguel — no son codigo, son pasos manuales en consolas externas o en el dispositivo.
+
+### Inmediatas (esta semana)
+
+- [ ] **Android testers** — Perseguir a los 18 testers para que instalen la app y la usen activamente. Sin 14 dias de uso no se puede solicitar acceso a produccion en Google Play.
+- [ ] **Verificar carrera en dispositivo real** — Hacer una carrera completa en iPhone o Android con la build actual antes de mergear la branch `fix/bugs-performance` a main.
+- [ ] **Merge fix/bugs-performance → main** — Una vez verificado en dispositivo, pedir a Claude que haga el merge (o hacerlo manualmente: `git checkout main && git merge fix/bugs-performance`).
+
+### Cuando las condiciones lo permitan
+
+- [ ] **App Check enforce** — Entrar en Firebase Console → App Check → APIs y esperar a que el porcentaje de solicitudes verificadas supere el 90% en Firestore y Authentication. Cuando lo haga, avisar a Claude para cambiar `REQUIRE_APP_CHECK=true` y hacer `firebase deploy --only functions`. Activarlo antes podria bloquear a todos los usuarios.
+- [ ] **Email admin de reportes** — Para recibir emails cuando llegue un reporte de contenido: ir a myaccount.google.com/apppasswords, crear un App Password de 16 caracteres, y ejecutar estos comandos:
+  ```
+  firebase functions:secrets:set GMAIL_USER   → miguelhsa@gmail.com
+  firebase functions:secrets:set GMAIL_PASS   → (App Password generado)
+  firebase functions:secrets:set ADMIN_EMAIL  → miguelhsa@gmail.com
+  firebase deploy --only functions
+  ```
+- [ ] **Android produccion** — Cuando los 18 testers completen los 14 dias de uso activo, ir a Google Play Console → Prueba cerrada → solicitar acceso a produccion.
+
+### Antes de reactivar Strava
+
+- [ ] **Verificar tier de API** — Entrar en strava.com/settings/api y confirmar el tier actual. Si sigue en Standard, valorar solicitar Extended Access o contratar suscripcion de pago antes de reactivar el boton en la app.
+- [ ] **Verificar redirect_uri** — Confirmar que la URL hardcodeada en `screens/CorrerScreen.js` coincide exactamente con el secreto `STRAVA_REDIRECT_URI` configurado en Firebase Functions. Una discrepancia aqui es la causa mas probable de que el intercambio de tokens falle silenciosamente.
 
 ---
 
@@ -44,7 +73,7 @@ El bucle principal es:
 - Reglas Firestore con validacion server-side: distancia, duracion, velocidad, nickname, nombre y descripcion de grupo.
 - Modelo preparado para ciudades y barrios.
 - Coleccion `territorios` como modelo preferente, con `barrios` como fallback compatible.
-- Adaptador inicial de datos Strava, pendiente de backend OAuth/importacion.
+- Adaptador inicial de datos Strava construido (OAuth, importación, tokens, deep link). **UI desactivada con "Próximamente" desde 2026-07-07** — el botón no tiene acción pero todo el backend está intacto. Motivo: límite de 10 atletas del Standard Tier de Strava. Pendiente resolver el tier antes de reactivar.
 - Tracking GPS foreground y background con TaskManager, filtros de precision y velocidad, pausa/reanudar con `segmentStart`.
 - Persistencia de carrera en curso en AsyncStorage.
 - Sistema de logros con 14 logros en 3 categorias (km, barrios, racha) y multiplicadores acumulativos.
@@ -60,7 +89,7 @@ Problemas encontrados en la revision de codigo que deben resolverse independient
 
 ### Criticos — afectan integridad de datos
 
-- **Race condition al guardar carrera** (`CorrerScreen.js:319`): `setCorriendo(false)` se llama antes de que terminen las operaciones async de guardado. Si algo falla a mitad, el estado de UI y Firestore quedan desincronizados.
+- ~~**Race condition al guardar carrera** (`CorrerScreen.js`): resuelto 2026-07-18. Añadido `catch` exterior en `pararCarrera` que captura errores inesperados antes del bloque de guardado y muestra alerta al usuario. El sistema de carreras pendientes en AsyncStorage ya actuaba de red de seguridad para los datos.~~
 - ~~**Escrituras secuenciales sin atomicidad**: resuelto con `writeBatch` atomico.~~
 - ~~**Demo data visible en produccion**: eliminado.~~
 
@@ -71,10 +100,10 @@ Problemas encontrados en la revision de codigo que deben resolverse independient
 - **Post-lanzamiento critico: monitorizar errores y abandono en Strava**. Revisar logs de `stravaOAuthCallback` e `importarConquistasStrava`, errores de `redirect_uri`, usuarios que conectan pero no importan, tokens caducados, limites de API y casos sin actividades recientes. Medir coste/lecturas/escrituras de cada importacion real.
 - **Post-lanzamiento critico: validar reseñas nativas en entorno real**. Probar `expo-store-review` en builds reales de App Store/TestFlight y Google Play Internal Testing, configurar `ios.appStoreUrl` cuando exista App Store ID y confirmar que el boton manual abre la ficha correcta.
 - **Post-lanzamiento critico: monitorizar primera semana real**. Revisar logs de Functions, errores de App Check, uso de mapas, coste Firestore/Maps/Strava, carreras fallidas, deep links rotos, usuarios que abandonan onboarding y frecuencia del recordatorio de reseña a 7 dias.
-- **AsyncStorage leido cada segundo en dos sitios a la vez** (`App.js:98` y `CorrerScreen.js:150`): el banner de carrera activa y la pantalla de correr leen AsyncStorage en paralelo cada 1 segundo durante toda la carrera. Impacto en bateria y rendimiento.
-- **Busqueda lineal O(n) de barrios** (`barrios.js:30`): `calcularBarrio` itera todos los territorios para cada punto de la ruta. Con 300 territorios y 1.000 puntos GPS son 300.000 comparaciones por carrera.
+- ~~**AsyncStorage leido cada segundo en dos sitios a la vez** (`App.js` y `CorrerScreen.js`): resuelto 2026-07-18. Intervalo del banner de carrera activa en `App.js` reducido de 1s a 3s durante carrera activa. `CorrerScreen` mantiene 1s para UI en vivo.~~
+- ~~**Busqueda lineal O(n) de barrios** (`barrios.js`): ya estaba resuelto. `buildIndiceEspacial` implementado, `calcularBarrio` usa lookup O(k) por cuadricula espacial.~~
 - ~~**`formatTiempo` duplicada**: resuelto en `utils/formatters.js`.~~
-- **Codigo de grupo no criptografico** (`grupos.js:9`): `Math.random()` para generar codigos de invitacion de grupos privados. No es criptograficamente seguro.
+- ~~**Codigo de grupo no criptografico** (`grupos.js`): ya estaba resuelto. `generarCodigo` usa `crypto.getRandomValues` con fallback a `Math.random` solo si crypto no esta disponible.~~
 - ~~**Migrar Firebase Functions fuera de Node.js 20**: resuelto. Runtime actualizado a Node.js 22 y desplegado en produccion.~~
 - **Configurar credenciales reales de email admin en Functions**: `GMAIL_USER`, `GMAIL_PASS` y `ADMIN_EMAIL` estan en modo `disabled` para poder desplegar sin secretos locales. Hasta configurarlas con valores reales, `notificarReporte` registra el reporte pero no envia email al admin.
 
@@ -371,6 +400,14 @@ La app movil envia los datos brutos de la carrera. El backend decide todo lo dem
 ## Fase 3 — Strava
 
 Objetivo: usar Strava como fuente externa de rutas GPS para conquistar territorios, no como sustituto de estadisticas deportivas. Estimacion: 2-5 semanas.
+
+> **⚠️ URGENTE — revisar antes de reactivar (2026-07-07)**
+> La integración está construida pero desactivada. El bloqueo actual es el **límite de 10 atletas del Standard Tier de Strava**. Hay que ir a [strava.com/settings/api](https://www.strava.com/settings/api) y verificar el tier actual, solicitar Extended Access o evaluar suscripción de pago. Sin resolver esto, cualquier nuevo usuario que intente conectar Strava quedará bloqueado.
+>
+> Bugs conocidos pendientes al reactivar:
+> - iOS Safari bloquea el auto-redirect `conquerun://` — el usuario tiene que pulsar manualmente y muchos no lo ven.
+> - La página de callback siempre muestra "Strava conectado ✓" aunque haya error en el intercambio de tokens.
+> - **Cambio de API anunciado para junio 2027**: URL base `strava.com/api/v3` → `api-v3.strava.com`, endpoint de desconexión `oauth/deauthorize` → `oauth/revoke` (ya aplicado en el código).
 
 ### Arquitectura
 

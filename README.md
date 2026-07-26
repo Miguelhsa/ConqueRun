@@ -456,11 +456,12 @@ npx expo start    # servidor de desarrollo
 
 ## Publicación en tiendas
 
-### Estado (mayo 2026)
+### Estado (julio 2026)
 
 | | Qué |
 |---|---|
-| ✅ | Android .aab listo en EAS |
+| ✅ | iOS — app publicada en App Store, aprobada y disponible para descarga |
+| ✅ | Android — en prueba cerrada (Alpha) con 18 testers. Pendiente 14 días de uso activo para solicitar producción |
 | ✅ | Apple Developer account creada |
 | ✅ | Google Play Developer account creada |
 | ✅ | EAS CLI logueado como miguelhsa |
@@ -477,10 +478,11 @@ npx expo start    # servidor de desarrollo
 | ✅ | Background location — dialog prominente antes de pedir el permiso |
 | ✅ | Age gate — verificación de 13+ años en el registro |
 | ✅ | Content moderation — reporte de contenido funcional |
-| ⏳ | iOS .ipa — pendiente build de producción |
-| ⏳ | App Check enforce — activar `REQUIRE_APP_CHECK=true` tras verificar métricas |
-| ⏳ | Capturas de pantalla para las fichas de tienda |
-| ⏳ | Feature graphic Android (1024 × 500 px) |
+| ✅ | Capturas de pantalla completadas (iOS y Android) |
+| ⏳ | Android producción — solicitar acceso cuando los 18 testers completen 14 días de uso activo |
+| ⏳ | App Check enforce — activar `REQUIRE_APP_CHECK=true` cuando el % verificado en Firebase Console supere el 90% |
+| ⏳ | Strava — UI desactivada con "Próximamente". Backend intacto. Pendiente resolver tier API antes de reactivar |
+| ⏳ | Merge `fix/bugs-performance` → main tras verificar en dispositivo real |
 
 ### URLs legales (GitHub Pages)
 
