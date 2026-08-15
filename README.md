@@ -338,7 +338,7 @@ uid, email, estado: 'pendiente', solicitadoEn
 | `descontarTerritorioSegmentadoPerdido` | Firestore onWrite `territorios/.../segmentos/{seg}` | Ajusta `barriosConquistadosTotal` cuando otro usuario conquista un territorio. |
 | `descontarBarrioSegmentadoPerdido` | Firestore onWrite `barrios/.../segmentos/{seg}` | Mismo para la colección `barrios`. |
 | `enviarNotificacionTerritorios` | Firestore onWrite territorios | Notifica push al exdueño cuando pierde un barrio. |
-| `aplicarDecayTerritorial` | Scheduled (diario) | Aplica decaimiento de puntos en territorios inactivos. Paginado con cursor (500 docs/página) para evitar timeouts. |
+| `aplicarDecayTerritorial` | Scheduled (lunes 03:00) | Aplica decaimiento del 10% semanal en territorios. Al cruzar ≤100 pts envía push al dueño. Al caer a ≤50 pts libera el territorio. Paginado (500 docs/página). |
 | `unirseAGrupoConCodigo` | HTTPS callable | Valida código y ciudad, añade al grupo. |
 | `unirseAGrupoPublico` | HTTPS callable | Valida ciudad y límite de 50 miembros, añade al grupo público. |
 | `repararConsistenciaUsuario` | HTTPS callable | Recalcula barrios conquistados del usuario desde fuente de verdad. |
@@ -393,7 +393,7 @@ El cliente usa `@react-native-firebase/app-check` con un `CustomProvider` que pu
 - `false` (actual): registra llamadas sin bloquear — modo monitoring
 - `true`: rechaza peticiones sin token válido — modo enforce
 
-**Estado actual (mayo 2026):**
+**Estado actual (agosto 2026):**
 - ✅ Providers registrados en Firebase Console (Play Integrity + App Attest)
 - ✅ Token TTL: 7 días
 - ⏳ `REQUIRE_APP_CHECK=false` — pendiente verificar métricas de tokens en consola antes de activar enforce
@@ -456,12 +456,13 @@ npx expo start    # servidor de desarrollo
 
 ## Publicación en tiendas
 
-### Estado (julio 2026)
+### Estado (agosto 2026)
 
 | | Qué |
 |---|---|
 | ✅ | iOS — app publicada en App Store, aprobada y disponible para descarga |
-| ✅ | Android — en prueba cerrada (Alpha) con 18 testers. Pendiente 14 días de uso activo para solicitar producción |
+| ✅ | Android — en prueba cerrada (Alpha) versionCode 25. Pendiente 14 días de uso activo para solicitar producción |
+| ✅ | Google Sign-In Android — SHA-256 registrado en Firebase Console (fix para Credential Manager API de v16) |
 | ✅ | Apple Developer account creada |
 | ✅ | Google Play Developer account creada |
 | ✅ | EAS CLI logueado como miguelhsa |
@@ -483,6 +484,7 @@ npx expo start    # servidor de desarrollo
 | ⏳ | App Check enforce — activar `REQUIRE_APP_CHECK=true` cuando el % verificado en Firebase Console supere el 90% |
 | ⏳ | Strava — UI desactivada con "Próximamente". Backend intacto. Pendiente resolver tier API antes de reactivar |
 | ⏳ | Merge `fix/bugs-performance` → main tras verificar en dispositivo real |
+| ⏳ | Merge `feature/decay-notifications` → main + `firebase deploy --only functions` |
 
 ### URLs legales (GitHub Pages)
 

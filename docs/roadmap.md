@@ -1,6 +1,6 @@
 # Hoja de Ruta de ConqueRun
 
-Revision: 2026-07-19
+Revision: 2026-08-02
 
 Esta hoja de ruta refleja el estado real del repositorio tras revision exhaustiva de codigo: `App.js`, todas las `screens/`, todos los `utils/`, reglas de Firestore y documentos auxiliares. Las tareas ya implementadas se han retirado para que este documento sirva como guia operativa.
 
@@ -27,9 +27,10 @@ Acciones que solo puede hacer Miguel — no son codigo, son pasos manuales en co
 
 ### Inmediatas (esta semana)
 
-- [ ] **Android testers** — Perseguir a los 18 testers para que instalen la app y la usen activamente. Sin 14 dias de uso no se puede solicitar acceso a produccion en Google Play.
+- [ ] **Android testers** — Reenviar el link de Alpha (versionCode 25, con fix Google Sign-In) a los 18 testers para que instalen y usen activamente. Sin 14 dias de uso no se puede solicitar acceso a produccion en Google Play.
 - [ ] **Verificar carrera en dispositivo real** — Hacer una carrera completa en iPhone o Android con la build actual antes de mergear la branch `fix/bugs-performance` a main.
 - [ ] **Merge fix/bugs-performance → main** — Una vez verificado en dispositivo, pedir a Claude que haga el merge (o hacerlo manualmente: `git checkout main && git merge fix/bugs-performance`).
+- [ ] **Deploy feature/decay-notifications** — Merge a main y ejecutar `firebase deploy --only functions` para activar las notificaciones push de barrio en peligro.
 
 ### Cuando las condiciones lo permitan
 

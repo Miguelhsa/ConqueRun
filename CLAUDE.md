@@ -17,7 +17,7 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 | Plataforma | Estado |
 |---|---|
 | iOS | ✅ Live en App Store |
-| Android | ✅ Prueba cerrada (Alpha), versionCode 24, pendiente 14 días de uso para ir a producción |
+| Android | ✅ Prueba cerrada (Alpha), versionCode 25, pendiente 14 días de uso para ir a producción |
 | Strava | ⛔ Desactivado con "Próximamente" — backend intacto, UI bloqueada por límite 10 atletas Standard Tier |
 | App Check | ⏳ `REQUIRE_APP_CHECK=false` — apps registradas, esperando >90% verificado en Firebase Console |
 
@@ -25,10 +25,11 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 
 ## Branches activas
 
-- `main` — versión estable, 9 commits adelante de origin
-- `fix/bugs-performance` — 1 commit con dos fixes pendientes de merge tras verificación en dispositivo real:
+- `main` — versión estable
+- `fix/bugs-performance` — 1 commit pendiente de merge tras verificación en dispositivo real:
   - `App.js`: polling AsyncStorage 1s → 3s durante carrera activa
   - `CorrerScreen.js`: catch exterior en `pararCarrera` para errores inesperados
+- `feature/decay-notifications` — notificación push cuando un barrio cruza ≤100 pts de decay. Pendiente merge + `firebase deploy --only functions`
 
 **No mergear `fix/bugs-performance` sin verificar una carrera completa en dispositivo real.**
 
@@ -37,9 +38,9 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 ## Pendientes técnicos
 
 ### Inmediatos
-1. **Merge `fix/bugs-performance` → `main`** — esperar verificación en dispositivo
-2. **Subir build 24 a Alpha en Play Console** — ya enviada a revisión (2026-07-26)
-3. **Testers Alpha** — 0% de instalación en Alpha, los 18 testers instalaron por Prueba interna. Hay que reenviarles el link correcto de Alpha para que empiece el contador de 14 días
+1. **Merge `fix/bugs-performance` → `main`** — esperar verificación de carrera en dispositivo real
+2. **Merge `feature/decay-notifications` → `main`** + `firebase deploy --only functions`
+3. **Testers Alpha** — build 25 en Alpha con fix Google Sign-In (SHA-256). Reenviar link de Alpha a los 18 testers para que empiece el contador de 14 días
 
 ### Cuando las condiciones lo permitan
 4. **App Check enforce** — cambiar `functions/.env.conquerrun-8d30e` a `REQUIRE_APP_CHECK=true` y `firebase deploy --only functions` cuando Firebase Console muestre >90% verificado
