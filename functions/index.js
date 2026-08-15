@@ -3536,6 +3536,7 @@ exports.enviarNotificacionTerritorios = onDocumentWritten(
 
 const DECAY_RATE = 0.10;
 const DECAY_PUNTOS_MINIMO = 50;
+const DECAY_UMBRAL_AVISO = 100;
 
 exports.aplicarDecayTerritorial = onSchedule({ schedule: 'every monday 03:00', timeoutSeconds: 1800 }, async () => {
   const db = getFirestore();
@@ -3549,6 +3550,9 @@ exports.aplicarDecayTerritorial = onSchedule({ schedule: 'every monday 03:00', t
     if (nuevos === valor) return { changed: false };
     return { changed: true, puntos: nuevos };
   };
+
+  // uid → [nombreBarrio, ...] para barrios que cruzan el umbral de aviso esta semana
+  const avisosDecay = new Map();
 
   const calcularOpsDesdeSnap = (snap, modo) => {
     const ops = [];
@@ -3565,6 +3569,14 @@ exports.aplicarDecayTerritorial = onSchedule({ schedule: 'every monday 03:00', t
           update.conquistadoEn = FieldValue.delete();
         } else if (decayUsuario.changed) {
           update.duenoPuntos = decayUsuario.puntos;
+          // Notificar solo al cruzar el umbral (no cada semana que esté por debajo)
+          const puntosAnteriores = Number(data.duenoPuntos) || 0;
+          if (puntosAnteriores > DECAY_UMBRAL_AVISO && decayUsuario.puntos <= DECAY_UMBRAL_AVISO) {
+            const uid = data.dueno;
+            const nombre = data.nombre ?? data.barrioId ?? 'un barrio';
+            if (!avisosDecay.has(uid)) avisosDecay.set(uid, []);
+            avisosDecay.get(uid).push(nombre);
+          }
         }
       }
 
@@ -3630,4 +3642,38 @@ exports.aplicarDecayTerritorial = onSchedule({ schedule: 'every monday 03:00', t
   }
 
   console.log(`[decay] Actualizaciones aplicadas: ${total}`);
+
+  // Notificaciones de barrios en riesgo — 1 lectura de token por usuario único
+  if (avisosDecay.size > 0) {
+    const mensajesPush = [];
+    await Promise.all(Array.from(avisosDecay.entries()).map(async ([uid, barrios]) => {
+      try {
+        const notifSnap = await db.collection('usuarios').doc(uid).collection('privado').doc('notificaciones').get();
+        const pushToken = notifSnap.exists ? notifSnap.data().pushToken : null;
+        if (!pushToken || !pushToken.startsWith('ExponentPushToken')) return;
+        const body = barrios.length === 1
+          ? `${barrios[0]} está perdiendo fuerza. Sal a correr para defenderlo.`
+          : `${barrios.length} de tus barrios están perdiendo fuerza. ¡Defiéndelos!`;
+        mensajesPush.push({ to: pushToken, title: '⚠️ Territorio en peligro', body, sound: 'default' });
+      } catch (e) {
+        console.warn('[decay] Error obteniendo token para aviso:', uid, e.message);
+      }
+    }));
+
+    if (mensajesPush.length > 0) {
+      try {
+        // Expo permite hasta 100 mensajes por petición
+        for (let i = 0; i < mensajesPush.length; i += 100) {
+          await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(mensajesPush.slice(i, i + 100)),
+          });
+        }
+        console.log(`[decay] Avisos de territorio en peligro enviados: ${mensajesPush.length}`);
+      } catch (e) {
+        console.error('[decay] Error enviando avisos push:', e.message);
+      }
+    }
+  }
 });
