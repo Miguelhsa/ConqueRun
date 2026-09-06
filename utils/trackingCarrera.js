@@ -3,6 +3,8 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 import { getDistancia } from './barrios';
+import { configurarCanalCarrera, mostrarNotificacionCarrera, ocultarNotificacionCarrera } from './notificacionCarrera';
+import { iniciarLiveActivityCarrera, actualizarLiveActivityCarrera, finalizarLiveActivityCarrera } from './liveActivityCarrera';
 
 export const CARRERA_LOCATION_TASK = 'conqurun-carrera-location-task';
 export const GPS_ACCURACY_MAX_METROS = 50;
@@ -251,7 +253,15 @@ const agregarPuntosTrackingSincronizado = async (locations = [], { origen = 'unk
   try { if (rutaStr) rutaActual = JSON.parse(rutaStr); } catch {}
   try { if (metaStr) meta = JSON.parse(metaStr); } catch {}
   if (!meta) return rutaActual;
-  if (meta.pausada) return rutaActual;
+  if (meta.pausada) {
+    const ahoraPausa = meta.pausadaEn ?? Date.now();
+    const segundosPausa = meta.iniciadaEn
+      ? Math.max(0, Math.floor((ahoraPausa - meta.iniciadaEn - (meta.tiempoPausadoMs ?? 0)) / 1000))
+      : 0;
+    mostrarNotificacionCarrera({ distanciaMetros: meta.distanciaAcumulada ?? 0, segundos: segundosPausa, pausada: true });
+    actualizarLiveActivityCarrera({ distanciaMetros: meta.distanciaAcumulada ?? 0, segundos: segundosPausa, pausada: true });
+    return rutaActual;
+  }
 
   const inicioValido = (meta.iniciadaEn ?? 0) - 60000;
   const puntos = locations
@@ -299,6 +309,12 @@ const agregarPuntosTrackingSincronizado = async (locations = [], { origen = 'unk
       metaNueva.ultimoBackgroundEn = ahora;
     }
     updates.push([META_KEY, JSON.stringify(metaNueva)]);
+    const ahoraTiempo = metaNueva.pausada && metaNueva.pausadaEn ? metaNueva.pausadaEn : ahora;
+    const segundosCarrera = metaNueva.iniciadaEn
+      ? Math.max(0, Math.floor((ahoraTiempo - metaNueva.iniciadaEn - (metaNueva.tiempoPausadoMs ?? 0)) / 1000))
+      : 0;
+    mostrarNotificacionCarrera({ distanciaMetros: distanciaAcumulada, segundos: segundosCarrera, pausada: Boolean(metaNueva.pausada) });
+    actualizarLiveActivityCarrera({ distanciaMetros: distanciaAcumulada, segundos: segundosCarrera, pausada: Boolean(metaNueva.pausada) });
   }
   await AsyncStorage.multiSet(updates);
   return rutaNueva;
@@ -326,9 +342,14 @@ export const prepararTrackingCarrera = async ({ segundoPlano = false, carreraId 
 
 export const limpiarTrackingCarrera = async () => {
   await encolarEscrituraTracking(() => AsyncStorage.multiRemove([RUTA_KEY, META_KEY]));
+  await ocultarNotificacionCarrera();
+  finalizarLiveActivityCarrera();
 };
 
 export const iniciarTrackingCarrera = async () => {
+  await configurarCanalCarrera();
+  mostrarNotificacionCarrera({ distanciaMetros: 0, segundos: 0, pausada: false, forzar: true });
+  iniciarLiveActivityCarrera({ distanciaMetros: 0, segundos: 0, pausada: false });
   const activo = await Location.hasStartedLocationUpdatesAsync(CARRERA_LOCATION_TASK);
   if (activo) {
     await Location.stopLocationUpdatesAsync(CARRERA_LOCATION_TASK);

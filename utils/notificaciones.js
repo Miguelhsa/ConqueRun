@@ -6,11 +6,26 @@ import { doc, setDoc, collection } from 'firebase/firestore';
 const refPrivado = (uid) => doc(db, 'usuarios', uid, 'privado', 'notificaciones');
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notificacion) => {
+    // La notificación persistente de carrera en curso no debe sonar ni saltar
+    // como banner en cada refresco: solo permanece en la bandeja / pantalla de bloqueo.
+    if (notificacion?.request?.content?.data?.tipo === 'carreraResumen') {
+      return {
+        shouldShowAlert: false,
+        shouldShowBanner: false,
+        shouldShowList: true,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      };
+    }
+    return {
+      shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 export const registrarNotificaciones = async (uid) => {

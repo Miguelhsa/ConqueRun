@@ -1,0 +1,6 @@
+{
+  "name": "activity-controller",
+  "version": "1.0.0",
+  "description": "Control de la Live Activity de carrera (ActivityKit) para ConqueRun",
+  "main": "index.ts"
+}
