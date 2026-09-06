@@ -88,7 +88,11 @@ export async function iniciarSesionGoogle() {
 
   const respuesta = await GoogleSignin.signIn();
 
-  if (respuesta?.type === 'cancelled' || respuesta?.code === statusCodes.SIGN_IN_CANCELLED) {
+  if (
+    respuesta?.type === 'cancelled' ||
+    respuesta?.type === 'noSavedCredentialFound' ||
+    respuesta?.code === statusCodes.SIGN_IN_CANCELLED
+  ) {
     return null;
   }
 

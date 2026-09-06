@@ -100,7 +100,8 @@ export default function LoginScreen({ onLogin }) {
       if (error.message === 'MODULO_NATIVO_NO_DISPONIBLE') {
         Alert.alert('No disponible en desarrollo', 'Google Sign-In requiere la app compilada (build de producción). Usa email/contraseña mientras desarrollas.');
       } else {
-        Alert.alert('Error con Google', 'No se pudo iniciar sesión con Google. Inténtalo de nuevo.');
+        console.error('[GoogleSignIn] code:', error.code, 'msg:', error.message);
+        Alert.alert('Error con Google', `No se pudo iniciar sesión con Google. Inténtalo de nuevo.\n\n(${error.code ?? error.message})`);
       }
     } finally {
       setCargandoSocial(null);
