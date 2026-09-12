@@ -1,6 +1,6 @@
 import { FUENTES_CARRERA, PROVEEDORES_EXTERNOS, ESTADOS_VERIFICACION } from './carreras';
 
-export const STRAVA_SCOPES = ['read', 'activity:read'];
+export const STRAVA_SCOPES = ['read', 'activity:read_all'];
 
 export const crearCarreraDesdeStrava = ({ uid, activity, importedAt }) => {
   const distancia = Math.round(activity.distance ?? 0);

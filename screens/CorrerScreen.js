@@ -1577,14 +1577,21 @@ export default function CorrerScreen() {
 
       <ScrollView style={styles.historial} contentContainerStyle={styles.historialContenido}>
         <Text style={styles.historialTitulo}>Últimas carreras</Text>
-        <TouchableOpacity style={[styles.stravaImportarCard, { opacity: 0.5 }]} activeOpacity={1} disabled={true}>
+        <TouchableOpacity style={styles.stravaImportarCard} onPress={iniciarImportacionStrava} activeOpacity={0.8} disabled={importandoStrava}>
           <View style={styles.stravaImportarCabecera}>
             <FontAwesome6 name="strava" size={16} color={colors.strava} />
             <Text style={styles.stravaImportarTitulo}>Importar conquistas de Strava</Text>
-            <Text style={[styles.stravaImportarTexto, { marginLeft: 8, color: colors.strava }]}>Próximamente</Text>
+            {importandoStrava && <ActivityIndicator size="small" color={colors.strava} style={{ marginLeft: 6 }} />}
           </View>
-          <Text style={styles.stravaImportarTexto}>Conecta tu cuenta de Strava para importar tus carreras</Text>
+          <Text style={styles.stravaImportarTexto}>
+            {stravaConectado ? 'Importar carreras de los últimos 90 días' : 'Conecta tu cuenta para importar tus carreras'}
+          </Text>
         </TouchableOpacity>
+        {stravaConectado && (
+          <TouchableOpacity style={styles.stravaDesconectarBoton} onPress={handleDesconectarStrava} disabled={desconectandoStrava}>
+            <Text style={styles.stravaDesconectarTexto}>{desconectandoStrava ? 'Desconectando...' : 'Desconectar Strava'}</Text>
+          </TouchableOpacity>
+        )}
         {carrerasRecientes.length === 0 ? (
           <Text style={styles.historialVacio}>Aún no has corrido. ¡A por el primer kilómetro!</Text>
         ) : (
