@@ -1167,7 +1167,7 @@ async function obtenerTerritoriosSegmentadosSv(ciudadId, segmentoCompetitivo) {
 }
 
 async function stravaFetch(path, accessToken, options = {}) {
-  const res = await fetch(`https://www.api-v3.strava.com${path}`, {
+  const res = await fetch(`https://www.strava.com/api/v3${path}`, {
     ...options,
     headers: {
       authorization: `Bearer ${accessToken}`,
