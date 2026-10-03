@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "743879769903-rqqbbku4o6gl126a1etqa3vcr1ep43j9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.conquerun.app",
+            "certificate_hash": "8ad5c56c2167ae47e3f2ee06d0eccc52c5d36db2"
+          }
+        },
+        {
           "client_id": "743879769903-emv2olgja4o0nhu1b389ocdml6em79da.apps.googleusercontent.com",
           "client_type": 3
         }
