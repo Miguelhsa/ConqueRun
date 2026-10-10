@@ -9,6 +9,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import * as ImagePicker from 'expo-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { invalidarCacheTerritorios, obtenerBarriosSegmentados } from '../utils/barrios';
 import { repararConsistenciaUsuario } from '../utils/consistencia';
@@ -26,6 +27,8 @@ import { colors, radius } from '../utils/theme';
 
 
 export default function PerfilScreen() {
+  // Márgenes de la zona segura (barra de navegación Android / indicador de inicio iOS)
+  const insets = useSafeAreaInsets();
   const [stats, setStats] = useState(null);
   const [nickname, setNickname] = useState('');
   const [pais, setPais] = useState(null);
@@ -888,7 +891,12 @@ export default function PerfilScreen() {
     </ImageBackground>
 
     {/* Modal eliminación de cuenta */}
-    <Modal visible={mostrarModalEliminar} transparent animationType="fade">
+    <Modal
+      visible={mostrarModalEliminar}
+      transparent
+      animationType="fade"
+      onRequestClose={() => { if (!eliminando) setMostrarModalEliminar(false); }}
+    >
       <View style={styles.eliminarOverlay}>
         <View style={styles.eliminarCard}>
           <Text style={styles.eliminarTitulo}>Eliminar cuenta</Text>
@@ -918,11 +926,29 @@ export default function PerfilScreen() {
     </Modal>
 
     {/* Modal de instrucciones */}
-    <Modal visible={mostrarInfo} transparent animationType="slide">
+    <Modal
+      visible={mostrarInfo}
+      transparent
+      animationType="slide"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={() => setMostrarInfo(false)}
+    >
       <View style={styles.infoOverlay}>
-        <View style={styles.infoCard}>
+        <View style={[styles.infoCard, { paddingBottom: 24 + insets.bottom }]}>
+          <View style={styles.infoHeader}>
+            <Text style={[styles.infoTitulo, styles.infoTituloHeader]}>Cómo funciona ConqueRun</Text>
+            <TouchableOpacity
+              style={styles.infoCerrarX}
+              onPress={() => setMostrarInfo(false)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Cerrar"
+            >
+              <MaterialCommunityIcons name="close" size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
           <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={styles.infoTitulo}>Cómo funciona ConqueRun</Text>
 
             {[
               {
@@ -979,11 +1005,29 @@ export default function PerfilScreen() {
     </Modal>
 
     {/* Modal segmentos de ritmo */}
-    <Modal visible={mostrarSegmentosRitmo} transparent animationType="slide">
+    <Modal
+      visible={mostrarSegmentosRitmo}
+      transparent
+      animationType="slide"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={() => setMostrarSegmentosRitmo(false)}
+    >
       <View style={styles.infoOverlay}>
-        <View style={styles.infoCard}>
+        <View style={[styles.infoCard, { paddingBottom: 24 + insets.bottom }]}>
+          <View style={styles.infoHeader}>
+            <Text style={[styles.infoTitulo, styles.infoTituloHeader]}>Ritmos de conquista</Text>
+            <TouchableOpacity
+              style={styles.infoCerrarX}
+              onPress={() => setMostrarSegmentosRitmo(false)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityRole="button"
+              accessibilityLabel="Cerrar"
+            >
+              <MaterialCommunityIcons name="close" size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
           <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={styles.infoTitulo}>Ritmos de conquista</Text>
 
             {SEGMENTOS_RITMO.map(segmento => {
               const activo = segmento.id === segmentoRitmo;
@@ -1087,6 +1131,16 @@ const styles = StyleSheet.create({
   infoTitulo: {
     fontSize: 20, fontWeight: '900', color: colors.text,
     marginBottom: 20,
+  },
+  infoHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: 12, marginBottom: 20,
+  },
+  infoTituloHeader: { flex: 1, marginBottom: 0 },
+  infoCerrarX: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: colors.bg, borderColor: colors.border, borderWidth: 1,
+    alignItems: 'center', justifyContent: 'center',
   },
   infoItem: {
     flexDirection: 'row', gap: 14, marginBottom: 18, alignItems: 'flex-start',
