@@ -47,9 +47,24 @@ service cloud.firestore {
       return desc is string && desc.size() <= 120;
     }
 
+    // Convierte 'YYYY-MM-DD' en timestamp para poder comparar edades en reglas.
+    function fechaNacimientoTimestamp(fecha) {
+      return timestamp.date(
+        int(fecha.split('-')[0]),
+        int(fecha.split('-')[1]),
+        int(fecha.split('-')[2])
+      );
+    }
+
+    // Edad minima de 14 anos (LOPDGDD Art. 7). El cliente calcula la edad exacta;
+    // esta regla es la red de seguridad de servidor frente a escrituras directas
+    // contra la API. 5110 dias = 14 * 365: aproximacion deliberadamente permisiva
+    // en unos pocos dias para no rechazar a quien cumple 14 justo en el limite.
     function fechaNacimientoValida(fecha) {
       return fecha is string &&
-        fecha.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+        fecha.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        fechaNacimientoTimestamp(fecha) >= timestamp.date(1900, 1, 1) &&
+        fechaNacimientoTimestamp(fecha) <= request.time - duration.value(5110, 'd');
     }
 
     function ciudadActualValida() {
@@ -320,32 +335,6 @@ service cloud.firestore {
           !changedKeys().hasAny(['codigo']) ||
           request.resource.data.codigo.matches('^[A-Z0-9]{6}$')
         );
-    }
-
-    function validRankingMetadataCreate(id) {
-      return signedIn() &&
-        request.resource.data.uid == request.auth.uid &&
-        id == request.resource.data.ciudadId + '_' + request.auth.uid &&
-        request.resource.data.keys().hasOnly([
-          'uid', 'ciudadId', 'nickname', 'fotoPerfil', 'fotoPerfilEstado',
-          'pais', 'genero', 'grupoEdad', 'ritmo30d', 'segmentoRitmo',
-          'segmentoGenero', 'segmentoEdad', 'segmentoCompetitivo',
-          'segmentoEtiqueta', 'topLogros', 'actualizadoEn'
-        ]);
-    }
-
-    function validRankingMetadataUpdate(id) {
-      return signedIn() &&
-        resource.data.uid == request.auth.uid &&
-        request.resource.data.uid == resource.data.uid &&
-        request.resource.data.ciudadId == resource.data.ciudadId &&
-        id == resource.data.ciudadId + '_' + request.auth.uid &&
-        changedKeys().hasOnly([
-          'nickname', 'fotoPerfil', 'fotoPerfilEstado',
-          'pais', 'genero', 'grupoEdad', 'ritmo30d', 'segmentoRitmo',
-          'segmentoGenero', 'segmentoEdad', 'segmentoCompetitivo',
-          'segmentoEtiqueta', 'topLogros', 'actualizadoEn'
-        ]);
     }
 
     // Rate limit de reportes: máximo 1 reporte por usuario por recurso

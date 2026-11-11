@@ -190,6 +190,11 @@ function top10Uids(top10 = []) {
   )];
 }
 
+// usuariosPublicos lo lee cualquier usuario autenticado, asi que no puede contener
+// genero ni segmentoEtiqueta: la etiqueta incluye el tramo de edad y dejaba expuesto
+// quien es menor de edad. Ver docs/auditoria-cumplimiento-2026-11.md (hallazgo 6).
+// Los FieldValue.delete() limpian los documentos creados antes de este cambio;
+// se pueden retirar cuando no queden documentos antiguos.
 function perfilPublico(uid, data, FieldValue) {
   return {
     uid,
@@ -197,14 +202,49 @@ function perfilPublico(uid, data, FieldValue) {
     fotoPerfil: data.fotoPerfil ?? null,
     fotoPerfilEstado: data.fotoPerfilEstado ?? null,
     pais: data.pais ?? null,
-    genero: data.genero ?? null,
     ciudadActualId: data.ciudadActualId ?? null,
     ciudadActualNombre: data.ciudadActualNombre ?? null,
     paisCodigo: data.paisCodigo ?? null,
-    segmentoEtiqueta: data.segmentoEtiqueta ?? null,
     topLogros: (data.logros ?? []).slice(0, 3),
     actualizadoEn: FieldValue.serverTimestamp(),
+    genero: FieldValue.delete(),
+    segmentoEtiqueta: FieldValue.delete(),
   };
+}
+
+// DSA (Reglamento UE 2022/2065) Art. 17: declaracion de motivos al usuario
+// afectado cuando se retira su contenido. El panel de moderacion marca la foto
+// como 'rechazada' con un motivo y hasta ahora el usuario no recibia ningun
+// aviso. Se invoca desde sincronizarRankingPerfil para no anadir un segundo
+// trigger sobre usuarios/{uid}.
+const MOTIVOS_RECHAZO_FOTO = {
+  contenido_no_permitido: 'La imagen no cumple las Normas de Comunidad.',
+};
+
+async function notificarFotoRechazadaSiProcede(db, uid, before, after) {
+  if (after?.fotoPerfilEstado !== 'rechazada') return;
+  if (before?.fotoPerfilEstado === after.fotoPerfilEstado) return;
+
+  const motivo = MOTIVOS_RECHAZO_FOTO[after.fotoMotivoRechazo]
+    ?? 'La imagen no cumple las Normas de Comunidad.';
+
+  try {
+    const tokenSnap = await db.doc(`usuarios/${uid}/privado/notificaciones`).get();
+    const pushToken = tokenSnap.exists ? tokenSnap.data()?.pushToken : null;
+    if (!pushToken) return;
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        to: pushToken,
+        title: 'Tu foto de perfil ha sido retirada',
+        body: `${motivo} Puedes subir otra desde tu perfil, o impugnar la decision escribiendo a conquerunapp@gmail.com.`,
+        sound: 'default',
+      }),
+    });
+  } catch (e) {
+    console.error('[push] No se pudo notificar la retirada de foto:', e.message);
+  }
 }
 
 function resumenTerritoriosConquistados(territorios = []) {
@@ -334,6 +374,10 @@ exports.sincronizarRankingPerfil = onDocumentWritten('usuarios/{uid}', async (ev
   }
 
   const rankingRef = db.collection('rankingsCiudad').doc(`${ciudadId}_${uid}`);
+  // rankingsCiudad lo lee cualquier usuario autenticado. No incluimos genero,
+  // segmentoEdad/grupoEdad ni segmentoEtiqueta: identificaban publicamente a los
+  // menores. segmentoCompetitivo se mantiene porque las consultas del ranking
+  // filtran por el, y la app lee su propia etiqueta de usuarios/{uid}.
   const payload = {
     uid,
     ciudadId,
@@ -341,16 +385,16 @@ exports.sincronizarRankingPerfil = onDocumentWritten('usuarios/{uid}', async (ev
     fotoPerfil: after.fotoPerfil ?? null,
     fotoPerfilEstado: after.fotoPerfilEstado ?? null,
     pais: after.pais ?? null,
-    genero: after.genero ?? null,
-    grupoEdad: after.segmentoEdad ?? null,
     ritmo30d: after.ritmo30d ?? null,
     segmentoRitmo: after.segmentoRitmo ?? null,
-    segmentoGenero: after.segmentoGenero ?? null,
-    segmentoEdad: after.segmentoEdad ?? null,
     segmentoCompetitivo: after.segmentoCompetitivo ?? null,
-    segmentoEtiqueta: after.segmentoEtiqueta ?? null,
     topLogros: (after.logros ?? []).slice(0, 3),
     actualizadoEn: FieldValue.serverTimestamp(),
+    genero: FieldValue.delete(),
+    grupoEdad: FieldValue.delete(),
+    segmentoGenero: FieldValue.delete(),
+    segmentoEdad: FieldValue.delete(),
+    segmentoEtiqueta: FieldValue.delete(),
   };
 
   if (!before || ciudadCambiada || segmentoCambiado) {
@@ -398,6 +442,7 @@ exports.sincronizarRankingPerfil = onDocumentWritten('usuarios/{uid}', async (ev
   }
 
   await batch.commit();
+  await notificarFotoRechazadaSiProcede(db, uid, before, after);
 });
 
 exports.completarPerfilInicial = onCall(async (request) => {
@@ -649,6 +694,7 @@ exports.eliminarCuenta = onCall(async (request) => {
 
   await Promise.all([
     bucket.file(`fotos/${uid}.jpg`).delete().catch(() => {}),
+    bucket.file(`exportaciones/${uid}/datos.json`).delete().catch(() => {}),
     ...archivosPendientes
       .filter(f => {
         const grupoId = f.name.split('/').pop().replace('.jpg', '');
@@ -1931,15 +1977,17 @@ exports.registrarCarreraConqurun = onCall(
       fotoPerfil: perfil.fotoPerfil ?? null,
       fotoPerfilEstado: perfil.fotoPerfilEstado ?? null,
       pais: perfil.pais ?? null,
-      genero: perfil.genero ?? null,
-      grupoEdad: segmentos.segmentoEdad,
       ritmo30d: segmentos.ritmo30d,
       segmentoRitmo: segmentos.segmentoRitmo,
-      segmentoGenero: segmentos.segmentoGenero,
-      segmentoEdad: segmentos.segmentoEdad,
       segmentoCompetitivo: segmentos.segmentoCompetitivo,
-      segmentoEtiqueta: segmentos.segmentoEtiqueta,
       topLogros,
+      // rankingsCiudad es legible por cualquier usuario autenticado: sin genero
+      // ni tramo de edad (auditoria 2026-11, hallazgo 6).
+      genero: FieldValue.delete(),
+      grupoEdad: FieldValue.delete(),
+      segmentoGenero: FieldValue.delete(),
+      segmentoEdad: FieldValue.delete(),
+      segmentoEtiqueta: FieldValue.delete(),
       barrios: FieldValue.increment(nuevosTerritorios.length),
       actualizadoEn: FieldValue.serverTimestamp(),
     }, { merge: true });
@@ -2145,15 +2193,16 @@ exports.repararConsistenciaUsuario = onCall(async (request) => {
     fotoPerfil: userData.fotoPerfil ?? null,
     fotoPerfilEstado: userData.fotoPerfilEstado ?? null,
     pais: userData.pais ?? null,
-    genero: userData.genero ?? null,
-    grupoEdad: userData.segmentoEdad ?? null,
     ritmo30d: userData.ritmo30d ?? null,
     segmentoRitmo: userData.segmentoRitmo ?? null,
-    segmentoGenero: userData.segmentoGenero ?? null,
-    segmentoEdad: userData.segmentoEdad ?? null,
     segmentoCompetitivo,
-    segmentoEtiqueta: userData.segmentoEtiqueta ?? null,
     topLogros: (userData.logros ?? []).slice(0, 3),
+    // Ver nota en perfilPublico: coleccion publica, sin genero ni tramo de edad.
+    genero: FieldValue.delete(),
+    grupoEdad: FieldValue.delete(),
+    segmentoGenero: FieldValue.delete(),
+    segmentoEdad: FieldValue.delete(),
+    segmentoEtiqueta: FieldValue.delete(),
     actualizadoEn: FieldValue.serverTimestamp(),
   };
 
@@ -2289,7 +2338,10 @@ exports.exportarDatosUsuario = onCall(async (request) => {
 
   const [usuarioSnap, carrerasSnap, marcasSnap] = await Promise.all([
     usuarioRef.get(),
-    db.collection('carreras').where('uid', '==', uid).orderBy('fecha', 'desc').limit(500).get(),
+    // El tope anterior era 500. La portabilidad del Art. 20 cubre todos los datos
+    // facilitados por el interesado, no los ultimos 500; 5000 deja margen de
+    // sobra para cualquier cuenta real sin arriesgar la memoria de la funcion.
+    db.collection('carreras').where('uid', '==', uid).orderBy('fecha', 'desc').limit(5000).get(),
     usuarioRef.collection('marcasTerritoriales').get(),
   ]);
 
@@ -2305,7 +2357,7 @@ exports.exportarDatosUsuario = onCall(async (request) => {
 
   await privadoRef.set({ ultimaExportacionEn: FieldValue.serverTimestamp() }, { merge: true });
 
-  return {
+  const exportacion = {
     exportadoEn: new Date().toISOString(),
     uid,
     email: request.auth.token?.email ?? null,
@@ -2313,6 +2365,32 @@ exports.exportarDatosUsuario = onCall(async (request) => {
     fechaNacimiento: privado.fechaNacimiento ?? null,
     carreras: carrerasSnap.docs.map(d => serializarParaExport({ id: d.id, ...d.data() })),
     marcasTerritoriales: marcasSnap.docs.map(d => serializarParaExport({ id: d.id, ...d.data() })),
+  };
+
+  // El JSON completo (carreras con su ruta GPS) puede pesar varios MB, y
+  // Share.share({ message }) de Android falla por encima de unos cientos de KB:
+  // el derecho de portabilidad se rompia justo para los usuarios mas activos.
+  // Lo escribimos en Storage y el cliente pide la URL de descarga. La ruta solo
+  // es legible por su dueño (ver storage.rules) y se borra con la cuenta.
+  const json = JSON.stringify(exportacion, null, 2);
+  const ruta = `exportaciones/${uid}/datos.json`;
+  await getStorage().bucket().file(ruta).save(json, {
+    contentType: 'application/json; charset=utf-8',
+    metadata: { cacheControl: 'private, max-age=0, no-store' },
+  });
+
+  // Compatibilidad con la app 1.1.1, que comparte el JSON devuelto tal cual:
+  // se incluye en linea solo si es pequeño, que es el caso en el que hoy ya
+  // funciona. Se puede retirar cuando no queden clientes de esa version.
+  const LIMITE_INLINE = 300 * 1024;
+  const cabeInline = Buffer.byteLength(json, 'utf8') <= LIMITE_INLINE;
+
+  return {
+    ok: true,
+    ruta,
+    exportadoEn: exportacion.exportadoEn,
+    totalCarreras: exportacion.carreras.length,
+    ...(cabeInline ? exportacion : {}),
   };
 });
 
@@ -2861,15 +2939,16 @@ exports.importarConquistasStrava = onCall({ secrets: [STRAVA_CLIENT_SECRET] }, a
       fotoPerfil: perfil.fotoPerfil ?? null,
       fotoPerfilEstado: perfil.fotoPerfilEstado ?? null,
       pais: perfil.pais ?? null,
-      genero: perfil.genero ?? null,
-      grupoEdad: segmentos.segmentoEdad,
       ritmo30d: segmentos.ritmo30d,
       segmentoRitmo: segmentos.segmentoRitmo,
-      segmentoGenero: segmentos.segmentoGenero,
-      segmentoEdad: segmentos.segmentoEdad,
       segmentoCompetitivo: segmentos.segmentoCompetitivo,
-      segmentoEtiqueta: segmentos.segmentoEtiqueta,
       topLogros: (perfil.logros ?? []).slice(0, 3),
+      // Ver nota en perfilPublico: coleccion publica, sin genero ni tramo de edad.
+      genero: FieldValue.delete(),
+      grupoEdad: FieldValue.delete(),
+      segmentoGenero: FieldValue.delete(),
+      segmentoEdad: FieldValue.delete(),
+      segmentoEtiqueta: FieldValue.delete(),
       barrios: FieldValue.increment(nuevosTerritorios.length),
       actualizadoEn: FieldValue.serverTimestamp(),
     };
@@ -3408,6 +3487,28 @@ exports.notificarReporte = onDocumentCreated({ document: 'reportes/{reportId}', 
 
   const tipoLabel = TIPO_LABELS[tipo] ?? tipo;
   const motivoLabel = MOTIVO_LABELS[motivo] ?? motivo;
+
+  // DSA (Reglamento UE 2022/2065) Art. 16.4: acuse de recibo sin dilacion al
+  // usuario que notifica el contenido. Va antes del email al admin y nunca
+  // bloquea el resto de la funcion: un fallo de push no debe perder el reporte.
+  try {
+    const tokenSnap = await db.doc(`usuarios/${reportadoPor}/privado/notificaciones`).get();
+    const pushToken = tokenSnap.exists ? tokenSnap.data()?.pushToken : null;
+    if (pushToken) {
+      await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          to: pushToken,
+          title: 'Hemos recibido tu reporte',
+          body: `Reporte de ${tipoLabel.toLowerCase()} por ${motivoLabel.toLowerCase()}. Lo revisara una persona y te avisaremos de la decision.`,
+          sound: 'default',
+        }),
+      });
+    }
+  } catch (e) {
+    console.error('[push] No se pudo enviar el acuse de recibo del reporte:', e.message);
+  }
   const fechaStr = new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' });
   const urlAdmin = `https://console.firebase.google.com/project/conquerrun-8d30e/firestore/data/reportes`;
   const gmailUser = GMAIL_USER.value();

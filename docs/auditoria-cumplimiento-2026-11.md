@@ -15,22 +15,32 @@ Pero hay **4 incumplimientos reales** que sí son sancionables y que son baratos
 
 | # | Hallazgo | Riesgo | Estado |
 |---|---|---|---|
-| 1 | Edad mínima: Términos dicen 13, Privacidad dice 14, código exige 14 | 🔴 Crítico | ✅ Corregido en los documentos (pendiente la validación en reglas) |
+| 1 | Edad mínima: Términos dicen 13, Privacidad dice 14, código exige 14 | 🔴 Crítico | ✅ Corregido, con validación de ≥14 años también en `firestore.rules` |
 | 2 | Responsable del tratamiento sin identificar (sin nombre, NIF ni dirección) | 🔴 Crítico | ✅ Corregido (nombre, NIF y dirección en ambos documentos) |
 | 3 | La política dice que puedes cambiar género y país; el código lo bloquea | 🟠 Alto | ✅ Corregido (opción b: inmutables + rectificación por email) |
 | 4 | Promesas de retención no implementadas (3 años / 24 meses, contradictorias) | 🟠 Alto | ✅ Unificado en 24 meses y redactado como derecho reservado |
 | 5 | "Año de nacimiento" declarado, fecha completa almacenada | 🟠 Alto | ✅ Corregido |
-| 6 | Segmento de edad `13-17` y género visibles públicamente en el ranking | 🟠 Alto | ⬜ Pendiente (requiere código) |
+| 6 | Segmento de edad `13-17` y género visibles públicamente en el ranking | 🟠 Alto | 🟨 Parcial: retirados los campos en claro; `segmentoCompetitivo` sigue codificándolos |
 | 7 | Normas de comunidad citadas pero nunca publicadas | 🟡 Medio | ✅ Publicadas en `docs/normas-comunidad.html` |
 | 8 | Falta derecho de limitación (Art. 18) y plazo de respuesta | 🟡 Medio | ✅ Corregido (+ Art. 13.2.e y decisiones automatizadas) |
 | 9 | Género declarado como categoría especial del Art. 9 (no lo es) | 🟡 Medio | ✅ Reclasificado a Art. 6.1.a |
 | 10 | App Check desactivado: cualquiera puede escribir en Firestore con la API key | 🟠 Alto (técnico) | ⬜ Pendiente (ya planificado) |
-| 11 | La exportación GDPR puede fallar en Android por tamaño del payload | 🟡 Medio | ⬜ Pendiente (requiere código) |
-| 12 | DSA: falta acuse de recibo y motivación de decisiones de moderación | 🟡 Medio | 🟨 Documentado en los Términos; falta implementarlo |
+| 11 | La exportación GDPR puede fallar en Android por tamaño del payload | 🟡 Medio | ✅ Corregido (el JSON va a Storage y se comparte el enlace) |
+| 12 | DSA: falta acuse de recibo y motivación de decisiones de moderación | 🟡 Medio | ✅ Acuse de recibo (Art. 16.4) y aviso de retirada de foto (Art. 17) |
 
-> **Actualización 11 nov 2026**: aplicados los 9 arreglos documentales, datos del titular incluidos. Quedan los 4
-> que requieren código (#6, #10, #11, #12). Los cambios de código descritos en este informe **no** se han aplicado:
-> `firestore.rules`, `functions/index.js` y las pantallas siguen como estaban.
+> **Actualización 11 nov 2026**: aplicados los 9 arreglos documentales y los cambios de código de #1, #11 y #12.
+> El #6 queda **parcialmente** cerrado y el #10 (App Check) sigue siendo una decisión de calendario, no de código.
+> Nada de esto está desplegado todavía: requiere `firebase deploy --only functions,firestore:rules,storage` y,
+> para el cambio de `PerfilScreen`, una build nueva de la app.
+>
+> **Sobre el #6**: se han retirado `genero`, `grupoEdad`, `segmentoGenero`, `segmentoEdad` y `segmentoEtiqueta` de
+> `usuariosPublicos` y de las cuatro escrituras a `rankingsCiudad`, y `scripts/limpiarCamposSensiblesPublicos.mjs`
+> los borra de los documentos ya existentes. Pero **el identificador `segmentoCompetitivo` sigue siendo una cadena
+> del tipo `ritmo_hombre_13-17`**, y es imprescindible para las consultas del ranking y para el id de los documentos
+> `territorios/{id}/segmentos/{segmentoCompetitivo}`. Es decir: ya no se puede listar a los menores leyendo campos en
+> claro, pero quien inspeccione el segmento de un usuario sigue deduciendo su género y su tramo de edad. Cerrarlo del
+> todo exige una decisión de producto con migración de datos (fusionar el tramo 13-17 con el siguiente, u opacar el
+> identificador de segmento), porque las conquistas viven en documentos cuyo id es ese segmento.
 
 ---
 

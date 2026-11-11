@@ -12,7 +12,7 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 
 ---
 
-## Estado actual (julio 2026)
+## Estado actual (noviembre 2026)
 
 | Plataforma | Estado |
 |---|---|
@@ -20,6 +20,9 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 | Android | ✅ Prueba cerrada (Alpha), versionCode 25, pendiente 14 días de uso para ir a producción |
 | Strava | ⛔ Desactivado con "Próximamente" — backend intacto, UI bloqueada por límite 10 atletas Standard Tier |
 | App Check | ⏳ `REQUIRE_APP_CHECK=false` — apps registradas, esperando >90% verificado en Firebase Console |
+| Cumplimiento | 🟨 Auditoría RGPD/LSSI/DSA hecha el 11 nov. Documentos legales corregidos y código desplegado; quedan puntos abiertos |
+
+**➡️ La lista viva de pendientes está en [`docs/pendientes.md`](docs/pendientes.md). Empezar por ahí.**
 
 ---
 
@@ -30,6 +33,7 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
   - `App.js`: polling AsyncStorage 1s → 3s durante carrera activa
   - `CorrerScreen.js`: catch exterior en `pararCarrera` para errores inesperados
 - `feature/decay-notifications` — notificación push cuando un barrio cruza ≤100 pts de decay. Pendiente merge + `firebase deploy --only functions`
+- `docs/cumplimiento-legal` — ya mergeada en `main` (commit `5c6f0ba`), se puede borrar
 
 **No mergear `fix/bugs-performance` sin verificar una carrera completa en dispositivo real.**
 
@@ -38,6 +42,9 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 ## Pendientes técnicos
 
 ### Inmediatos
+0. **Cambios de la auditoría sin commitear** — `firestore.rules`, `functions/index.js`, `screens/PerfilScreen.js`, `storage.rules` y `scripts/limpiarCamposSensiblesPublicos.mjs` están **desplegados en producción pero no en git**. Commitear antes de nada: un deploy desde otra máquina los revertiría
+0b. **GitHub Pages no publicó los documentos legales** — el build del commit `5c6f0ba` falló por la caída de GitHub Actions del 11 nov. Comprobar y, si sigue en 404, `gh run rerun 43096154272`
+0c. **Ejecutar `node scripts/limpiarCamposSensiblesPublicos.mjs --dry`** y luego sin `--dry`
 1. **Merge `fix/bugs-performance` → `main`** — esperar verificación de carrera en dispositivo real
 2. **Merge `feature/decay-notifications` → `main`** + `firebase deploy --only functions`
 3. **Testers Alpha** — build 25 en Alpha con fix Google Sign-In (SHA-256). Reenviar link de Alpha a los 18 testers para que empiece el contador de 14 días
@@ -122,7 +129,10 @@ Nueva app: Google exige **12+ testers activos durante 14+ días en Prueba cerrad
 
 - Privacidad: en GitHub Pages
 - Términos: en GitHub Pages
+- Normas de Comunidad: `normas-comunidad.html`, nueva el 11 nov — enlazada desde privacidad y términos
 - Eliminación de cuenta: formulario externo
+
+⚠️ Las tres están corregidas en el repo pero **pendientes de publicarse**: el build de Pages falló. Hasta que publique, las URLs en vivo sirven la versión antigua (términos con edad mínima 13, sin titular identificado) y Normas de Comunidad da 404.
 
 Ver memoria `project_legal_urls.md` para URLs exactas.
 
@@ -135,3 +145,5 @@ Ver memoria `project_legal_urls.md` para URLs exactas.
 - No añadir índices compuestos en Firestore sin necesidad (preferencia del propietario: simplicidad)
 - No reactivar Strava hasta resolver el tier de API
 - No usar `Math.random()` para códigos de grupo (ya usa `crypto.getRandomValues`)
+- No volver a escribir `genero`, `grupoEdad`, `segmentoGenero`, `segmentoEdad` ni `segmentoEtiqueta` en `usuariosPublicos` ni en `rankingsCiudad`: son colecciones que lee cualquier usuario autenticado e identificaban a los menores
+- No bajar de 14 años la edad mínima en ningún documento ni en las reglas (LOPDGDD Art. 7)

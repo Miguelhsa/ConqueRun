@@ -402,8 +402,14 @@ export default function PerfilScreen() {
     try {
       const fn = httpsCallable(getFunctions(), 'exportarDatosUsuario');
       const { data } = await fn();
-      const json = JSON.stringify(data, null, 2);
-      await Share.share({ message: json, title: 'Mis datos de ConqueRun' });
+      // La funcion deja el JSON en Storage y devuelve la ruta: compartir el
+      // fichero completo por el intent de Android fallaba en cuentas con muchas
+      // carreras. Compartimos el enlace de descarga.
+      const url = await getDownloadURL(ref(getStorage(), data.ruta));
+      await Share.share({
+        message: `Copia de mis datos de ConqueRun (${data.totalCarreras} carreras): ${url}`,
+        title: 'Mis datos de ConqueRun',
+      });
     } catch (e) {
       const mensaje = e.code === 'functions/resource-exhausted'
         ? e.message

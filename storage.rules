@@ -26,6 +26,12 @@ service firebase.storage {
         request.resource.contentType.matches('image/.*');
     }
 
+    // Exportaciones GDPR: las escribe exportarDatosUsuario con el Admin SDK y
+    // solo las puede leer su dueño. El cliente nunca escribe aqui.
+    match /exportaciones/{uid}/{fileName} {
+      allow read: if isOwner(uid);
+    }
+
     match /grupos/{fileName} {
       allow read: if signedIn();
       // escrituras solo desde Cloud Function (Admin SDK); el cliente nunca escribe aquí directamente
