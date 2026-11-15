@@ -1,71 +1,35 @@
 # Pendientes — ConqueRun
 
-Última actualización: **11 noviembre 2026**, final de la sesión de cumplimiento legal.
+Última actualización: **15 noviembre 2026**.
 Documento de traspaso: lo que queda, por orden de lo que haría primero.
 
 ---
 
-## Lo primero mañana
+## Hecho el 15 nov
 
-1. **Comprobar si GitHub Pages publicó los documentos legales.** Ayer GitHub tenía Actions en caída mayor y el build quedó encolado sin arrancar.
+- `d27c0c3` (cambios de la auditoría) pusheado a `origin/main`. Ya no hay nada desplegado sin estar en git.
+- GitHub Pages publicado tras cancelar el build atascado `43096154272`: `normas-comunidad.html` da 200 y `terminos.html` dice 14 años.
+- `scripts/limpiarCamposSensiblesPublicos.mjs` ejecutado: 45 docs limpiados en `usuariosPublicos` y 44 en `rankingsCiudad`; la simulación posterior da 0 pendientes. La segmentación no se ve afectada: vive en `usuarios/{uid}` (privado) y `segmentoCompetitivo` se mantiene en `rankingsCiudad`.
+- `feature/decay-notifications` estaba ya mergeada en `main` (`aplicarDecayTerritorial`, `functions/index.js:3642`) y desplegada con las 23 functions del 11 nov.
 
-   ```bash
-   gh run view 43096154272 --json status,conclusion && curl -s -o /dev/null -w '%{http_code}\n' https://miguelhsa.github.io/ConqueRun/normas-comunidad.html
-   ```
+### Ramas mergeadas en `main` que se pueden borrar
 
-   - `200` en normas-comunidad.html → publicado, verificar también que `terminos.html` ya no dice "13 años".
-   - `404` → relanzar con `gh run rerun 43096154272` y volver a comprobar.
+`docs/cumplimiento-legal`, `feature/decay-notifications`, `feature/reactivar-strava`, `feature/resumen-carrera-bloqueo`, `fix/cumplimiento-auditoria`, `fix/modal-info-android`.
 
-2. **Commitear los cambios de la auditoría.** Están desplegados en Firebase pero no en git, que es el peor sitio donde pueden estar: un deploy desde otra máquina los revertiría.
+Solo queda viva `fix/bugs-performance` (1 commit).
 
-3. **Ejecutar el script de limpieza de datos antiguos** (ver más abajo).
+### Strava: activo
 
----
+Reactivado en la 1.1.0 (`feature/reactivar-strava`) y funcionando con pocos usuarios. La documentación anterior lo daba aún como desactivado.
 
-## Estado al cerrar el 11 nov
-
-### Desplegado y vivo en producción
-
-- `firestore.rules` y `storage.rules` — desplegadas y confirmadas.
-- Las 23 Cloud Functions — actualizadas sin fallos.
-
-### Commiteado y en `main`
-
-- `5c6f0ba` — correcciones legales en privacidad, términos y normas de comunidad.
-- Pushed a `origin/main`. **Pero GitHub Pages no llegó a publicarlo** por la caída de Actions.
-
-### Cambiado, desplegado, pero SIN commitear
-
-```
-M docs/auditoria-cumplimiento-2026-11.md
-M firestore.rules
-M functions/index.js
-M screens/PerfilScreen.js
-M storage.rules
-?? scripts/limpiarCamposSensiblesPublicos.mjs
-```
-
-La rama `docs/cumplimiento-legal` ya está mergeada en `main` y se puede borrar.
+- Sigue en **Standard Tier, límite 10 atletas**. Pedir Extended Access en strava.com/settings/api antes de que se llene y, en cualquier caso, antes de cualquier campaña.
+- **Scope inconsistente:** `screens/CorrerScreen.js:1260` pide `read,activity:read`; `utils/strava.js` declara `activity:read_all`. Con `activity:read` no se importan actividades privadas. Corregir en la próxima build.
 
 ---
 
 ## Pendiente inmediato
 
-### 1. Commitear lo de arriba
-
-Sugerencia de mensaje: `fix(cumplimiento): edad en reglas, datos de menores fuera de colecciones publicas, exportacion GDPR y avisos DSA`.
-
-### 2. Ejecutar el script de limpieza
-
-Las functions ya no escriben los campos sensibles y los borran de cada documento que tocan, pero un usuario que no vuelva a correr conserva los valores antiguos.
-
-```bash
-node scripts/limpiarCamposSensiblesPublicos.mjs --dry
-```
-
-Si el recuento tiene sentido, repetir sin `--dry`.
-
-### 3. Build nueva de la app
+### 1. Build nueva de la app
 
 El cambio de `screens/PerfilScreen.js` (exportación GDPR por enlace de descarga) no llega a los usuarios hasta la siguiente build. La parte de servidor ya está activa, y hay compatibilidad hacia atrás para la 1.1.1: las cuentas pequeñas siguen exportando como hasta ahora.
 
@@ -115,8 +79,7 @@ Documento interno de una página. No se publica, pero si lo piden y no existe es
 
 1. **Verificar una carrera completa en dispositivo real.** Bloquea el merge de `fix/bugs-performance`. Es el cuello de botella de dos cosas a la vez.
 2. **Merge `fix/bugs-performance` → main** una vez verificado.
-3. **Merge `feature/decay-notifications` → main** + `firebase deploy --only functions`. Las notificaciones de barrio en peligro son retención pura y están paradas sin desplegar.
-4. **Secretos del email admin de reportes.** `notificarReporte` registra el reporte y no avisa a ningún humano. Ahora además los Términos prometen por escrito revisión humana, así que ya no es solo deuda.
+3. **Secretos del email admin de reportes.** `notificarReporte` registra el reporte y no avisa a ningún humano. Ahora además los Términos prometen por escrito revisión humana, así que ya no es solo deuda.
 
    ```bash
    firebase functions:secrets:set GMAIL_USER
@@ -125,8 +88,8 @@ Documento interno de una página. No se publica, pero si lo piden y no existe es
    firebase deploy --only functions
    ```
 
-5. **Testers de Alpha.** Reenviar el link de **Alpha** (no el de prueba interna) a los 18 testers. El contador de 14 días no arranca hasta que usen ese link.
-6. **Android producción** cuando los 14 días estén cubiertos.
+4. **Testers de Alpha — a la espera de su OK** (15 nov). El contador de 14 días solo cuenta si usan el link de **Alpha**, no el de prueba interna.
+5. **Android producción** cuando los 14 días estén cubiertos.
 
 ---
 
