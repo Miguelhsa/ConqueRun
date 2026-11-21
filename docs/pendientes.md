@@ -39,7 +39,7 @@ Reactivado en la 1.1.0 (`feature/reactivar-strava`) y funcionando con pocos usua
 
 Cuando Google apruebe la 1.1.2 en Alpha: Play Console → Panel → Solicitar acceso a producción. Si lo aprueba, promocionar la versión de Alpha a Producción.
 
-Las respuestas sugeridas por Testers Community afirman cambios que la app no tiene: botón de ver contraseña, confirmación al salir, ASO y capturas nuevas. No mandarlas tal cual.
+Respuestas preparadas en [play-acceso-produccion.md](play-acceso-produccion.md). Las de Testers Community afirmaban cambios que no existían; no usarlas.
 
 ### 2. iOS 1.1.2
 

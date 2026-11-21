@@ -1,6 +1,6 @@
 import './utils/cryptoPolyfill';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -13,7 +13,7 @@ if (!__DEV__) {
   console.debug = () => {};
 }
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { AppState, Linking, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, BackHandler, Linking, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Application from 'expo-application';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
@@ -47,6 +47,7 @@ import PerfilScreen from './screens/PerfilScreen';
 import ModeracionScreen from './screens/ModeracionScreen';
 
 const Tab = createBottomTabNavigator();
+const navigationRef = createNavigationContainerRef();
 const TAB_BAR_HEIGHT = 84;
 
 const STORE_URL = Platform.OS === 'ios'
@@ -239,6 +240,25 @@ export default function App() {
     };
   }, [usuario, biometriaBloqueada, tieneNickname, onboardingPendiente, onboardingCompletado]);
 
+  // Android: pedir confirmación antes de que el botón atrás cierre la app con una carrera en marcha
+  const hayCarreraActiva = Boolean(carreraActiva);
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !hayCarreraActiva) return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (navigationRef.isReady() && navigationRef.canGoBack()) return false;
+      Alert.alert(
+        'Carrera en marcha',
+        'Si sales de ConqueRun podrías perder parte de la ruta. Para acabar la carrera, usa el botón de terminar.',
+        [
+          { text: 'Seguir corriendo', style: 'cancel' },
+          { text: 'Salir', style: 'destructive', onPress: () => BackHandler.exitApp() },
+        ],
+      );
+      return true;
+    });
+    return () => sub.remove();
+  }, [hayCarreraActiva]);
+
   const comprobarPerfil = async (uid) => {
     const snap = await getDoc(doc(db, 'usuarios', uid));
     const data = snap.exists() ? snap.data() : {};
@@ -343,7 +363,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <View style={styles.appShell}>
 
       <Modal visible={notifPendientes.length > 0} transparent animationType="fade">

@@ -24,6 +24,7 @@ const MENSAJES_ERROR = {
 export default function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [verPassword, setVerPassword] = useState(false);
   const [esRegistro, setEsRegistro] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [cargandoSocial, setCargandoSocial] = useState(null);
@@ -166,15 +167,31 @@ export default function LoginScreen({ onLogin }) {
           keyboardType="email-address"
           editable={!cargando}
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Contraseña"
-          placeholderTextColor="#7f8796"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          editable={!cargando}
-        />
+        <View style={styles.passwordFila}>
+          <TextInput
+            style={[styles.input, styles.inputPassword]}
+            placeholder="Contraseña"
+            placeholderTextColor="#7f8796"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!verPassword}
+            autoCapitalize="none"
+            editable={!cargando}
+          />
+          <TouchableOpacity
+            style={styles.botonVerPassword}
+            onPress={() => setVerPassword(v => !v)}
+            accessibilityRole="button"
+            accessibilityLabel={verPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+            hitSlop={8}
+          >
+            <MaterialCommunityIcons
+              name={verPassword ? 'eye-off-outline' : 'eye-outline'}
+              size={22}
+              color="#a3abb9"
+            />
+          </TouchableOpacity>
+        </View>
 
         {(esRegistro || !aceptaTerminos || !aceptaPrivacidad) && (
           <>
@@ -348,6 +365,22 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     marginBottom: 12,
+  },
+  passwordFila: {
+    width: '100%',
+    position: 'relative',
+  },
+  inputPassword: {
+    paddingRight: 52,
+  },
+  botonVerPassword: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 12,
+    width: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   checkboxFila: {
     flexDirection: 'row',
