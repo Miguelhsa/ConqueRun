@@ -35,4 +35,3 @@ La app ya funciona en producción en iOS con usuarios reales, y en la prueba cer
 
 **10. ¿Qué has hecho diferente esta vez?**
 Es nuestra primera solicitud de acceso a producción.
-(Confirmar que es la primera. Si hubo un rechazo anterior, contar qué cambió desde entonces.)
