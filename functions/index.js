@@ -247,6 +247,38 @@ async function notificarFotoRechazadaSiProcede(db, uid, before, after) {
   }
 }
 
+// Mismo aviso de DSA Art. 17 para la foto de grupo: se notifica al creador,
+// que es quien la puede cambiar.
+exports.notificarFotoGrupoRechazada = onDocumentWritten('grupos/{grupoId}', async (event) => {
+  const before = event.data?.before?.data();
+  const after = event.data?.after?.data();
+  if (after?.fotoEstado !== 'rechazada') return;
+  if (before?.fotoEstado === after.fotoEstado) return;
+  if (!after.creador) return;
+
+  const motivo = MOTIVOS_RECHAZO_FOTO[after.fotoMotivoRechazo]
+    ?? 'La imagen no cumple las Normas de Comunidad.';
+  const nombreGrupo = after.nombre ? ` "${after.nombre}"` : '';
+
+  try {
+    const tokenSnap = await getFirestore().doc(`usuarios/${after.creador}/privado/notificaciones`).get();
+    const pushToken = tokenSnap.exists ? tokenSnap.data()?.pushToken : null;
+    if (!pushToken) return;
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        to: pushToken,
+        title: `La foto de tu grupo${nombreGrupo} ha sido retirada`,
+        body: `${motivo} Puedes subir otra desde el grupo, o impugnar la decision escribiendo a conquerunapp@gmail.com.`,
+        sound: 'default',
+      }),
+    });
+  } catch (e) {
+    console.error('[push] No se pudo notificar la retirada de foto de grupo:', e.message);
+  }
+});
+
 function resumenTerritoriosConquistados(territorios = []) {
   return territorios.map(barrio => ({
     id: barrio.barrioId,
@@ -541,6 +573,7 @@ exports.eliminarCuenta = onCall(async (request) => {
     privadoSnap,
     reportesPorSnap,
     reportesRecursoSnap,
+    solicitudesEliminacionSnap,
   ] = await Promise.all([
     db.collection('usuarios').doc(uid).get(),
     db.collection('territorios').where('dueno', '==', uid).get(),
@@ -556,6 +589,8 @@ exports.eliminarCuenta = onCall(async (request) => {
     db.collection('usuarios').doc(uid).collection('privado').get(),
     db.collection('reportes').where('reportadoPor', '==', uid).get(),
     db.collection('reportes').where('recursoId', '==', uid).get(),
+    // Guardan el email: si se conservan, el borrado no es completo
+    db.collection('solicitudesEliminacion').where('uid', '==', uid).get(),
   ]);
 
   const gruposABorrar = gruposSnap.docs.filter((docSnap) => {
@@ -674,6 +709,7 @@ exports.eliminarCuenta = onCall(async (request) => {
     ...privadoSnap.docs,
     ...reportesPorSnap.docs,
     ...reportesRecursoSnap.docs,
+    ...solicitudesEliminacionSnap.docs,
   ].forEach((docSnap) => {
     refsAEliminar.set(docSnap.ref.path, docSnap.ref);
   });
