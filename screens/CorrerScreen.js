@@ -1257,7 +1257,7 @@ export default function CorrerScreen() {
         '&response_type=code' +
         `&redirect_uri=${encodeURIComponent(STRAVA_REDIRECT_URI)}` +
         '&approval_prompt=force' +
-        '&scope=read,activity:read' +
+        '&scope=read,activity:read_all' +
         `&state=${encodeURIComponent(state)}`;
       await Linking.openURL(url);
     } catch (e) {
