@@ -1,9 +1,16 @@
 # Pendientes — ConqueRun
 
-Última actualización: **15 noviembre 2026**.
+Última actualización: **21 noviembre 2026**.
 Documento de traspaso: lo que queda, por orden de lo que haría primero.
 
 ---
+
+## Hecho el 21 nov
+
+- Email de reportes activo: `GMAIL_PASS` (versión 2) en Secret Manager; `GMAIL_USER` y `ADMIN_EMAIL` en `functions/.env.conquerrun-8d30e`. `notificarReporte` redesplegada. Falta ver llegar un aviso real.
+- 1.1.2 (versionCode 29) subida a Alpha y en revisión: scope de Strava `activity:read_all` y exportación GDPR por enlace. La privacidad ya no dice que Strava esté desactivado.
+- Subida automática a Google Play: cuenta de servicio `eas-play-submit`, que solo puede publicar en canales de prueba. Se quitó a `firebase-adminsdk-fbsvc` de Play Console, que tenía permiso de producción en toda la cuenta.
+- Play Console confirma los requisitos de producción: 12+ testers y 14 días.
 
 ## Hecho el 15 nov
 
@@ -23,15 +30,24 @@ Solo queda viva `fix/bugs-performance` (1 commit).
 Reactivado en la 1.1.0 (`feature/reactivar-strava`) y funcionando con pocos usuarios. La documentación anterior lo daba aún como desactivado.
 
 - Sigue en **Standard Tier, límite 10 atletas**. Pedir Extended Access en strava.com/settings/api antes de que se llene y, en cualquier caso, antes de cualquier campaña.
-- **Scope inconsistente:** `screens/CorrerScreen.js:1260` pide `read,activity:read`; `utils/strava.js` declara `activity:read_all`. Con `activity:read` no se importan actividades privadas. Corregir en la próxima build.
 
 ---
 
 ## Pendiente inmediato
 
-### 1. Build nueva de la app
+### 1. Acceso a producción en Android
 
-El cambio de `screens/PerfilScreen.js` (exportación GDPR por enlace de descarga) no llega a los usuarios hasta la siguiente build. La parte de servidor ya está activa, y hay compatibilidad hacia atrás para la 1.1.1: las cuentas pequeñas siguen exportando como hasta ahora.
+Cuando Google apruebe la 1.1.2 en Alpha: Play Console → Panel → Solicitar acceso a producción. Si lo aprueba, promocionar la versión de Alpha a Producción.
+
+Las respuestas sugeridas por Testers Community afirman cambios que la app no tiene: botón de ver contraseña, confirmación al salir, ASO y capturas nuevas. No mandarlas tal cual.
+
+### 2. iOS 1.1.2
+
+Build y envío a App Store para que la exportación GDPR por enlace y el nuevo scope de Strava lleguen a iOS.
+
+### 3. Estado de operador en Play Console (antes de febrero 2027)
+
+La dirección del perfil de pagos de Google no coincidía con la de los textos legales. Se ha pedido cambiarla a la de los textos legales. Cuando aparezca, declarar como operador con `conquerunapp@gmail.com`. No declarar antes: Google publicaría la dirección del perfil de pagos.
 
 ---
 
@@ -79,17 +95,7 @@ Documento interno de una página. No se publica, pero si lo piden y no existe es
 
 1. **Verificar una carrera completa en dispositivo real.** Bloquea el merge de `fix/bugs-performance`. Es el cuello de botella de dos cosas a la vez.
 2. **Merge `fix/bugs-performance` → main** una vez verificado.
-3. **Secretos del email admin de reportes.** `notificarReporte` registra el reporte y no avisa a ningún humano. Ahora además los Términos prometen por escrito revisión humana, así que ya no es solo deuda.
-
-   ```bash
-   firebase functions:secrets:set GMAIL_USER
-   firebase functions:secrets:set GMAIL_PASS
-   firebase functions:secrets:set ADMIN_EMAIL
-   firebase deploy --only functions
-   ```
-
-4. **Testers de Alpha — a la espera de su OK** (15 nov). El contador de 14 días solo cuenta si usan el link de **Alpha**, no el de prueba interna.
-5. **Android producción** cuando los 14 días estén cubiertos.
+3. **Probar el email de reportes** con un reporte real o de prueba.
 
 ---
 

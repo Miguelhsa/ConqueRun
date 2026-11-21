@@ -17,7 +17,7 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 | Plataforma | Estado |
 |---|---|
 | iOS | ✅ Live en App Store |
-| Android | ✅ Prueba cerrada (Alpha), versionCode 25. A la espera del OK de los testers (15 nov) para arrancar los 14 días |
+| Android | ✅ Prueba cerrada (Alpha). 1.1.2 (versionCode 29) subida y en revisión el 21 nov. Requisitos de 12 testers y 14 días ya cumplidos (Testers Community): falta solicitar acceso a producción |
 | Strava | ✅ Activo desde la 1.1.0, funcionando con pocos usuarios. Sigue en Standard Tier (límite 10 atletas): vigilarlo |
 | App Check | ⏳ `REQUIRE_APP_CHECK=false` — apps registradas, esperando >90% verificado en Firebase Console |
 | Cumplimiento | 🟨 Auditoría RGPD/LSSI/DSA del 11 nov: código en git y desplegado, documentos legales publicados, datos públicos limpiados (15 nov). Quedan puntos abiertos |
@@ -42,31 +42,23 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 
 ### Inmediatos
 1. **Merge `fix/bugs-performance` → `main`** — esperar verificación de carrera en dispositivo real
-2. **Build nueva de la app** — para que llegue a usuarios la exportación GDPR por enlace (`screens/PerfilScreen.js`)
-3. **Testers Alpha** — build 25 en Alpha con fix Google Sign-In (SHA-256). A la espera de que los 18 testers den el OK usando el link de Alpha
+2. **Android producción** — cuando Google apruebe la 1.1.2 en Alpha, Play Console → Panel → Solicitar acceso a producción. Las respuestas sugeridas de Testers Community describen cambios que no existen en la app (botón de ver contraseña, confirmación de salida): no usarlas tal cual
+3. **iOS 1.1.2** — build y envío a App Store (exportación GDPR por enlace y scope de Strava)
 
 ### Cuando las condiciones lo permitan
 4. **App Check enforce** — cambiar `functions/.env.conquerrun-8d30e` a `REQUIRE_APP_CHECK=true` y `firebase deploy --only functions` cuando Firebase Console muestre >90% verificado
-5. **Email admin de reportes** — configurar secrets y desplegar:
-   ```
-   firebase functions:secrets:set GMAIL_USER   # miguelhsa@gmail.com
-   firebase functions:secrets:set GMAIL_PASS   # App Password 16 chars
-   firebase functions:secrets:set ADMIN_EMAIL  # miguelhsa@gmail.com
-   firebase deploy --only functions
-   ```
-6. **Android producción** — cuando 14 días cubiertos, ir a Play Console → Prueba cerrada → solicitar acceso a producción
+5. **Estado de operador en Play Console** — antes de feb 2027. Esperando a que el perfil de pagos cambie a Lope de Haro 23 (la dirección de los textos legales); declarar después, como operador, con `conquerunapp@gmail.com`
 
 ### Strava (activo)
 7. **Límite de 10 atletas** — antes de que se acerquen los usuarios conectados, pedir Extended Access en strava.com/settings/api. Al llegar a 10, los nuevos no podrán conectar
-8. **Scope inconsistente** — `screens/CorrerScreen.js:1260` pide `read,activity:read`, mientras `utils/strava.js` declara `activity:read_all`. Con `activity:read` no se importan las actividades privadas. Corregir en la próxima build
 
 ---
 
 ## Comandos frecuentes
 
 ```bash
-# Build Android producción (sube versionCode automáticamente)
-eas build --platform android --profile production
+# Build Android producción y subida a Alpha (sube versionCode automáticamente)
+eas build --platform android --profile production --auto-submit
 
 # Build iOS producción
 eas build --platform ios --profile production
@@ -92,7 +84,8 @@ git checkout main && git merge fix/bugs-performance
 | `utils/barrios.js` | `buildIndiceEspacial` (O(k)) y `calcularBarrio`. Índice espacial ya implementado |
 | `utils/grupos.js` | `generarCodigo` usa `crypto.getRandomValues`, no `Math.random` |
 | `utils/socialAuth.js` | Google Sign-In. `GOOGLE_WEB_CLIENT_ID = '743879769903-emv2olgja4o0nhu1b389ocdml6em79da'` |
-| `functions/.env.conquerrun-8d30e` | `REQUIRE_APP_CHECK=false` — no cambiar hasta >90% verificado |
+| `functions/.env.conquerrun-8d30e` | `REQUIRE_APP_CHECK=false` — no cambiar hasta >90% verificado. También `GMAIL_USER` y `ADMIN_EMAIL`; `GMAIL_PASS` es secreto en Secret Manager |
+| `google-play-service-account.json` | Clave de `eas-play-submit@…`, fuera de git. Solo puede publicar en canales de prueba, no en producción |
 | `firebase-native/google-services.json` | Config Android. package: `com.conquerun.app` |
 | `docs/roadmap.md` | Hoja de ruta completa con fases R1-R6 y E1-E4 |
 
@@ -114,9 +107,10 @@ git checkout main && git merge fix/bugs-performance
 Nueva app: Google exige **12+ testers activos durante 14+ días en Prueba cerrada (Alpha)** antes de poder solicitar acceso a producción.
 
 - Alpha creada: 4 jul 2026 (versionCode 22)
-- Build actual en Alpha: 24 (subida 26 jul 2026)
-- Base instalada Alpha: 0% — **los testers deben usar el link de Alpha, no el de Prueba interna**
-- Prueba interna (versionCode 23): 70% instalado — estos no cuentan para los 14 días
+- Testers: plan de pago de Testers Community desde el 5 nov 2026 (15 testers). Requisitos cumplidos el 21 nov
+- Build actual en Alpha: 29 (1.1.2), en revisión desde el 21 nov. La anterior era la 28 (1.1.1, 22 oct)
+- Subida automática: `eas submit` con la cuenta de servicio `eas-play-submit`, canal `alpha` (`eas.json`)
+- Tras aprobar producción: promocionar la versión de Alpha a Producción, sin build nueva
 
 ---
 
