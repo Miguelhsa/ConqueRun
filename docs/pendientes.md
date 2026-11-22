@@ -1,7 +1,57 @@
 # Pendientes — ConqueRun
 
-Última actualización: **21 noviembre 2026**.
+Última actualización: **22 noviembre 2026**.
 Documento de traspaso: lo que queda, por orden de lo que haría primero.
+
+---
+
+## ▶️ Próxima sesión: empezar por aquí
+
+### 1. Comprobar lo que estaba en revisión
+- [ ] **Apple:** ¿aprobada la iOS 1.1.3 (build 42)? Enviada el 22 nov. Si la aprueban, se publica sola o hay que pulsar "Publicar", según cómo esté configurada.
+- [ ] **Google:** ¿aprobada la Android 1.1.3 (versionCode 30) en Alpha? Subida el 22 nov.
+- [ ] **Google:** ¿cambió la dirección del perfil de pagos a la de los textos legales? (Play Console → Cuenta de desarrollador → Información de la cuenta).
+
+### 2. Si Google aprobó la 1.1.3
+- [ ] **Solicitar acceso a producción:** Play Console → Panel → Solicitar acceso a producción, con las respuestas de [play-acceso-produccion.md](play-acceso-produccion.md).
+- [ ] **Build 1.1.4** con el botón y el logo oficiales de Strava (ya en `main`): `eas build --platform all --profile production --auto-submit`. Android va solo a Alpha; iOS se sube a TestFlight y luego hay que enviarla a revisión a mano.
+- [ ] **Si aprueban producción:** Play Console → Alpha → Promocionar versión → Producción.
+
+### 3. Cosas de Miguel, rápidas
+- [ ] **Datos de contacto públicos de Apple (DSA):** App Store Connect → Negocio → Cumplimiento → Reglamento de Servicios Digitales. Cambiar a la dirección de los textos legales y a `conquerunapp@gmail.com`. Ahora se muestran los datos personales.
+- [ ] **Estado de operador en Google** (cuando cambie la dirección del perfil de pagos): operador, `conquerunapp@gmail.com`, teléfono y verificar. Plazo: febrero 2027.
+- [ ] **Tarjeta para renovar** la membresía de Apple Developer (developer.apple.com/account). Mirar también la fecha de caducidad.
+- [ ] **Quitar China continental** de la disponibilidad en App Store (Precios y disponibilidad). Plazo: 31 ene 2027.
+
+### 4. Strava Extended Access (cuando la 1.1.4 esté publicada)
+- [ ] Rellenar el formulario de Strava (enlace en el correo de Strava API del 29 jun, en conquerunapp@gmail.com). Hay 6 atletas conectados de 10. Web: `https://miguelhsa.github.io/ConqueRun/`. Claude prepara las respuestas en inglés y las capturas del botón y el logo.
+
+### 5. Antes de fechas límite
+- [ ] **Apple, clasificación por edades:** preguntas nuevas sobre compartir ubicación y citas. Antes del **15 ene 2027**.
+- [ ] **Expo + SDK de iOS 27:** actualizar Expo y compilar con Xcode 27 en EAS. Antes de **abril 2027**; hacerlo en enero-febrero. El arreglo de deployment target de los pods ya está hecho.
+
+### 6. Sin fecha
+- [ ] **Hallazgo 6** de la auditoría (`segmentoCompetitivo` deja deducir género y menores): decidir entre fusionar el tramo 13-17, ID opaco o subir la edad mínima.
+- [ ] **Registro de actividades de tratamiento** (Art. 30): documento interno de una página.
+- [ ] **Probar el email de reportes** con un reporte de prueba.
+- [ ] **Instrumentar el embudo** en Analytics (registro, nickname, ciudad, permiso GPS, primera carrera, primera conquista, grupo).
+- [ ] **`fix/bugs-performance`:** probar una carrera en dispositivo real y mergear.
+- [ ] **17 scripts sin commitear** en `scripts/`: decidir si se guardan o se borran.
+- [ ] **Probar en dispositivo** el ojo de la contraseña y la confirmación al salir con carrera activa (Android).
+
+### Simulador de iOS en el Mac
+Xcode 27 sustituye la app Simulator por **Device Hub** (Xcode → Open Developer Tool → Device Hub), y `npx expo run:ios` falla porque busca la app antigua. La app de desarrollo ya está instalada en el iPhone 17 Pro (iOS 26.5): basta con arrancar el simulador en Device Hub, ejecutar `npx expo start --dev-client` y abrir ConqueRun. Si hay que recompilar: `npx expo prebuild -p ios --clean` y `xcodebuild` contra `ios/ConqueRun.xcworkspace`; luego `xcrun simctl install`. **Usa la base de datos de producción.**
+
+---
+
+## Hecho el 22 nov
+
+- Functions desplegadas: `eliminarCuenta` borra también `solicitudesEliminacion`, y `notificarFotoGrupoRechazada` (nueva) avisa al creador cuando se retira la foto del grupo.
+- Android 1.1.3 (versionCode 30) en Alpha; la 1.1.2 quedó aprobada el 21 nov.
+- iOS 1.1.3 (build 42) en App Store Connect, probada en TestFlight y enviada a revisión. Para subirla hubo que firmar el acuerdo de apps gratuitas, que estaba caducado.
+- 1.1.3: botón de ver contraseña y confirmación al salir con carrera activa.
+- 1.1.4 preparada en `main`: botón oficial "Connect with Strava" y logo "Powered by Strava".
+- Plugin de Expo: deployment target mínimo de los pods a 15.1, que Xcode 27 exige.
 
 ---
 
