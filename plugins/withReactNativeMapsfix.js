@@ -73,6 +73,18 @@ const withReactNativeMapsfix = (config) =>
         ].join('\n'));
       }
 
+      if (!contents.includes('[ConqueRun] minimum deployment target fix')) {
+        blocks.push([
+          "  # [ConqueRun] minimum deployment target fix for Xcode 27+",
+          '  installer.pods_project.targets.each do |t|',
+          '    t.build_configurations.each do |bc|',
+          "      target = bc.build_settings['IPHONEOS_DEPLOYMENT_TARGET']",
+          "      bc.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1' if target && target.to_f < 15.1",
+          '    end',
+          '  end',
+        ].join('\n'));
+      }
+
       if (blocks.length > 0) {
         const patched = contents.replace(
           /(post_install do \|installer\|)(\r?\n)/,
