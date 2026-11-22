@@ -123,6 +123,14 @@ Pendiente también del plan: el "informe de guerra semanal" necesita usuarios su
 
 ---
 
+## Apple (App Store Connect)
+
+- **iOS 1.1.3 (build 42) enviada a revisión el 22 nov.**
+- **Clasificación por edades:** contestar las preguntas nuevas sobre compartir ubicación y citas **antes del 15 ene 2027**.
+- **China continental:** quitarla de la disponibilidad (Precios y disponibilidad) **antes del 31 ene 2027**, o presentar la evaluación de seguridad y la declaración AIGC.
+- **Datos de contacto DSA (comerciante):** la App Store muestra en la UE los datos personales del titular. Cambiarlos a la dirección de los textos legales y a `conquerunapp@gmail.com`.
+- **Membresía de Apple Developer:** no hay tarjeta para la renovación automática. Si caduca, Apple retira la app.
+
 ## Deuda técnica de producto
 
 - **iOS: compilar con el SDK de iOS 27 antes de abril de 2027.** Apple avisó (ITMS-90725) con la build 42: desde abril no admitirá builds con el SDK de iOS 26. Hay que subir Expo a una versión compatible con Xcode 27 y usar una imagen de EAS Build con Xcode 27. Hacerlo con margen, en enero-febrero.
