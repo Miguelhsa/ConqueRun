@@ -125,6 +125,9 @@ Pendiente también del plan: el "informe de guerra semanal" necesita usuarios su
 
 ## Deuda técnica de producto
 
+- **iOS: compilar con el SDK de iOS 27 antes de abril de 2027.** Apple avisó (ITMS-90725) con la build 42: desde abril no admitirá builds con el SDK de iOS 26. Hay que subir Expo a una versión compatible con Xcode 27 y usar una imagen de EAS Build con Xcode 27. Hacerlo con margen, en enero-febrero.
+- **Strava Extended Access:** la petición de junio por email no se tramitó; Strava solo acepta su formulario. Hay 6 atletas conectados de 10 (22 nov). La 1.1.4 trae el botón oficial "Connect with Strava" y el logo "Powered by Strava"; pedir el acceso cuando esté publicada, con `https://miguelhsa.github.io/ConqueRun/` como web (`conquerun.app` no existe).
+
 - **Factor ritmo** (`utils/grupos.js:48`, `ritmoBase = 300`): penaliza a corredores de 7-8 min/km con factores de 0.67-0.77. El roadmap lo lista como riesgo de retención y propone `ritmoBase = 400` o curva logarítmica. Es un cambio de una línea que toca directamente al North Star.
 - **Fase 2 del roadmap**: mover a backend el cálculo de puntos, la conquista de barrios y el antitrampas. Con App Check desactivado, es lo que separa el ranking de ser falsificable con un script.
 - **Política de retención de rutas GPS** (roadmap línea 370): es también el arreglo del principio de minimización del RGPD.

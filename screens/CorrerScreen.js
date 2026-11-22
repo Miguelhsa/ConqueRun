@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ActivityIndicator, AppState, Platform, View, Text, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, ImageBackground, Linking } from 'react-native';
+import { ActivityIndicator, AppState, Platform, View, Text, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView, Image, ImageBackground, Linking } from 'react-native';
 import { RouteLine, TerritoryMap } from '../components/map/MapAdapter';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
@@ -1586,6 +1586,12 @@ export default function CorrerScreen() {
           <Text style={styles.stravaImportarTexto}>
             {stravaConectado ? 'Importar carreras de los últimos 90 días' : 'Conecta tu cuenta para importar tus carreras'}
           </Text>
+          <Image
+            source={require('../assets/strava/api_logo_pwrdBy_strava_horiz_white.png')}
+            style={styles.stravaPoweredBy}
+            resizeMode="contain"
+            accessibilityLabel="Powered by Strava"
+          />
         </TouchableOpacity>
         {stravaConectado && (
           <TouchableOpacity style={styles.stravaDesconectarBoton} onPress={handleDesconectarStrava} disabled={desconectandoStrava}>
@@ -1714,9 +1720,18 @@ function StravaImportModal({ visible, importando, onAbrirStrava, onCancelar }) {
               <Text style={styles.stravaModalConsejo}>
                 💡 ¿Usas Garmin, Suunto o Polar? Sincroniza con Strava y tus carreras se importarán automáticamente.
               </Text>
-              <TouchableOpacity style={styles.stravaAutorizarBoton} onPress={onAbrirStrava}>
-                <FontAwesome6 name="strava" size={20} color={colors.text} />
-                <Text style={styles.stravaAutorizarTexto}>Conectar con Strava</Text>
+              {/* Botón oficial de Strava: sus normas de marca no permiten uno propio */}
+              <TouchableOpacity
+                style={styles.stravaAutorizarBoton}
+                onPress={onAbrirStrava}
+                accessibilityRole="button"
+                accessibilityLabel="Connect with Strava"
+              >
+                <Image
+                  source={require('../assets/strava/btn_strava_connect_with_orange.png')}
+                  style={styles.stravaAutorizarImagen}
+                  resizeMode="contain"
+                />
               </TouchableOpacity>
               <View style={styles.stravaAcciones}>
                 <TouchableOpacity style={styles.stravaCancelarBoton} onPress={onCancelar}>
@@ -2161,16 +2176,9 @@ const styles = StyleSheet.create({
   stravaModalTitulo: { color: colors.text, fontSize: 20, fontWeight: '900' },
   stravaModalTexto: { color: colors.muted, fontSize: 13, lineHeight: 18 },
   stravaModalConsejo: { color: colors.subdued, fontSize: 12, lineHeight: 17, marginTop: 10, fontStyle: 'italic' },
-  stravaAutorizarBoton: {
-    flexDirection: 'row',
-    gap: 8,
-    backgroundColor: colors.strava,
-    borderRadius: radius.md,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stravaAutorizarTexto: { color: colors.text, fontSize: 15, fontWeight: '900' },
+  stravaAutorizarBoton: { alignItems: 'center', justifyContent: 'center' },
+  stravaAutorizarImagen: { width: 237, height: 48 },
+  stravaPoweredBy: { width: 146, height: 15, marginTop: 8 },
   stravaInput: {
     backgroundColor: colors.bg,
     borderColor: colors.border,
