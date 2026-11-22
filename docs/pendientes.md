@@ -84,8 +84,8 @@ Documento interno de una página. No se publica, pero si lo piden y no existe es
 
 ### Otros de la auditoría aún abiertos
 
-- Borrar `solicitudesEliminacion` dentro de `eliminarCuenta`: hoy queda el email del usuario en Firestore tras el borrado "completo".
-- Función programada de borrado por inactividad a 24 meses, que los documentos legales ya prometen.
+- Función programada de borrado por inactividad a 24 meses. Los textos legales lo plantean como facultad ("nos reservamos el derecho"), con aviso por email 30 días antes. Ninguna cuenta puede llegar a 24 meses inactiva antes de 2028: **construirlo a finales de 2027**, usando la última actividad de Firebase Auth (`metadata.lastRefreshTime`).
+- ~~Borrar `solicitudesEliminacion` dentro de `eliminarCuenta`~~ y ~~aviso motivado al rechazar foto de grupo~~: hechos y desplegados el 22 nov.
 - EIPD/DPIA antes de abrir a volumen alto, por geolocalización continua + menores + perfilado.
 - Derecho de desistimiento en los Términos **antes** de activar cualquier suscripción.
 
