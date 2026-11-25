@@ -161,7 +161,7 @@ La retención D1/D7 sí la da Firebase automáticamente. Lo que falta es **dónd
 
 ### Marketing — no gastar todavía
 
-El plan está en [estrategia-instagram.md](estrategia-instagram.md). Razones para no lanzar la campaña de pago aún, dos de ellas del propio plan:
+El plan completo (hoja de ruta, kit de IA y guiones) está en [marketing.md](marketing.md); el presupuesto y los prompts, en [estrategia-instagram.md](estrategia-instagram.md). Razones para no lanzar la campaña de pago aún, dos de ellas del propio plan:
 
 - Android no es público: el plan dice iOS-only hasta entonces, y que el CPI de Android es ~50% más barato.
 - 35-65 instalaciones al mes repartidas por Madrid no crean densidad, y sin rivalidad por barrio la mecánica no engancha.
