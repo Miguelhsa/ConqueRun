@@ -16,8 +16,8 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 
 | Plataforma | Estado |
 |---|---|
-| iOS | ✅ Live en App Store (1.1.1). 1.1.3 (build 42) enviada a revisión el 22 nov |
-| Android | ✅ Prueba cerrada (Alpha). 1.1.3 (versionCode 30) en revisión desde el 22 nov; la 1.1.2 quedó aprobada. Requisitos de 12 testers y 14 días cumplidos: falta solicitar acceso a producción |
+| iOS | ✅ Live en App Store (1.1.3, aprobada el 25 nov) |
+| Android | ✅ Prueba cerrada (Alpha) con la 1.1.3 (versionCode 30) aprobada. Acceso a producción solicitado el 25 nov: esperando respuesta de Google |
 | Strava | ✅ Activo desde la 1.1.0, funcionando con pocos usuarios. Sigue en Standard Tier (límite 10 atletas): vigilarlo |
 | App Check | ⏳ `REQUIRE_APP_CHECK=false` — apps registradas, esperando >90% verificado en Firebase Console |
 | Cumplimiento | 🟨 Auditoría RGPD/LSSI/DSA del 11 nov: código en git y desplegado, documentos legales publicados, datos públicos limpiados (15 nov). Quedan puntos abiertos |
@@ -42,8 +42,8 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 
 ### Inmediatos
 1. **Merge `fix/bugs-performance` → `main`** — esperar verificación de carrera en dispositivo real
-2. **Android producción** — cuando Google apruebe la 1.1.3 en Alpha, Play Console → Panel → Solicitar acceso a producción, con las respuestas de `docs/play-acceso-produccion.md`
-3. **Build 1.1.4** — branding oficial de Strava, ya en `main`. Lanzarla cuando Google apruebe la 1.1.3
+2. **Android producción** — solicitado el 25 nov. Cuando Google lo apruebe: Alpha → Promocionar versión → Producción
+3. **Build 1.1.4** — branding oficial de Strava, ya en `main`. Ya se puede lanzar
 
 ### Cuando las condiciones lo permitan
 4. **App Check enforce** — cambiar `functions/.env.conquerrun-8d30e` a `REQUIRE_APP_CHECK=true` y `firebase deploy --only functions` cuando Firebase Console muestre >90% verificado

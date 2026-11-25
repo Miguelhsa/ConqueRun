@@ -8,12 +8,12 @@ Documento de traspaso: lo que queda, por orden de lo que haría primero.
 ## ▶️ Próxima sesión: empezar por aquí
 
 ### 1. Comprobar lo que estaba en revisión
-- [ ] **Apple:** ¿aprobada la iOS 1.1.3 (build 42)? Enviada el 22 nov. Si la aprueban, se publica sola o hay que pulsar "Publicar", según cómo esté configurada.
-- [ ] **Google:** ¿aprobada la Android 1.1.3 (versionCode 30) en Alpha? Subida el 22 nov.
+- [x] **Apple:** iOS 1.1.3 aprobada y publicada (comprobado el 25 nov). ¿aprobada la iOS 1.1.3 (build 42)? Enviada el 22 nov. Si la aprueban, se publica sola o hay que pulsar "Publicar", según cómo esté configurada.
+- [x] **Google:** Android 1.1.3 aprobada en Alpha (comprobado el 25 nov). ¿aprobada la Android 1.1.3 (versionCode 30) en Alpha? Subida el 22 nov.
 - [ ] **Google:** ¿cambió la dirección del perfil de pagos a la de los textos legales? (Play Console → Cuenta de desarrollador → Información de la cuenta).
 
 ### 2. Si Google aprobó la 1.1.3
-- [ ] **Solicitar acceso a producción:** Play Console → Panel → Solicitar acceso a producción, con las respuestas de [play-acceso-produccion.md](play-acceso-produccion.md).
+- [x] **Acceso a producción solicitado el 25 nov.** Esperar respuesta (~7 días). **Solicitar acceso a producción:** Play Console → Panel → Solicitar acceso a producción, con las respuestas de [play-acceso-produccion.md](play-acceso-produccion.md).
 - [ ] **Build 1.1.4** con el botón y el logo oficiales de Strava (ya en `main`): `eas build --platform all --profile production --auto-submit`. Android va solo a Alpha; iOS se sube a TestFlight y luego hay que enviarla a revisión a mano.
 - [ ] **Si aprueban producción:** Play Console → Alpha → Promocionar versión → Producción.
 
