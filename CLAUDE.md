@@ -16,8 +16,8 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 
 | Plataforma | Estado |
 |---|---|
-| iOS | ✅ Live en App Store (1.1.3, aprobada el 25 nov) |
-| Android | ✅ Prueba cerrada (Alpha) con la 1.1.3 (versionCode 30) aprobada. Acceso a producción solicitado el 25 nov: esperando respuesta de Google |
+| iOS | ✅ Live en App Store (1.1.3). 1.1.4 (build 43) en TestFlight, pendiente de mandar a revisión |
+| Android | ✅ Alpha: 1.1.3 aprobada, 1.1.4 (versionCode 31) subida el 25 nov. Acceso a producción solicitado el 25 nov: esperando respuesta de Google |
 | Strava | ✅ Activo desde la 1.1.0, funcionando con pocos usuarios. Sigue en Standard Tier (límite 10 atletas): vigilarlo |
 | App Check | ⏳ `REQUIRE_APP_CHECK=false` — apps registradas, esperando >90% verificado en Firebase Console |
 | Cumplimiento | 🟨 Auditoría RGPD/LSSI/DSA del 11 nov: código en git y desplegado, documentos legales publicados, datos públicos limpiados (15 nov). Quedan puntos abiertos |
@@ -43,7 +43,7 @@ Stack: React Native + Expo SDK 54 · Firebase Auth + Firestore + Cloud Functions
 ### Inmediatos
 1. **Merge `fix/bugs-performance` → `main`** — esperar verificación de carrera en dispositivo real
 2. **Android producción** — solicitado el 25 nov. Cuando Google lo apruebe: Alpha → Promocionar versión → Producción
-3. **Build 1.1.4** — branding oficial de Strava, ya en `main`. Ya se puede lanzar
+3. **Build 1.1.4** — lanzada el 25 nov (branding oficial de Strava). Android en Alpha; iOS falta mandarla a revisión
 
 ### Cuando las condiciones lo permitan
 4. **App Check enforce** — cambiar `functions/.env.conquerrun-8d30e` a `REQUIRE_APP_CHECK=true` y `firebase deploy --only functions` cuando Firebase Console muestre >90% verificado
@@ -88,6 +88,8 @@ git checkout main && git merge fix/bugs-performance
 | `google-play-service-account.json` | Clave de `eas-play-submit@…`, fuera de git. Solo puede publicar en canales de prueba, no en producción |
 | `firebase-native/google-services.json` | Config Android. package: `com.conquerun.app` |
 | `docs/roadmap.md` | Hoja de ruta completa con fases R1-R6 y E1-E4 |
+| `docs/marketing.md` | Plan de marketing y guiones. El material vive en `~/Documents/ConqueRun-Marketing` (pendiente unificar) |
+| `marketing/mapas/` | Scripts y vídeos del mapa para marketing. Fuera de git (repo público) |
 
 ---
 

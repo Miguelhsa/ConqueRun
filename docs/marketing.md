@@ -1,6 +1,10 @@
 # Marketing de ConqueRun — estrategia, hoja de ruta y guiones
 
-Creado el 25 nov 2026. Documento principal de marketing. El detalle del presupuesto de Instagram y la biblioteca de prompts de Higgsfield siguen en [estrategia-instagram.md](estrategia-instagram.md).
+Creado el 25 nov 2026.
+
+> **Ojo:** el marketing de ConqueRun ya vive en `~/Documents/ConqueRun-Marketing/` (runbook de sesiones, plan de Instagram con campañas de pago, posts publicados y en cola, capturas, sistema de diseño en Claude Design). Este documento se escribió sin conocer esa carpeta. Pendiente: fusionarlo allí y dejar aquí solo un enlace.
+>
+> **Aspecto del mapa:** el mapa real de la app es Google Maps claro con calles, con los barrios en líneas azules y rellenos rojo (rival) y verde lima (tuyo). Cualquier vídeo o imagen de mapa debe parecerse a eso. El detalle del presupuesto de Instagram y la biblioteca de prompts de Higgsfield siguen en [estrategia-instagram.md](estrategia-instagram.md).
 
 ---
 

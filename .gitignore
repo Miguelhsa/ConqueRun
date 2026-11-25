@@ -54,3 +54,6 @@ functions/.secret.local
 # Claude Code session data
 .claude/
 google-play-service-account.json
+
+# Material de marketing (el repo es público)
+marketing/

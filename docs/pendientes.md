@@ -7,37 +7,37 @@ Documento de traspaso: lo que queda, por orden de lo que haría primero.
 
 ## ▶️ Próxima sesión: empezar por aquí
 
-### 1. Comprobar lo que estaba en revisión
-- [x] **Apple:** iOS 1.1.3 aprobada y publicada (comprobado el 25 nov). ¿aprobada la iOS 1.1.3 (build 42)? Enviada el 22 nov. Si la aprueban, se publica sola o hay que pulsar "Publicar", según cómo esté configurada.
-- [x] **Google:** Android 1.1.3 aprobada en Alpha (comprobado el 25 nov). ¿aprobada la Android 1.1.3 (versionCode 30) en Alpha? Subida el 22 nov.
-- [ ] **Google:** ¿cambió la dirección del perfil de pagos a la de los textos legales? (Play Console → Cuenta de desarrollador → Información de la cuenta).
+**Tablero de seguimiento:** el artefacto "Pasos de ConqueRun" (claude.ai, privado) tiene todas las tareas con casillas. Claude lo lee y lo actualiza en cada sesión.
 
-### 2. Si Google aprobó la 1.1.3
-- [x] **Acceso a producción solicitado el 25 nov.** Esperar respuesta (~7 días). **Solicitar acceso a producción:** Play Console → Panel → Solicitar acceso a producción, con las respuestas de [play-acceso-produccion.md](play-acceso-produccion.md).
-- [ ] **Build 1.1.4** con el botón y el logo oficiales de Strava (ya en `main`): `eas build --platform all --profile production --auto-submit`. Android va solo a Alpha; iOS se sube a TestFlight y luego hay que enviarla a revisión a mano.
-- [ ] **Si aprueban producción:** Play Console → Alpha → Promocionar versión → Producción.
+### Dónde lo dejamos (25 nov)
+- **Apple:** iOS 1.1.3 aprobada y publicada. Build 1.1.4 (43) subida a TestFlight; Miguel tiene que crear la versión 1.1.4 y mandarla a revisión. El aviso ITMS-90725 (SDK de iOS 27) no bloquea; plazo abril 2027.
+- **Google:** Android 1.1.3 aprobada en Alpha. **Acceso a producción solicitado el 25 nov** con las respuestas de [play-acceso-produccion.md](play-acceso-produccion.md). Android 1.1.4 (versionCode 31) subida a Alpha automáticamente. Cuando aprueben producción: Alpha → Promocionar versión → Producción.
+- **Marketing:** plan, guiones R1-R8 y kit de IA en [marketing.md](marketing.md). Vídeo del mapa sobre la app real hecho: `marketing/mapas/conquista-madrid-real.mp4` (fuera de git). Descubierta la carpeta `~/Documents/ConqueRun-Marketing` con el runbook, el plan de Instagram y los posts: hay que unificar todo allí.
 
-### 3. Cosas de Miguel, rápidas
-- [ ] **Datos de contacto públicos de Apple (DSA):** App Store Connect → Negocio → Cumplimiento → Reglamento de Servicios Digitales. Cambiar a la dirección de los textos legales y a `conquerunapp@gmail.com`. Ahora se muestran los datos personales.
-- [ ] **Estado de operador en Google** (cuando cambie la dirección del perfil de pagos): operador, `conquerunapp@gmail.com`, teléfono y verificar. Plazo: febrero 2027.
-- [ ] **Tarjeta para renovar** la membresía de Apple Developer (developer.apple.com/account). Mirar también la fecha de caducidad.
-- [ ] **Quitar China continental** de la disponibilidad en App Store (Precios y disponibilidad). Plazo: 31 ene 2027.
+### 1. Al empezar
+- [ ] ¿Ha contestado Google a la solicitud de producción?
+- [ ] ¿Ha mandado Miguel la iOS 1.1.4 a revisión? ¿Aprobada? ¿Y la Android 1.1.4 en Alpha?
+- [ ] ¿Cambió la dirección del perfil de pagos de Google?
 
-### 4. Strava Extended Access (cuando la 1.1.4 esté publicada)
-- [ ] Rellenar el formulario de Strava (enlace en el correo de Strava API del 29 jun, en conquerunapp@gmail.com). Hay 6 atletas conectados de 10. Web: `https://miguelhsa.github.io/ConqueRun/`. Claude prepara las respuestas en inglés y las capturas del botón y el logo.
+### 2. Siguiente trabajo con Claude
+- [ ] **Unificar el marketing** en `~/Documents/ConqueRun-Marketing` (plan de hoy + runbook + plan de Instagram) y dejar aquí solo un enlace.
+- [ ] **Strava Extended Access** en cuanto la 1.1.4 esté publicada (6/10 atletas). Claude prepara las respuestas en inglés.
+- [ ] **Montar R1 y R2** cuando Miguel tenga los planos grabados y la voz de ElevenLabs.
+- [ ] **Embudo en Analytics** (condición para pagar anuncios).
 
-### 5. Antes de fechas límite
-- [ ] **Apple, clasificación por edades:** preguntas nuevas sobre compartir ubicación y citas. Antes del **15 ene 2027**.
-- [ ] **Expo + SDK de iOS 27:** actualizar Expo y compilar con Xcode 27 en EAS. Antes de **abril 2027**; hacerlo en enero-febrero. El arreglo de deployment target de los pods ya está hecho.
+### 3. Cosas de Miguel
+- [ ] Mandar la iOS 1.1.4 a revisión (novedades: "Ahora puedes conectar tu cuenta de Strava con el botón oficial. Mejoras de estabilidad.").
+- [ ] Datos de contacto DSA en Apple → Lope de Haro 23 + conquerunapp@gmail.com.
+- [ ] Tarjeta para renovar Apple Developer.
+- [ ] Quitar China continental (antes del 31 ene 2027).
+- [ ] Grabar los planos A1-A12 en 2-3 carreras, crear cuenta de ElevenLabs, bio de Instagram, decidir los 5 posts de `por-publicar/`.
+- [ ] Probar en el móvil: carrera completa (para mergear `fix/bugs-performance`), ojo de la contraseña, aviso al salir en Android.
 
-### 6. Sin fecha
-- [ ] **Hallazgo 6** de la auditoría (`segmentoCompetitivo` deja deducir género y menores): decidir entre fusionar el tramo 13-17, ID opaco o subir la edad mínima.
-- [ ] **Registro de actividades de tratamiento** (Art. 30): documento interno de una página.
-- [ ] **Probar el email de reportes** con un reporte de prueba.
-- [ ] **Instrumentar el embudo** en Analytics (registro, nickname, ciudad, permiso GPS, primera carrera, primera conquista, grupo).
-- [ ] **`fix/bugs-performance`:** probar una carrera en dispositivo real y mergear.
-- [ ] **17 scripts sin commitear** en `scripts/`: decidir si se guardan o se borran.
-- [ ] **Probar en dispositivo** el ojo de la contraseña y la confirmación al salir con carrera activa (Android).
+### 4. Plazos
+- 15 ene 2027: clasificación por edades de Apple · 31 ene: China · feb 2027: estado de operador en Google · abr 2027: SDK de iOS 27 (hacerlo en ene-feb).
+
+### 5. Sin fecha
+- Hallazgo 6 de la auditoría · registro Art. 30 · probar el email de denuncias · 17 scripts sueltos en `scripts/`.
 
 ### Simulador de iOS en el Mac
 Xcode 27 sustituye la app Simulator por **Device Hub** (Xcode → Open Developer Tool → Device Hub), y `npx expo run:ios` falla porque busca la app antigua. La app de desarrollo ya está instalada en el iPhone 17 Pro (iOS 26.5): basta con arrancar el simulador en Device Hub, ejecutar `npx expo start --dev-client` y abrir ConqueRun. Si hay que recompilar: `npx expo prebuild -p ios --clean` y `xcodebuild` contra `ios/ConqueRun.xcworkspace`; luego `xcrun simctl install`. **Usa la base de datos de producción.**
