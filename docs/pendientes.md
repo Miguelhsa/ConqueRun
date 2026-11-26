@@ -15,7 +15,9 @@ Documento de traspaso: lo que queda, por orden de lo que haría primero.
 - **Marketing:** plan, guiones R1-R8 y kit de IA en [marketing.md](marketing.md). Vídeo del mapa sobre la app real hecho: `marketing/mapas/conquista-madrid-real.mp4` (fuera de git). Descubierta la carpeta `~/Documents/ConqueRun-Marketing` con el runbook, el plan de Instagram y los posts: hay que unificar todo allí.
 
 ### 1. Al empezar
-- [ ] ¿Ha contestado Google a la solicitud de producción?
+- [x] **Google aprobó el acceso a producción el 26 nov.**
+- [ ] **Terminar la versión de producción en Play Console** (borrador empezado el 26 nov con la 1.1.4 (31) añadida): pegar las notas de la versión entre `<es-ES>` y `</es-ES>`, Siguiente, revisar países (los 178 de Alpha) y despliegue al 100 %, enviar a revisión. Notas: "Primera versión pública de ConqueRun: conquista los barrios de tu ciudad corriendo, compite en el ranking y forma grupos con tus amigos. Ahora también puedes importar tus carreras de Strava."
+- [ ] En cuanto esté publicada: formulario de Strava Extended Access (urgente: 6/10 atletas) y añadir Android a la bio de Instagram.
 - [ ] ¿Ha mandado Miguel la iOS 1.1.4 a revisión? ¿Aprobada? ¿Y la Android 1.1.4 en Alpha?
 - [ ] ¿Cambió la dirección del perfil de pagos de Google?
 
